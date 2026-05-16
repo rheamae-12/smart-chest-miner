@@ -1,22 +1,23 @@
-import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { C, cardStyle } from "../theme";
 import { getVitalStatus } from "../utils/alertChecker";
+import { formatReading } from "../utils/formatters";
 
 export default function LiveChartCard({ title, data, color, dataKey, unit, miner, yDomain, thresholds }) {
-  const latest = data[data.length - 1]?.[dataKey] ?? "--";
+  const latest = data[data.length - 1]?.[dataKey] ?? 0;
   const status = getVitalStatus(latest, dataKey, thresholds);
   const statusColor = status === "NORMAL" ? C.green : status === "HIGH" || status === "LOW" ? C.amber : C.red;
-  const gradientId = `grad-${dataKey}-${String(miner).replace(/\W/g, "")}`;
+  const chartData = data.slice(-20);
 
   return (
-    <div style={{ ...cardStyle, padding: "16px 18px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-        <div style={{ flex: 1 }}>
+    <div style={{ ...cardStyle, padding: "16px 18px", minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 170px", minWidth: 0 }}>
           <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: "0.08em", textTransform: "uppercase" }}>{miner}</div>
           <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{title}</div>
         </div>
-        <div style={{ fontSize: 22, fontWeight: 700, color }}>
-          {latest}
+        <div style={{ fontSize: 20, fontWeight: 700, color, whiteSpace: "nowrap", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {formatReading(latest)}
           {unit}
         </div>
         {status && (
@@ -27,18 +28,21 @@ export default function LiveChartCard({ title, data, color, dataKey, unit, miner
       </div>
       <div style={{ height: 90 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 2, right: 2, left: -30, bottom: 0 }}>
-            <defs>
-              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={color} stopOpacity={0.25} />
-                <stop offset="95%" stopColor={color} stopOpacity={0} />
-              </linearGradient>
-            </defs>
+          <LineChart data={chartData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
             <XAxis dataKey="time" tick={false} axisLine={false} tickLine={false} />
             <YAxis domain={yDomain} tick={{ fontSize: 9, fill: C.textMuted }} axisLine={false} tickLine={false} />
             <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 11, color: C.text }} />
-            <Area type="monotone" dataKey={dataKey} stroke={color} strokeWidth={1.5} fill={`url(#${gradientId})`} dot={false} isAnimationActive={false} />
-          </AreaChart>
+            <Line
+              type="linear"
+              dataKey={dataKey}
+              stroke={color}
+              strokeWidth={1.8}
+              dot={{ r: 2, strokeWidth: 1, fill: C.bg1 }}
+              activeDot={{ r: 3 }}
+              isAnimationActive={false}
+              connectNulls={false}
+            />
+          </LineChart>
         </ResponsiveContainer>
       </div>
     </div>

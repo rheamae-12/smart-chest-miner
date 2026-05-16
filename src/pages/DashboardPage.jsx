@@ -5,7 +5,7 @@ import StatCard from "../components/StatCard";
 import StatusBadge from "../components/StatusBadge";
 import { C, cardStyle } from "../theme";
 import { buildAlerts, getVitalStatus } from "../utils/alertChecker";
-import { average, formatLastSeen } from "../utils/formatters";
+import { average, formatLastSeen, formatReading } from "../utils/formatters";
 
 export default function DashboardPage({ miners, liveData, thresholds }) {
   const [selected, setSelected] = useState(miners[0]?.id || "");
@@ -18,10 +18,10 @@ export default function DashboardPage({ miners, liveData, thresholds }) {
     <div style={{ padding: "20px 24px", overflow: "auto", height: "100%" }}>
       <AlertBanner miners={miners} thresholds={thresholds} />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(140px, 1fr))", gap: 12, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 20 }}>
         <StatCard label="Active Devices" value={activeMiners.length} unit={`/${miners.length}`} color={C.green} />
-        <StatCard label="Avg Heart Rate" value={average(activeMiners.map((item) => item.hr)) || "--"} unit="bpm" color={C.red} />
-        <StatCard label="Avg SpO2" value={average(activeMiners.map((item) => item.spo2)) || "--"} unit="%" color={C.cyan} />
+        <StatCard label="Avg Heart Rate" value={formatReading(average(activeMiners.map((item) => item.hr)))} unit="bpm" color={C.red} />
+        <StatCard label="Avg SpO2" value={formatReading(average(activeMiners.map((item) => item.spo2)))} unit="%" color={C.cyan} />
         <StatCard label="Alerts" value={alerts.length} color={alerts.length ? C.amber : C.green} sub="active conditions" />
       </div>
 
@@ -61,6 +61,7 @@ export default function DashboardPage({ miners, liveData, thresholds }) {
           <Metric label="Location" value={miner.location} />
           <Divider />
           <StatusBadge active={miner.active} />
+          {miner.stale && <Tag color={C.amber}>Stale Signal</Tag>}
           {miner.finger === false && <Tag color={C.amber}>No Chest Contact</Tag>}
           {miner.manual_alert && <Tag color={C.amber}>Manual Alert</Tag>}
           <div style={{ marginLeft: "auto", fontSize: 11, color: C.textMuted }}>Last seen: {formatLastSeen(miner.lastSeen)}</div>
@@ -96,9 +97,10 @@ export default function DashboardPage({ miners, liveData, thresholds }) {
                   <StatusBadge active={item.active} />
                 </div>
                 <div style={{ display: "flex", gap: 18, fontSize: 12 }}>
-                  <span style={{ color: C.red }}>HR {item.active && item.finger !== false ? item.hr : "--"}</span>
-                  <span style={{ color: C.cyan }}>SpO2 {item.active && item.finger !== false ? item.spo2 : "--"}</span>
+                  <span style={{ color: C.red }}>HR {item.active && item.finger !== false ? formatReading(item.hr) : "--"}</span>
+                  <span style={{ color: C.cyan }}>SpO2 {item.active && item.finger !== false ? formatReading(item.spo2) : "--"}</span>
                 </div>
+                {item.stale && <div style={{ marginTop: 8, fontSize: 10, color: C.amber }}>No recent Firebase update</div>}
                 {item.manual_alert && <div style={{ marginTop: 8, fontSize: 10, color: C.amber }}>Manual alert active</div>}
                 {item.finger === false && <div style={{ marginTop: 8, fontSize: 10, color: C.amber }}>No chest contact</div>}
               </div>

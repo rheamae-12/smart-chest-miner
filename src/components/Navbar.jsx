@@ -35,7 +35,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
       <div style={{ flex: 1 }} />
       <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: C.textMuted }}>
         <span style={{ width: 6, height: 6, borderRadius: "50%", background: usingRealtime ? C.green : C.amber, boxShadow: usingRealtime ? `0 0 6px ${C.green}` : "none", display: "inline-block" }} />
-        {connectionError ? "Firebase error" : usingRealtime ? "Firebase live" : "Local fallback"}
+        <span title={connectionError || ""}>{usingRealtime ? "Firebase live" : connectionError ? connectionError : "Waiting for Firebase"}</span>
       </div>
       <div style={{ width: 1, height: 20, background: C.border }} />
       <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: C.textMuted }}>

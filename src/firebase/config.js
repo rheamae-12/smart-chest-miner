@@ -4,12 +4,18 @@ import { getDatabase } from "firebase/database";
 import { getFirestore } from "firebase/firestore";
 
 export const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: cleanEnv(import.meta.env.VITE_FIREBASE_API_KEY),
+  authDomain: cleanEnv(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN),
+  databaseURL: cleanEnv(import.meta.env.VITE_FIREBASE_DATABASE_URL),
+  projectId: cleanEnv(import.meta.env.VITE_FIREBASE_PROJECT_ID),
+  appId: cleanEnv(import.meta.env.VITE_FIREBASE_APP_ID),
 };
+export const firebaseDatabaseUrl = cleanEnv(import.meta.env.VITE_FIREBASE_DATABASE_URL);
+export const firebaseDatabaseSecret = cleanEnv(import.meta.env.VITE_FIREBASE_DATABASE_SECRET);
+
+function cleanEnv(value) {
+  return String(value || "").trim().replace(/^["']|["']$/g, "");
+}
 
 function hasFirebaseValue(value) {
   return Boolean(value && !String(value).includes("your_") && String(value).trim() !== "");

@@ -15,8 +15,14 @@ export function formatLastSeen(value) {
   return date.toLocaleString();
 }
 
-export function average(values) {
+export function formatReading(value, digits = 1) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return "--";
+  return number.toFixed(digits);
+}
+
+export function average(values, digits = 1) {
   const valid = values.filter((value) => Number.isFinite(value) && value > 0);
   if (valid.length === 0) return 0;
-  return Math.round(valid.reduce((sum, value) => sum + value, 0) / valid.length);
+  return Number((valid.reduce((sum, value) => sum + value, 0) / valid.length).toFixed(digits));
 }

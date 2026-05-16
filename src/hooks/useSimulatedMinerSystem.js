@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { MINERS_INIT } from "../data/mockMiners";
 import { firebaseConfigured } from "../firebase/config";
-import { subscribeToAllAnalytics, subscribeToDevices, writeAnalyticsSnapshot } from "../firebase/database";
+import { subscribeToAllAnalytics, subscribeToDevices, trimAnalyticsHistory } from "../firebase/database";
 import { DEFAULT_THRESHOLDS } from "../utils/alertChecker";
 import { timeLabel } from "../utils/formatters";
 
 const SYSTEM_STORAGE_KEY = "smart-chest-miner-system";
-const ANALYTICS_WRITE_INTERVAL_MS = 60000;
 const DEVICE_ID = "MCM-001";
+const MIN_VALID_EPOCH_MS = 946684800000;
+const MAX_LIVE_POINTS = 30;
+const MAX_ANALYTICS_POINTS = 120;
+const ONLINE_TIMEOUT_MS = 75000;
 
 function readStoredSystem() {
   try {
@@ -38,23 +41,41 @@ function initialAnalyticsData() {
   return data;
 }
 
+function normalizeTimestamp(value) {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp) || timestamp < MIN_VALID_EPOCH_MS) {
+    return 0;
+  }
+
+  return timestamp;
+}
+
+function isFreshTimestamp(timestamp) {
+  return timestamp > 0 && Date.now() - timestamp <= ONLINE_TIMEOUT_MS;
+}
+
 function mapRealtimeDevices(value) {
   return Object.entries(value || {})
     .filter(([id]) => id === DEVICE_ID)
     .map(([id, device]) => {
-    const timestamp = device.live?.timestamp || device.lastSeen || Date.now();
-    const lastSeen = new Date(Number(timestamp));
-    const offlineByTime = Date.now() - lastSeen.getTime() > 60000;
-    const live = device.live || {};
+    const live = device.live || device;
+    const timestamp = normalizeTimestamp(live.timestamp ?? device.lastSeen);
+    const lastSeen = timestamp ? new Date(timestamp) : null;
+    const fresh = isFreshTimestamp(timestamp);
+    const firebaseStatus = String(device.status ?? live.status ?? "").toLowerCase();
+    const firebaseActive = device.active === true || firebaseStatus === "online";
+    const hasSensorPayload = live.heartRate !== undefined || live.hr !== undefined || live.spo2 !== undefined;
+    const active = (firebaseActive || hasSensorPayload) && fresh;
     const finger = Boolean(live.finger ?? live.chestDetected ?? true);
     const manualAlert = Boolean(live.manual_alert ?? live.manualAlert ?? false);
     return {
       id,
       name: device.name || device.minerName || id,
       location: device.location || "Unassigned",
-      active: Boolean(device.active ?? device.status === "online") && !offlineByTime,
+      active,
       lastSeen,
-      status: offlineByTime ? "offline" : device.status || "online",
+      status: active ? "online" : "offline",
+      stale: !fresh && hasSensorPayload,
       hr: Number(live.heartRate ?? live.hr ?? device.heartRate ?? 0),
       spo2: Number(live.spo2 ?? device.spo2 ?? 0),
       finger,
@@ -69,19 +90,57 @@ function mapRealtimeAnalytics(value) {
   Object.entries(value || {}).forEach(([deviceId, rows]) => {
     if (deviceId !== DEVICE_ID) return;
     data[deviceId] = Object.values(rows || {})
+      .filter((row) => {
+        const hr = Number(row.hr ?? row.heartRate ?? 0);
+        const spo2 = Number(row.spo2 ?? 0);
+        const finger = Boolean(row.finger ?? true);
+        return finger && hr > 0 && spo2 > 0;
+      })
       .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
-      .slice(-60)
+      .slice(-MAX_ANALYTICS_POINTS)
       .map((row) => {
-        const date = new Date(row.timestamp || Date.now());
+        const timestamp = normalizeTimestamp(row.timestamp);
+        const date = new Date(timestamp);
         return {
           time: timeLabel(date),
           hr: Number(row.hr ?? row.heartRate ?? 0),
           spo2: Number(row.spo2 ?? 0),
-          timestamp: row.timestamp || Date.now(),
+          finger: Boolean(row.finger ?? true),
+          manual_alert: Boolean(row.manual_alert ?? false),
+          status: row.status || "online",
+          timestamp,
         };
       });
   });
   return data;
+}
+
+function latestAnalyticsMiner(rows) {
+  const latest = rows?.[rows.length - 1];
+  if (!latest) return null;
+  const active = isFreshTimestamp(latest.timestamp);
+
+  return {
+    ...MINERS_INIT[0],
+    active,
+    status: active ? "online" : "offline",
+    lastSeen: new Date(latest.timestamp),
+    hr: latest.hr,
+    spo2: latest.spo2,
+    finger: latest.finger,
+    manual_alert: latest.manual_alert,
+    stale: !active,
+  };
+}
+
+function clearLiveDataForDevice(prev, deviceId) {
+  const current = prev[deviceId] || { hr: [], spo2: [] };
+  if (current.hr.length === 0 && current.spo2.length === 0) return prev;
+
+  return {
+    ...prev,
+    [deviceId]: { hr: [], spo2: [] },
+  };
 }
 
 export function useSimulatedMinerSystem(enabled) {
@@ -94,7 +153,7 @@ export function useSimulatedMinerSystem(enabled) {
   const [usingRealtime, setUsingRealtime] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const minersRef = useRef(miners);
-  const analyticsBucketsRef = useRef({});
+  const lastTrimRef = useRef(0);
 
   useEffect(() => {
     minersRef.current = miners;
@@ -132,45 +191,51 @@ export function useSimulatedMinerSystem(enabled) {
         setLiveData((prev) => {
           const next = { ...prev };
           realtimeMiners.forEach((miner) => {
-            if (!miner.active || !miner.finger || (!miner.hr && !miner.spo2)) return;
+            if (!miner.active || miner.stale || !miner.finger || (!miner.hr && !miner.spo2)) {
+              next[miner.id] = { hr: [], spo2: [] };
+              return;
+            }
             const label = timeLabel(miner.lastSeen);
             const cur = next[miner.id] || { hr: [], spo2: [] };
+            const timestamp = miner.lastSeen.getTime();
+            const lastHr = cur.hr[cur.hr.length - 1];
+            if (lastHr?.timestamp === timestamp) return;
             next[miner.id] = {
-              hr: [...cur.hr.slice(-29), { time: label, hr: miner.hr }],
-              spo2: [...cur.spo2.slice(-29), { time: label, spo2: miner.spo2 }],
+              hr: [...cur.hr.slice(-(MAX_LIVE_POINTS - 1)), { time: label, hr: miner.hr, timestamp }],
+              spo2: [...cur.spo2.slice(-(MAX_LIVE_POINTS - 1)), { time: label, spo2: miner.spo2, timestamp }],
             };
           });
           return next;
         });
 
-        realtimeMiners.forEach((miner) => {
-          if (!miner.active || !miner.finger || miner.hr <= 0 || miner.spo2 <= 0) return;
-
-          const bucket = analyticsBucketsRef.current[miner.id] || { hr: [], spo2: [], lastWrite: Date.now() };
-          bucket.hr.push(miner.hr);
-          bucket.spo2.push(miner.spo2);
-
-          const shouldWrite = Date.now() - bucket.lastWrite >= ANALYTICS_WRITE_INTERVAL_MS && bucket.hr.length > 0;
-          if (shouldWrite) {
-            const avgHR = Math.round(bucket.hr.reduce((sum, value) => sum + value, 0) / bucket.hr.length);
-            const avgSpo2 = Math.round(bucket.spo2.reduce((sum, value) => sum + value, 0) / bucket.spo2.length);
-            bucket.lastWrite = Date.now();
-            bucket.hr = [];
-            bucket.spo2 = [];
-            writeAnalyticsSnapshot(miner.id, avgHR, avgSpo2).catch((error) => setConnectionError(error.message));
-          }
-
-          analyticsBucketsRef.current[miner.id] = bucket;
-        });
       },
       (message) => {
         setConnectionError(message);
-        setUsingRealtime(false);
       },
     );
 
     const unsubscribeAnalytics = subscribeToAllAnalytics(
-      (value) => setAnalyticsData((prev) => ({ ...prev, ...mapRealtimeAnalytics(value) })),
+      (value) => {
+        setConnectionError("");
+        const mappedAnalytics = mapRealtimeAnalytics(value);
+        const rows = mappedAnalytics[DEVICE_ID] || [];
+        const latestMiner = latestAnalyticsMiner(rows);
+
+        setAnalyticsData((prev) => ({ ...prev, ...mappedAnalytics }));
+        if (latestMiner && !minersRef.current.some((miner) => miner.active)) {
+          setMiners([latestMiner]);
+          minersRef.current = [latestMiner];
+        }
+
+        if (!latestMiner) {
+          setLiveData((prev) => clearLiveDataForDevice(prev, DEVICE_ID));
+        }
+
+        if (Date.now() - lastTrimRef.current > 60000) {
+          lastTrimRef.current = Date.now();
+          trimAnalyticsHistory(DEVICE_ID, MAX_ANALYTICS_POINTS).catch(() => {});
+        }
+      },
       (message) => setConnectionError(message),
     );
 

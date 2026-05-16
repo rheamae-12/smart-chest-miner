@@ -10,6 +10,7 @@ const demoUser = {
   source: "demo",
 };
 const STORAGE_KEY = "smart-chest-miner-users";
+const SESSION_KEY = "smart-chest-miner-session";
 
 function readLocalUsers() {
   try {
@@ -55,7 +56,14 @@ async function profileForFirebaseUser(firebaseUser, fallbackName) {
 }
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(SESSION_KEY));
+    } catch {
+      return null;
+    }
+  });
+  const [authReady, setAuthReady] = useState(!firebaseConfigured);
   const [authError, setAuthError] = useState("");
   const [authMessage, setAuthMessage] = useState("");
 
@@ -65,15 +73,20 @@ export function AuthProvider({ children }) {
     return observeFirebaseAuth(async (firebaseUser) => {
       try {
         if (!firebaseUser) {
-          setUser(null);
+          const storedSession = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+          setUser(storedSession?.source === "firebase" ? null : storedSession);
+          setAuthReady(true);
           return;
         }
 
         const nextUser = await profileForFirebaseUser(firebaseUser);
         setUser(nextUser);
+        localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
         if (nextUser.profileWarning) setAuthError(nextUser.profileWarning);
       } catch (error) {
         setAuthError(error.message);
+      } finally {
+        setAuthReady(true);
       }
     });
   }, []);
@@ -85,6 +98,7 @@ export function AuthProvider({ children }) {
 
     if (normalizedEmail === demoUser.email && password === "admin123") {
       setUser(demoUser);
+      localStorage.setItem(SESSION_KEY, JSON.stringify(demoUser));
       return true;
     }
 
@@ -94,6 +108,7 @@ export function AuthProvider({ children }) {
         if (firebaseUser) {
           const nextUser = await profileForFirebaseUser(firebaseUser);
           setUser(nextUser);
+          localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
           if (nextUser.profileWarning) {
             setAuthError(nextUser.profileWarning);
           } else {
@@ -108,7 +123,9 @@ export function AuthProvider({ children }) {
     } else {
       const localUser = readLocalUsers().find((item) => item.email === normalizedEmail && item.password === password);
       if (localUser) {
-        setUser({ name: localUser.name, email: localUser.email, source: "local" });
+        const nextUser = { name: localUser.name, email: localUser.email, source: "local" };
+        setUser(nextUser);
+        localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
         return true;
       }
     }
@@ -142,6 +159,7 @@ export function AuthProvider({ children }) {
         if (firebaseUser) {
           const nextUser = await profileForFirebaseUser(firebaseUser, cleanName);
           setUser(nextUser);
+          localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
           if (nextUser.profileWarning) {
             setAuthError(nextUser.profileWarning);
           } else {
@@ -165,7 +183,9 @@ export function AuthProvider({ children }) {
       password,
     };
     writeLocalUsers([...readLocalUsers(), newUser]);
-    setUser({ name: newUser.name, email: newUser.email, source: "local" });
+    const nextUser = { name: newUser.name, email: newUser.email, source: "local" };
+    setUser(nextUser);
+    localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
     setAuthMessage("Account created successfully.");
     return true;
   };
@@ -174,6 +194,7 @@ export function AuthProvider({ children }) {
     if (!user) return;
     const nextUser = { ...user, ...patch };
     setUser(nextUser);
+    localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
     if (user.source === "firebase" && user.uid) {
       updateUserProfile(user.uid, {
         name: nextUser.name,
@@ -189,9 +210,10 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     await logoutFirebase();
     setUser(null);
+    localStorage.removeItem(SESSION_KEY);
   };
 
-  const value = { user, login, signUp, updateUser, logout, authError, authMessage };
+  const value = { user, authReady, login, signUp, updateUser, logout, authError, authMessage };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

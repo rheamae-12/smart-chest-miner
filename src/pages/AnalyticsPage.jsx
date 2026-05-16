@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import StatCard from "../components/StatCard";
 import { C, cardStyle } from "../theme";
-import { average } from "../utils/formatters";
+import { average, formatReading } from "../utils/formatters";
 
 export default function AnalyticsPage({ miners, analyticsData }) {
   const [filter, setFilter] = useState({ miner: "all", sensor: "both", range: "30" });
@@ -33,8 +33,8 @@ export default function AnalyticsPage({ miners, analyticsData }) {
   });
 
   return (
-    <div style={{ padding: "20px 24px", overflow: "auto", height: "100%" }}>
-      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+    <div style={{ padding: "20px 24px", overflow: "auto", height: "100%", boxSizing: "border-box" }}>
+      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "end" }}>
         <Select label="Miner" value={filter.miner} onChange={(miner) => setFilter({ ...filter, miner })}>
           <option value="all">All Miners</option>
           {miners.map((miner) => (
@@ -55,19 +55,19 @@ export default function AnalyticsPage({ miners, analyticsData }) {
         </Select>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(140px, 1fr))", gap: 12, marginBottom: 20 }}>
-        <StatCard label="Avg HR" value={average(flattened.map((row) => row.hr)) || "--"} unit="bpm" color={C.red} />
-        <StatCard label="Avg SpO2" value={average(flattened.map((row) => row.spo2)) || "--"} unit="%" color={C.cyan} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 20 }}>
+        <StatCard label="Avg HR" value={formatReading(average(flattened.map((row) => row.hr)))} unit="bpm" color={C.red} />
+        <StatCard label="Avg SpO2" value={formatReading(average(flattened.map((row) => row.spo2)))} unit="%" color={C.cyan} />
         <StatCard label="Tracked" value={visibleMiners.length} unit="miners" color={C.green} />
         <StatCard label="Total Readings" value={flattened.length} color={C.amber} />
       </div>
 
-      {(filter.sensor === "both" || filter.sensor === "hr") && <LinePanel title="Heart Rate History" miners={visibleMiners} analyticsData={analyticsData} rangeStart={rangeStart} dataKey="hr" color={C.red} unit="bpm" />}
-      {(filter.sensor === "both" || filter.sensor === "spo2") && <LinePanel title="SpO2 History" miners={visibleMiners} analyticsData={analyticsData} rangeStart={rangeStart} dataKey="spo2" color={C.cyan} unit="%" />}
+      {(filter.sensor === "both" || filter.sensor === "hr") && <LinePanel title="Heart Rate History" miners={visibleMiners} analyticsData={analyticsData} rangeStart={rangeStart} dataKey="hr" color={C.red} unit="bpm" emptyText="No valid heart-rate analytics yet." />}
+      {(filter.sensor === "both" || filter.sensor === "spo2") && <LinePanel title="SpO2 History" miners={visibleMiners} analyticsData={analyticsData} rangeStart={rangeStart} dataKey="spo2" color={C.cyan} unit="%" emptyText="No valid SpO2 analytics yet." />}
 
-      <div style={{ ...cardStyle, padding: 18, marginTop: 16 }}>
+      <div style={{ ...cardStyle, padding: 18, marginTop: 16, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 14 }}>Miner Comparison</div>
-        <div style={{ height: 220 }}>
+        <div style={{ height: 240, minWidth: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={comparison}>
               <CartesianGrid stroke={C.border} vertical={false} />
@@ -101,14 +101,14 @@ function Select({ label, value, onChange, children }) {
   return (
     <label style={{ display: "grid", gap: 5 }}>
       <span style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)} style={{ background: C.bg2, color: C.text, border: `1px solid ${C.border}`, borderRadius: 7, padding: "8px 12px", fontSize: 12 }}>
+      <select value={value} onChange={(event) => onChange(event.target.value)} style={{ background: C.bg2, color: C.text, border: `1px solid ${C.border}`, borderRadius: 7, padding: "8px 12px", fontSize: 12, minWidth: 120 }}>
         {children}
       </select>
     </label>
   );
 }
 
-function LinePanel({ title, miners, analyticsData, rangeStart, dataKey, color, unit }) {
+function LinePanel({ title, miners, analyticsData, rangeStart, dataKey, color, unit, emptyText }) {
   const filteredData = Object.fromEntries(
     miners.map((miner) => [miner.id, (analyticsData[miner.id] || []).filter((point) => !rangeStart || Number(point.timestamp || 0) >= rangeStart)]),
   );
@@ -117,29 +117,34 @@ function LinePanel({ title, miners, analyticsData, rangeStart, dataKey, color, u
   for (let index = 0; index < longest; index += 1) {
     const row = { time: filteredData[miners[0]?.id]?.[index]?.time || "" };
     miners.forEach((miner) => {
-      row[miner.name] = filteredData[miner.id]?.[index]?.[dataKey] ?? null;
+      const value = filteredData[miner.id]?.[index]?.[dataKey];
+      row[miner.name] = Number.isFinite(value) ? Number(value.toFixed(1)) : null;
     });
     chartData.push(row);
   }
 
   return (
-    <div style={{ ...cardStyle, padding: 18, marginBottom: 16 }}>
+    <div style={{ ...cardStyle, padding: 18, marginBottom: 16, minWidth: 0 }}>
       <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 14 }}>
         {title} ({unit})
       </div>
-      <div style={{ height: 220 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData}>
-            <CartesianGrid stroke={C.border} vertical={false} />
-            <XAxis dataKey="time" tick={{ fontSize: 9, fill: C.textMuted }} />
-            <YAxis tick={{ fontSize: 9, fill: C.textMuted }} axisLine={false} />
-            <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 11 }} />
-            <Legend />
-            {miners.map((miner, index) => (
-              <Line key={miner.id} type="monotone" dataKey={miner.name} stroke={index === 0 ? color : index % 2 ? C.amber : C.green} dot={false} strokeWidth={1.6} isAnimationActive={false} />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
+      <div style={{ height: 240, minWidth: 0 }}>
+        {chartData.length === 0 ? (
+          <div style={{ height: "100%", display: "grid", placeItems: "center", color: C.textMuted, fontSize: 13 }}>{emptyText}</div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+              <CartesianGrid stroke={C.border} vertical={false} />
+              <XAxis dataKey="time" tick={{ fontSize: 9, fill: C.textMuted }} minTickGap={24} />
+              <YAxis tick={{ fontSize: 9, fill: C.textMuted }} axisLine={false} width={38} />
+              <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 11 }} />
+              <Legend wrapperStyle={{ paddingTop: 8 }} />
+              {miners.map((miner, index) => (
+                <Line key={miner.id} type="linear" dataKey={miner.name} stroke={index === 0 ? color : index % 2 ? C.amber : C.green} dot={{ r: 2 }} strokeWidth={1.6} isAnimationActive={false} connectNulls={false} />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </div>
   );

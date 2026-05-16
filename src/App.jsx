@@ -12,8 +12,17 @@ import { useSimulatedMinerSystem } from "./hooks/useSimulatedMinerSystem";
 import { C } from "./theme";
 
 export default function App() {
-  const { user, logout } = useAuth();
+  const { user, logout, authReady } = useAuth();
   const system = useSimulatedMinerSystem(Boolean(user));
+  const confirmLogout = () => {
+    if (window.confirm("Log out of Smart Chest Miner?")) {
+      logout();
+    }
+  };
+
+  if (!authReady) {
+    return <div style={{ minHeight: "100vh", background: C.bg0 }} />;
+  }
 
   if (!user) {
     return (
@@ -39,11 +48,16 @@ export default function App() {
           <Navbar
             miners={system.miners}
             user={user}
-            onLogout={logout}
+            onLogout={confirmLogout}
             usingRealtime={system.usingRealtime}
             connectionError={system.connectionError}
           />
           <main style={{ flex: 1, overflow: "hidden" }}>
+            {system.connectionError && (
+              <div style={{ padding: "8px 20px", background: "rgba(245,158,11,0.12)", color: C.amber, borderBottom: `1px solid ${C.border}`, fontSize: 12 }}>
+                Firebase notice: {system.connectionError}
+              </div>
+            )}
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route

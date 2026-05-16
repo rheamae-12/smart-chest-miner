@@ -1,5 +1,5 @@
 import { onValue, ref, remove, set, update } from "firebase/database";
-import { db } from "./config";
+import { db, firebaseDatabaseSecret, firebaseDatabaseUrl } from "./config";
 
 function noopSubscribe(onError) {
   onError?.("Firebase is not configured. Add VITE_FIREBASE_* values to .env.");
@@ -7,12 +7,19 @@ function noopSubscribe(onError) {
 }
 
 export function subscribeToDevices(onData, onError) {
-  if (!db) return noopSubscribe(onError);
-  return onValue(
+  const stopRestPolling = subscribeToDevicesRest(onData, onError);
+  if (!db) return stopRestPolling;
+
+  const unsubscribeSdk = onValue(
     ref(db, "devices"),
     (snapshot) => onData(snapshot.val() || {}),
-    (error) => onError?.(error.message),
+    (error) => onError?.(`SDK read failed, using REST fallback: ${error.message}`),
   );
+
+  return () => {
+    unsubscribeSdk();
+    stopRestPolling();
+  };
 }
 
 export function subscribeToDeviceLive(deviceId, onData, onError) {
@@ -46,12 +53,87 @@ export function subscribeToAnalytics(deviceId, onData, onError) {
 }
 
 export function subscribeToAllAnalytics(onData, onError) {
-  if (!db) return noopSubscribe(onError);
-  return onValue(
+  const stopRestPolling = subscribeToAnalyticsRest(onData, onError);
+  if (!db) return stopRestPolling;
+
+  const unsubscribeSdk = onValue(
     ref(db, "analytics"),
     (snapshot) => onData(snapshot.val() || {}),
-    (error) => onError?.(error.message),
+    (error) => onError?.(`SDK analytics read failed, using REST fallback: ${error.message}`),
   );
+
+  return () => {
+    unsubscribeSdk();
+    stopRestPolling();
+  };
+}
+
+function firebaseRestUrl(path) {
+  if (!firebaseDatabaseUrl || !firebaseDatabaseSecret) return "";
+  if (firebaseDatabaseSecret.includes("YOUR_")) return "";
+  const base = firebaseDatabaseUrl.replace(/\/$/, "");
+  return `${base}/${path}.json?auth=${encodeURIComponent(firebaseDatabaseSecret)}`;
+}
+
+function pollFirebasePath(path, onData, onError, intervalMs = 2000) {
+  const url = firebaseRestUrl(path);
+  if (!url) {
+    onError?.("Firebase REST fallback is missing VITE_FIREBASE_DATABASE_URL or VITE_FIREBASE_DATABASE_SECRET.");
+    return () => {};
+  }
+
+  let stopped = false;
+  const load = async () => {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`REST ${path} failed: HTTP ${response.status}`);
+      }
+      const value = await response.json();
+      if (!stopped) onData(value || {});
+    } catch (error) {
+      if (!stopped) onError?.(error.message);
+    }
+  };
+
+  load();
+  const interval = window.setInterval(load, intervalMs);
+  return () => {
+    stopped = true;
+    window.clearInterval(interval);
+  };
+}
+
+function subscribeToDevicesRest(onData, onError) {
+  return pollFirebasePath("devices", onData, onError);
+}
+
+function subscribeToAnalyticsRest(onData, onError) {
+  return pollFirebasePath("analytics", onData, onError);
+}
+
+export async function trimAnalyticsHistory(deviceId, keepCount = 120) {
+  const url = firebaseRestUrl(`analytics/${deviceId}`);
+  if (!url) return false;
+
+  const response = await fetch(url);
+  if (!response.ok) return false;
+
+  const rows = (await response.json()) || {};
+  const keysToDelete = Object.keys(rows)
+    .sort((a, b) => Number(a) - Number(b))
+    .slice(0, Math.max(0, Object.keys(rows).length - keepCount));
+
+  if (keysToDelete.length === 0) return true;
+
+  const updates = Object.fromEntries(keysToDelete.map((key) => [key, null]));
+  const patchResponse = await fetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+
+  return patchResponse.ok;
 }
 
 export async function registerDevice(device) {
