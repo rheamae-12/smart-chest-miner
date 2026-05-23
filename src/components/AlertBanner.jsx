@@ -12,12 +12,12 @@ export default function AlertBanner({ miners, thresholds }) {
   if (alerts.length === 0) return null;
 
   return (
-    <div style={{ ...cardStyle, border: "1px solid rgba(239,68,68,0.4)", padding: "12px 16px", marginBottom: 16 }}>
+    <div style={{ ...cardStyle, border: "1px solid rgba(244,63,94,0.44)", padding: "14px 16px", marginBottom: 16, background: "rgba(244,63,94,0.1)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: C.red, letterSpacing: "0.08em" }}>SYSTEM ALERTS</div>
+        <div style={{ fontSize: 12, fontWeight: 900, color: C.red, letterSpacing: "0.08em" }}>SYSTEM ALERTS</div>
         <button
           onClick={() => setDismissed(alerts.map((alert) => alert.id))}
-          style={{ marginLeft: "auto", border: "none", background: "transparent", color: C.textMuted, cursor: "pointer", fontSize: 11 }}
+          style={{ marginLeft: "auto", border: `1px solid ${C.border}`, borderRadius: 6, background: "rgba(255,255,255,0.03)", color: C.textMuted, cursor: "pointer", fontSize: 11, padding: "5px 8px" }}
         >
           Dismiss all
         </button>
@@ -29,12 +29,13 @@ export default function AlertBanner({ miners, thresholds }) {
             onClick={() => setDismissed((items) => [...items, alert.id])}
             style={{
               fontSize: 11,
-              color: alert.severity === "critical" ? "#fca5a5" : C.amber,
-              background: alert.severity === "critical" ? "rgba(239,68,68,0.1)" : "rgba(245,158,11,0.1)",
-              padding: "4px 10px",
-              borderRadius: 5,
-              border: "none",
+              color: alert.severity === "critical" ? C.red : C.amber,
+              background: alert.severity === "critical" ? "rgba(244,63,94,0.12)" : "rgba(245,158,11,0.12)",
+              padding: "6px 10px",
+              borderRadius: 7,
+              border: `1px solid ${alert.severity === "critical" ? "rgba(244,63,94,0.35)" : "rgba(245,158,11,0.35)"}`,
               cursor: "pointer",
+              fontWeight: 800,
             }}
           >
             {alert.message}

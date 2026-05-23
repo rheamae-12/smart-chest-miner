@@ -7,18 +7,22 @@ function noopSubscribe(onError) {
 }
 
 export function subscribeToDevices(onData, onError) {
-  const stopRestPolling = subscribeToDevicesRest(onData, onError);
-  if (!db) return stopRestPolling;
+  if (!db) return subscribeToDevicesRest(onData, onError);
+
+  let stopRestPolling = null;
 
   const unsubscribeSdk = onValue(
     ref(db, "devices"),
     (snapshot) => onData(snapshot.val() || {}),
-    (error) => onError?.(`SDK read failed, using REST fallback: ${error.message}`),
+    (error) => {
+      onError?.(`SDK read failed, using REST fallback: ${error.message}`);
+      stopRestPolling ||= subscribeToDevicesRest(onData, onError);
+    },
   );
 
   return () => {
     unsubscribeSdk();
-    stopRestPolling();
+    stopRestPolling?.();
   };
 }
 
@@ -53,18 +57,22 @@ export function subscribeToAnalytics(deviceId, onData, onError) {
 }
 
 export function subscribeToAllAnalytics(onData, onError) {
-  const stopRestPolling = subscribeToAnalyticsRest(onData, onError);
-  if (!db) return stopRestPolling;
+  if (!db) return subscribeToAnalyticsRest(onData, onError);
+
+  let stopRestPolling = null;
 
   const unsubscribeSdk = onValue(
     ref(db, "analytics"),
     (snapshot) => onData(snapshot.val() || {}),
-    (error) => onError?.(`SDK analytics read failed, using REST fallback: ${error.message}`),
+    (error) => {
+      onError?.(`SDK analytics read failed, using REST fallback: ${error.message}`);
+      stopRestPolling ||= subscribeToAnalyticsRest(onData, onError);
+    },
   );
 
   return () => {
     unsubscribeSdk();
-    stopRestPolling();
+    stopRestPolling?.();
   };
 }
 
@@ -112,6 +120,23 @@ function subscribeToAnalyticsRest(onData, onError) {
   return pollFirebasePath("analytics", onData, onError);
 }
 
+async function writeFirebasePath(path, method, payload) {
+  const url = firebaseRestUrl(path);
+  if (!url) return false;
+
+  const response = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: payload === undefined ? undefined : JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`REST ${method} ${path} failed: HTTP ${response.status}`);
+  }
+
+  return true;
+}
+
 export async function trimAnalyticsHistory(deviceId, keepCount = 120) {
   const url = firebaseRestUrl(`analytics/${deviceId}`);
   if (!url) return false;
@@ -137,8 +162,7 @@ export async function trimAnalyticsHistory(deviceId, keepCount = 120) {
 }
 
 export async function registerDevice(device) {
-  if (!db) return false;
-  await set(ref(db, `devices/${device.id}`), {
+  const payload = {
     name: device.name,
     location: device.location,
     active: device.active ?? false,
@@ -151,18 +175,22 @@ export async function registerDevice(device) {
       finger: device.finger ?? false,
       manual_alert: device.manual_alert ?? false,
     },
-  });
+  };
+
+  if (!db) return writeFirebasePath(`devices/${device.id}`, "PUT", payload);
+
+  await set(ref(db, `devices/${device.id}`), payload);
   return true;
 }
 
 export async function updateDevice(deviceId, patch) {
-  if (!db) return false;
+  if (!db) return writeFirebasePath(`devices/${deviceId}`, "PATCH", patch);
   await update(ref(db, `devices/${deviceId}`), patch);
   return true;
 }
 
 export async function removeDevice(deviceId) {
-  if (!db) return false;
+  if (!db) return writeFirebasePath(`devices/${deviceId}`, "DELETE");
   await remove(ref(db, `devices/${deviceId}`));
   return true;
 }

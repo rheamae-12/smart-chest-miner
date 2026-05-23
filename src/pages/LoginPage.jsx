@@ -1,83 +1,127 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
-import { C, cardStyle } from "../theme";
+import logo from "../assets/smart-chest-miner-logo.png";
+import { C, cardStyle, controlStyle, primaryButtonStyle } from "../theme";
 
 export default function LoginPage() {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ name: "", email: "", password: "" });
-  const { login, signUp, authError, authMessage } = useAuth();
+  const [localError, setLocalError] = useState("");
+  const [localMessage, setLocalMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const { login, signUp, authError } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const submit = async () => {
-    const ok = mode === "login" ? await login(form.email, form.password) : await signUp(form);
+    setLocalError("");
+    setLocalMessage("");
+    const email = form.email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setLocalError("Enter a valid email address.");
+      return;
+    }
+    if (form.password.length < (mode === "login" ? 1 : 6)) {
+      setLocalError(mode === "login" ? "Password is required." : "Password must be at least 6 characters.");
+      return;
+    }
+    if (mode === "signup" && form.name.trim().length < 2) {
+      setLocalError("Full name is required.");
+      return;
+    }
+
+    setBusy(true);
+    const ok = mode === "login" ? await login(email, form.password) : await signUp({ ...form, email });
+    setBusy(false);
     if (ok) navigate(location.state?.from?.pathname || "/dashboard", { replace: true });
   };
 
+  const forgotPassword = () => {
+    setLocalError("");
+    setLocalMessage("Password reset is handled by the system administrator for this prototype.");
+  };
+
+  const switchMode = () => {
+    setLocalError("");
+    setLocalMessage("");
+    setMode((value) => (value === "login" ? "signup" : "login"));
+  };
+
   return (
-    <div style={{ minHeight: "100vh", background: C.bg0, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div style={{ width: "100%", maxWidth: 380 }}>
-        <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: C.amber, letterSpacing: "0.12em" }}>SMART CHEST MINER</div>
-          <div style={{ fontSize: 12, color: C.textMuted, marginTop: 4, letterSpacing: "0.08em" }}>IOT VITAL SIGN MONITORING SYSTEM</div>
+    <div style={{ height: "100vh", background: C.bg0, display: "grid", placeItems: "center", overflow: "hidden", position: "relative", padding: 24, boxSizing: "border-box" }}>
+      <div style={{ position: "absolute", inset: "20% 0 auto", height: 160, borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, opacity: 0.5 }} />
+      <div style={{ width: "min(420px, 100%)", position: "relative" }} className="soft-in">
+        <div style={{ display: "grid", placeItems: "center", marginBottom: 20 }}>
+          <Logo size={64} />
+          <div style={{ color: C.text, fontSize: 18, fontWeight: 900, marginTop: 10 }}>Smart Chest Miner</div>
+          <div style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 6 }}>Authentication Protocol</div>
         </div>
 
-        <div style={{ ...cardStyle, padding: 28 }}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-            <ModeButton active={mode === "login"} onClick={() => setMode("login")}>
-              Log In
-            </ModeButton>
-            <ModeButton active={mode === "signup"} onClick={() => setMode("signup")}>
-              Sign Up
-            </ModeButton>
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 20 }}>{mode === "login" ? "Log In" : "Create Account"}</div>
-          {[
-            ...(mode === "signup" ? [["Full Name", "name", "text", "Juan Dela Cruz"]] : []),
-            ["Email", "email", "text", "admin@smartchestminer.io"],
-            ["Password", "password", "password", mode === "login" ? "password" : "at least 6 characters"],
-          ].map(([label, key, type, placeholder]) => (
-            <div key={key} style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 5, letterSpacing: "0.06em" }}>{label.toUpperCase()}</div>
-              <input
-                type={type}
-                placeholder={placeholder}
-                value={form[key]}
-                onChange={(event) => setForm({ ...form, [key]: event.target.value })}
-                onKeyDown={(event) => event.key === "Enter" && submit()}
-                style={{ width: "100%", background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 7, color: C.text, padding: "10px 14px", fontSize: 13, boxSizing: "border-box" }}
-              />
+          <div style={{ ...cardStyle, padding: 26, background: "rgba(27,27,27,0.94)" }}>
+            <div style={{ marginBottom: 22 }}>
+              <div style={{ color: C.text, fontSize: 20, fontWeight: 900 }}>{mode === "login" ? "System Access" : "Request Access"}</div>
+              <div style={{ color: C.textMuted, fontSize: 12, marginTop: 6 }}>{mode === "login" ? "Supervisor credentials required for telemetry link." : "Create a supervisor profile for this browser."}</div>
             </div>
-          ))}
-          {authError && <div style={{ fontSize: 12, color: C.red, marginBottom: 12 }}>{authError}</div>}
-          {authMessage && <div style={{ fontSize: 12, color: C.green, marginBottom: 12 }}>{authMessage}</div>}
-          <button onClick={submit} style={{ width: "100%", padding: 11, borderRadius: 7, border: "none", background: C.amber, color: "#000", fontWeight: 700, cursor: "pointer", fontSize: 14, marginTop: 6 }}>
-            {mode === "login" ? "Log In" : "Sign Up"}
-          </button>
-          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 14, textAlign: "center" }}>Demo: admin@smartchestminer.io / admin123</div>
-        </div>
+
+            <div style={{ display: "grid", gap: 14 }}>
+              {mode === "signup" && <Field label="Full Name" value={form.name} autoComplete="name" onChange={(name) => setForm({ ...form, name })} placeholder="Juan Dela Cruz" />}
+              <Field label="Email" value={form.email} autoComplete="email" onChange={(email) => setForm({ ...form, email })} placeholder="admin@smartchestminer.io" />
+              <Field label="Password" type="password" value={form.password} autoComplete={mode === "login" ? "current-password" : "new-password"} onChange={(password) => setForm({ ...form, password })} placeholder={mode === "login" ? "password" : "at least 6 characters"} onEnter={submit} />
+            </div>
+
+            {mode === "login" && (
+              <button onClick={forgotPassword} style={{ border: "none", background: "transparent", color: C.primary, cursor: "pointer", padding: "10px 0 0", fontSize: 12, fontWeight: 800 }}>
+                Forgot password?
+              </button>
+            )}
+
+            {(localError || authError) && <Notice tone="danger">{localError || authError}</Notice>}
+            {localMessage && <Notice tone="good">{localMessage}</Notice>}
+
+            <button disabled={busy} onClick={submit} style={{ ...primaryButtonStyle, width: "100%", padding: 12, marginTop: 18, fontSize: 14 }}>
+              {busy ? "Checking..." : mode === "login" ? "Open Dashboard" : "Create Account"}
+            </button>
+
+            <div style={{ display: "flex", justifyContent: "center", gap: 6, color: C.textMuted, fontSize: 12, marginTop: 16 }}>
+              <span>{mode === "login" ? "Don't have an account?" : "Already have an account?"}</span>
+              <button onClick={switchMode} style={{ border: "none", background: "transparent", color: C.primary, cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 900 }}>
+                {mode === "login" ? "Sign up" : "Sign in"}
+              </button>
+            </div>
+
+          </div>
       </div>
     </div>
   );
 }
 
-function ModeButton({ active, onClick, children }) {
+function Logo({ size }) {
   return (
-    <button
-      onClick={onClick}
-      style={{
-        flex: 1,
-        border: `1px solid ${active ? C.amber : C.border}`,
-        background: active ? "rgba(245,158,11,0.12)" : "transparent",
-        color: active ? C.amber : C.textMuted,
-        borderRadius: 7,
-        padding: 9,
-        cursor: "pointer",
-        fontWeight: 700,
-      }}
-    >
-      {children}
-    </button>
+    <div style={{ width: size, height: size, borderRadius: 12, background: C.text, border: `1px solid rgba(255,106,0,0.42)`, display: "grid", placeItems: "center", overflow: "hidden", boxShadow: "0 0 24px rgba(255,106,0,0.2)", flexShrink: 0 }}>
+      <img src={logo} alt="Smart Chest Miner" style={{ width: "92%", height: "92%", objectFit: "contain" }} />
+    </div>
   );
+}
+
+function Field({ label, value, onChange, type = "text", placeholder, autoComplete, onEnter }) {
+  return (
+    <label>
+      <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6, letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
+      <input
+        type={type}
+        placeholder={placeholder}
+        value={value}
+        autoComplete={autoComplete}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => event.key === "Enter" && onEnter?.()}
+        style={{ ...controlStyle, width: "100%", padding: "11px 13px" }}
+      />
+    </label>
+  );
+}
+
+function Notice({ tone, children }) {
+  const color = tone === "good" ? C.green : C.red;
+  return <div style={{ color, background: `${color}12`, border: `1px solid ${color}35`, borderRadius: 7, padding: "9px 11px", fontSize: 12, marginTop: 14 }}>{children}</div>;
 }

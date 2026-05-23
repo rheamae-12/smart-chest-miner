@@ -4,7 +4,7 @@ for# Smart Chest Miner — Build Phase Document
 **System Type:** IoT-Integrated Web Application — Miner Vital Sign Monitoring  
 **Version:** 1.0.0  
 **Date:** May 2026  
-**Prepared By:** Development Team  
+**Prepared By:** Boris and Yami 
 
 ---
 
@@ -51,7 +51,7 @@ Smart Chest Miner (SCM) is an IoT-integrated real-time monitoring web applicatio
 
 ### Key Actors
 
-| Actor | Role |
+| Admin | Miner |
 |---|---|
 | Mine Supervisor | Monitors dashboard in real time |
 | System Administrator | Manages devices, users, system settings |
@@ -65,7 +65,7 @@ Smart Chest Miner (SCM) is an IoT-integrated real-time monitoring web applicatio
 ┌─────────────────────────────────────────────────┐
 │               HARDWARE LAYER                    │
 │                                                 │
-│   ESP32 MCU                                     │
+│   ESP32                                         │
 │   ├── MAX30102 (Heart Rate + SpO₂ Sensor)       │
 │   └── WiFi Module (built-in)                    │
 └───────────────────┬─────────────────────────────┘

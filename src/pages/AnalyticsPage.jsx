@@ -1,151 +1,246 @@
 import { useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import StatCard from "../components/StatCard";
-import { C, cardStyle } from "../theme";
-import { average, formatReading } from "../utils/formatters";
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle } from "../theme";
+import { average, formatLastSeen, formatReading } from "../utils/formatters";
 
 export default function AnalyticsPage({ miners, analyticsData }) {
-  const [filter, setFilter] = useState({ miner: "all", sensor: "both", range: "30" });
+  const [filter, setFilter] = useState({ miner: "all", range: "24H", bucket: "1" });
   const visibleMiners = filter.miner === "all" ? miners : miners.filter((miner) => miner.id === filter.miner);
-  const rangeStart = getRangeStart(filter.range);
-
-  const flattened = useMemo(
-    () =>
-      visibleMiners.flatMap((miner) =>
-        (analyticsData[miner.id] || [])
-          .filter((point) => !rangeStart || Number(point.timestamp || 0) >= rangeStart)
-          .map((point) => ({
-            ...point,
-            minerId: miner.id,
-            miner: miner.name,
-          })),
-      ),
-    [analyticsData, rangeStart, visibleMiners],
-  );
-
-  const comparison = visibleMiners.map((miner) => {
-    const rows = (analyticsData[miner.id] || []).filter((point) => !rangeStart || Number(point.timestamp || 0) >= rangeStart);
-    return {
-      miner: miner.name,
-      hr: average(rows.map((row) => row.hr)),
-      spo2: average(rows.map((row) => row.spo2)),
-    };
-  });
+  const rows = useMemo(() => buildRows(visibleMiners, analyticsData, filter.range), [analyticsData, filter.range, visibleMiners]);
+  const chartData = useMemo(() => bucketRows(rows, Number(filter.bucket)), [filter.bucket, rows]);
+  const logs = useMemo(() => buildDeviceLogs(miners), [miners]);
 
   return (
-    <div style={{ padding: "20px 24px", overflow: "auto", height: "100%", boxSizing: "border-box" }}>
-      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "end" }}>
-        <Select label="Miner" value={filter.miner} onChange={(miner) => setFilter({ ...filter, miner })}>
-          <option value="all">All Miners</option>
-          {miners.map((miner) => (
-            <option key={miner.id} value={miner.id}>
-              {miner.name}
-            </option>
-          ))}
-        </Select>
-        <Select label="Sensor" value={filter.sensor} onChange={(sensor) => setFilter({ ...filter, sensor })}>
-          <option value="both">Both</option>
-          <option value="hr">Heart Rate only</option>
-          <option value="spo2">SpO2 only</option>
-        </Select>
-        <Select label="Range" value={filter.range} onChange={(range) => setFilter({ ...filter, range })}>
-          <option value="30">Last 30 min</option>
-          <option value="60">Last 60 min</option>
-          <option value="today">Today</option>
-        </Select>
-      </div>
+    <div style={pageStyle}>
+      <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
+        <section style={{ ...cardStyle, padding: 16, display: "flex", alignItems: "end", justifyContent: "space-between", gap: 16 }}>
+          <div>
+            <div style={moduleLabel}>Sensor analytics</div>
+            <div style={{ color: C.text, fontSize: 25, fontWeight: 950, marginTop: 4 }}>Telemetry Trends</div>
+            <div style={{ color: C.textMuted, fontSize: 12, marginTop: 5 }}>Filter HR and SpO2 readings by miner and readings-per-minute interval.</div>
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <Select label="Miner" value={filter.miner} onChange={(miner) => setFilter({ ...filter, miner })}>
+              <option value="all">All miners</option>
+              {miners.map((miner) => (
+                <option key={miner.id} value={miner.id}>{miner.name} ({miner.id})</option>
+              ))}
+            </Select>
+            <Select label="Range" value={filter.range} onChange={(range) => setFilter({ ...filter, range })}>
+              <option value="30M">Last 30 min</option>
+              <option value="1H">Last 1 hour</option>
+              <option value="24H">Last 24 hours</option>
+              <option value="7D">Last 7 days</option>
+            </Select>
+            <Select label="Readings / min" value={filter.bucket} onChange={(bucket) => setFilter({ ...filter, bucket })}>
+              <option value="1">1 minute</option>
+              <option value="5">5 minutes</option>
+              <option value="15">15 minutes</option>
+            </Select>
+          </div>
+        </section>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 20 }}>
-        <StatCard label="Avg HR" value={formatReading(average(flattened.map((row) => row.hr)))} unit="bpm" color={C.red} />
-        <StatCard label="Avg SpO2" value={formatReading(average(flattened.map((row) => row.spo2)))} unit="%" color={C.cyan} />
-        <StatCard label="Tracked" value={visibleMiners.length} unit="miners" color={C.green} />
-        <StatCard label="Total Readings" value={flattened.length} color={C.amber} />
-      </div>
+        <section style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+          <Metric label="Avg Heart Rate" value={formatReading(average(rows.map((row) => row.hr)), 0)} unit="bpm" color={C.red} />
+          <Metric label="Avg SpO2" value={formatReading(average(rows.map((row) => row.spo2)), 0)} unit="%" color={C.primary} />
+          <Metric label="Tracked Miners" value={visibleMiners.length} unit={`/${miners.length}`} color={C.green} />
+          <Metric label="Total Readings" value={rows.length} unit="records" color={C.amber} />
+        </section>
 
-      {(filter.sensor === "both" || filter.sensor === "hr") && <LinePanel title="Heart Rate History" miners={visibleMiners} analyticsData={analyticsData} rangeStart={rangeStart} dataKey="hr" color={C.red} unit="bpm" emptyText="No valid heart-rate analytics yet." />}
-      {(filter.sensor === "both" || filter.sensor === "spo2") && <LinePanel title="SpO2 History" miners={visibleMiners} analyticsData={analyticsData} rangeStart={rangeStart} dataKey="spo2" color={C.cyan} unit="%" emptyText="No valid SpO2 analytics yet." />}
+        <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 12, minHeight: 0 }}>
+          <main style={{ display: "grid", gridTemplateRows: "minmax(0, 1fr) auto", gap: 12, minHeight: 0 }}>
+            <div style={{ ...cardStyle, padding: 16, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", marginBottom: 12 }}>
+                <div>
+                  <div style={moduleLabel}>Reading history</div>
+                  <div style={{ color: C.text, fontSize: 18, fontWeight: 950, marginTop: 4 }}>Heart Rate and SpO2</div>
+                  <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4 }}>
+                    {filter.miner === "all" ? "Aggregated across selected miners" : `Separate readings for ${visibleMiners[0]?.name || "selected miner"}`}
+                  </div>
+                </div>
+                <Legend />
+              </div>
+              <div style={{ minHeight: 0, borderRadius: 8, border: `1px solid ${C.borderSoft}`, background: "#151515", padding: 8 }}>
+                {chartData.length ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={chartData} margin={{ top: 12, right: 18, left: -18, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="analyticsHr" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={C.red} stopOpacity={0.22} />
+                          <stop offset="100%" stopColor={C.red} stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke={C.borderSoft} vertical={false} />
+                      <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={26} />
+                      <YAxis tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
+                      <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
+                      <Area type="monotone" dataKey="hr" name="Heart Rate" stroke={C.red} fill="url(#analyticsHr)" strokeWidth={2.2} dot={false} isAnimationActive={false} />
+                      <Area type="monotone" dataKey="spo2" name="SpO2" stroke={C.primary} fill="transparent" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <EmptyState />
+                )}
+              </div>
+            </div>
 
-      <div style={{ ...cardStyle, padding: 18, marginTop: 16, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 14 }}>Miner Comparison</div>
-        <div style={{ height: 240, minWidth: 0 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={comparison}>
-              <CartesianGrid stroke={C.border} vertical={false} />
-              <XAxis dataKey="miner" tick={{ fontSize: 10, fill: C.textMuted }} />
-              <YAxis tick={{ fontSize: 9, fill: C.textMuted }} axisLine={false} />
-              <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 11 }} />
-              <Legend />
-              {(filter.sensor === "both" || filter.sensor === "hr") && <Bar dataKey="hr" fill={C.red} radius={[4, 4, 0, 0]} name="HR (bpm)" />}
-              {(filter.sensor === "both" || filter.sensor === "spo2") && <Bar dataKey="spo2" fill={C.cyan} radius={[4, 4, 0, 0]} name="SpO2 (%)" />}
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+            <div style={{ ...cardStyle, padding: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 8 }}>
+                <div>
+                  <div style={moduleLabel}>Miner comparison</div>
+                  <div style={{ color: C.text, fontSize: 14, fontWeight: 900, marginTop: 3 }}>Latest per-miner readings</div>
+                </div>
+                <button style={{ ...ghostButtonStyle, padding: "8px 11px", fontSize: 11 }}>Refresh View</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+                {visibleMiners.map((miner) => (
+                  <MinerReading key={miner.id} miner={miner} />
+                ))}
+              </div>
+            </div>
+          </main>
+
+          <aside style={{ ...cardStyle, padding: 15, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr" }}>
+            <div style={{ marginBottom: 10 }}>
+              <div style={moduleLabel}>Device activity logs</div>
+              <div style={{ color: C.text, fontSize: 16, fontWeight: 950, marginTop: 4 }}>Online / Offline Events</div>
+              <div style={{ color: C.textMuted, fontSize: 11, marginTop: 4 }}>Status history based on the latest device telemetry window.</div>
+            </div>
+            <div className="hide-scrollbar" style={{ overflow: "auto", display: "grid", gap: 8, alignContent: "start" }}>
+              {logs.map((log) => (
+                <ActivityLog key={`${log.id}-${log.status}`} log={log} />
+              ))}
+            </div>
+          </aside>
+        </section>
       </div>
     </div>
   );
 }
 
+function buildRows(miners, analyticsData, range) {
+  const start = getRangeStart(range);
+  return miners
+    .flatMap((miner) =>
+      (analyticsData[miner.id] || [])
+        .filter((point) => !start || Number(point.timestamp || 0) >= start)
+        .map((point) => ({ ...point, minerId: miner.id, miner: miner.name })),
+    )
+    .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+}
+
+function bucketRows(rows, minutes) {
+  if (!rows.length) return [];
+  const bucketMs = Math.max(1, minutes) * 60 * 1000;
+  const buckets = new Map();
+  rows.forEach((row) => {
+    const timestamp = Number(row.timestamp || 0);
+    const key = timestamp ? Math.floor(timestamp / bucketMs) * bucketMs : row.time;
+    const current = buckets.get(key) || { timestamp: Number(key) || 0, hrs: [], spo2s: [] };
+    if (Number(row.hr) > 0) current.hrs.push(Number(row.hr));
+    if (Number(row.spo2) > 0) current.spo2s.push(Number(row.spo2));
+    buckets.set(key, current);
+  });
+  return Array.from(buckets.values())
+    .sort((a, b) => a.timestamp - b.timestamp)
+    .slice(-42)
+    .map((bucket) => ({
+      time: bucket.timestamp ? new Date(bucket.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
+      hr: average(bucket.hrs),
+      spo2: average(bucket.spo2s),
+    }));
+}
+
 function getRangeStart(range) {
   const now = Date.now();
-  if (range === "30") return now - 30 * 60 * 1000;
-  if (range === "60") return now - 60 * 60 * 1000;
-  if (range === "today") {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    return start.getTime();
-  }
+  if (range === "30M") return now - 30 * 60 * 1000;
+  if (range === "1H") return now - 60 * 60 * 1000;
+  if (range === "24H") return now - 24 * 60 * 60 * 1000;
+  if (range === "7D") return now - 7 * 24 * 60 * 60 * 1000;
   return 0;
+}
+
+function buildDeviceLogs(miners) {
+  return miners.map((miner) => ({
+    id: miner.id,
+    name: miner.name,
+    status: miner.active ? "Online" : miner.stale ? "Stale" : "Offline",
+    color: miner.active ? C.green : miner.stale ? C.amber : C.offline,
+    detail: miner.active ? "Receiving fresh HR and SpO2 telemetry." : miner.stale ? "Last telemetry is outside the fresh signal window." : "No live readings are currently available.",
+    time: formatLastSeen(miner.lastSeen),
+  }));
 }
 
 function Select({ label, value, onChange, children }) {
   return (
     <label style={{ display: "grid", gap: 5 }}>
-      <span style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)} style={{ background: C.bg2, color: C.text, border: `1px solid ${C.border}`, borderRadius: 7, padding: "8px 12px", fontSize: 12, minWidth: 120 }}>
+      <span style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 900 }}>{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)} style={{ ...controlStyle, minWidth: 138 }}>
         {children}
       </select>
     </label>
   );
 }
 
-function LinePanel({ title, miners, analyticsData, rangeStart, dataKey, color, unit, emptyText }) {
-  const filteredData = Object.fromEntries(
-    miners.map((miner) => [miner.id, (analyticsData[miner.id] || []).filter((point) => !rangeStart || Number(point.timestamp || 0) >= rangeStart)]),
-  );
-  const chartData = [];
-  const longest = Math.max(0, ...miners.map((miner) => (filteredData[miner.id] || []).length));
-  for (let index = 0; index < longest; index += 1) {
-    const row = { time: filteredData[miners[0]?.id]?.[index]?.time || "" };
-    miners.forEach((miner) => {
-      const value = filteredData[miner.id]?.[index]?.[dataKey];
-      row[miner.name] = Number.isFinite(value) ? Number(value.toFixed(1)) : null;
-    });
-    chartData.push(row);
-  }
-
+function Metric({ label, value, unit, color }) {
   return (
-    <div style={{ ...cardStyle, padding: 18, marginBottom: 16, minWidth: 0 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 14 }}>
-        {title} ({unit})
+    <div style={{ ...cardStyle, padding: 14, borderLeft: `3px solid ${color}` }}>
+      <div style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
+      <div style={{ color, fontSize: 27, fontWeight: 950, marginTop: 8, lineHeight: 1 }}>{value}<span style={{ color: C.textMuted, fontSize: 11, marginLeft: 5 }}>{unit}</span></div>
+    </div>
+  );
+}
+
+function Legend() {
+  return (
+    <div style={{ display: "flex", gap: 12, alignItems: "center", color: C.textMuted, fontSize: 11 }}>
+      <span><b style={{ color: C.red }}>--</b> HR bpm</span>
+      <span><b style={{ color: C.primary }}>--</b> SpO2 %</span>
+    </div>
+  );
+}
+
+function MinerReading({ miner }) {
+  const color = miner.active ? C.green : C.offline;
+  return (
+    <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 7, padding: 10, background: "rgba(255,255,255,0.02)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <strong style={{ color: C.text, fontSize: 12 }}>{miner.name}</strong>
+        <span style={{ color, fontSize: 10, fontWeight: 900 }}>{miner.active ? "ONLINE" : "OFFLINE"}</span>
       </div>
-      <div style={{ height: 240, minWidth: 0 }}>
-        {chartData.length === 0 ? (
-          <div style={{ height: "100%", display: "grid", placeItems: "center", color: C.textMuted, fontSize: 13 }}>{emptyText}</div>
-        ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
-              <CartesianGrid stroke={C.border} vertical={false} />
-              <XAxis dataKey="time" tick={{ fontSize: 9, fill: C.textMuted }} minTickGap={24} />
-              <YAxis tick={{ fontSize: 9, fill: C.textMuted }} axisLine={false} width={38} />
-              <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 11 }} />
-              <Legend wrapperStyle={{ paddingTop: 8 }} />
-              {miners.map((miner, index) => (
-                <Line key={miner.id} type="linear" dataKey={miner.name} stroke={index === 0 ? color : index % 2 ? C.amber : C.green} dot={{ r: 2 }} strokeWidth={1.6} isAnimationActive={false} connectNulls={false} />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-        )}
+      <div style={{ color: C.textMuted, fontSize: 10, marginTop: 3 }}>{miner.id}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginTop: 10 }}>
+        <MiniValue label="HR" value={miner.active ? formatReading(miner.hr, 0) : "--"} color={C.red} />
+        <MiniValue label="SpO2" value={miner.active ? formatReading(miner.spo2, 0) : "--"} color={C.primary} />
       </div>
     </div>
   );
 }
+
+function MiniValue({ label, value, color }) {
+  return (
+    <div>
+      <div style={{ color: C.textMuted, fontSize: 9 }}>{label}</div>
+      <div style={{ color, fontSize: 15, fontWeight: 900, marginTop: 3 }}>{value}</div>
+    </div>
+  );
+}
+
+function ActivityLog({ log }) {
+  return (
+    <div style={{ borderLeft: `3px solid ${log.color}`, borderRadius: 6, background: "rgba(255,255,255,0.02)", padding: "10px 10px 10px 12px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <strong style={{ color: C.text, fontSize: 12 }}>{log.name}</strong>
+        <span style={{ color: log.color, fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>{log.status}</span>
+      </div>
+      <div style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.4, marginTop: 5 }}>{log.detail}</div>
+      <div style={{ color: C.textMuted, fontSize: 10, marginTop: 7 }}>{log.id} / {log.time}</div>
+    </div>
+  );
+}
+
+function EmptyState() {
+  return <div style={{ height: "100%", display: "grid", placeItems: "center", color: C.textMuted, fontSize: 13 }}>No valid HR or SpO2 analytics for this filter yet.</div>;
+}
+
+const moduleLabel = { color: C.primary, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 900 };

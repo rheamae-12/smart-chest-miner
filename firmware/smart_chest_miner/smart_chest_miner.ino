@@ -192,6 +192,7 @@ void setup() {
   }
 
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  waitForTimeSync();
   randomSeed(analogRead(0));
 
   registerDeviceInfo();
@@ -567,6 +568,27 @@ double currentTimestampMs() {
   }
 
   return (double)millis();
+}
+
+void waitForTimeSync() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  Serial.print("[TIME] Synchronizing clock");
+  unsigned long started = millis();
+  time_t now;
+  time(&now);
+
+  while (now <= 100000 && millis() - started < 10000) {
+    delay(500);
+    Serial.print(".");
+    time(&now);
+  }
+
+  if (now > 100000) {
+    Serial.println(" OK");
+  } else {
+    Serial.println(" skipped; uploads will retry with device uptime until NTP is available");
+  }
 }
 
 // =============================================================

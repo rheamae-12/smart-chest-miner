@@ -11,6 +11,9 @@ const demoUser = {
 };
 const STORAGE_KEY = "smart-chest-miner-users";
 const SESSION_KEY = "smart-chest-miner-session";
+const LOGIN_GUARD_KEY = "smart-chest-miner-login-guard";
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_MS = 60000;
 
 function readLocalUsers() {
   try {
@@ -22,6 +25,30 @@ function readLocalUsers() {
 
 function writeLocalUsers(users) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(users));
+}
+
+function readLoginGuard() {
+  try {
+    return JSON.parse(localStorage.getItem(LOGIN_GUARD_KEY)) || { count: 0, lockedUntil: 0 };
+  } catch {
+    return { count: 0, lockedUntil: 0 };
+  }
+}
+
+function clearLoginGuard() {
+  localStorage.removeItem(LOGIN_GUARD_KEY);
+}
+
+function registerFailedLogin() {
+  const guard = readLoginGuard();
+  const count = Number(guard.count || 0) + 1;
+  const lockedUntil = count >= MAX_FAILED_ATTEMPTS ? Date.now() + LOCKOUT_MS : 0;
+  localStorage.setItem(LOGIN_GUARD_KEY, JSON.stringify({ count, lockedUntil }));
+}
+
+function lockoutMessage(lockedUntil) {
+  const seconds = Math.max(1, Math.ceil((lockedUntil - Date.now()) / 1000));
+  return `Too many failed attempts. Try again in ${seconds} seconds.`;
 }
 
 async function profileForFirebaseUser(firebaseUser, fallbackName) {
@@ -95,8 +122,15 @@ export function AuthProvider({ children }) {
     setAuthError("");
     setAuthMessage("");
     const normalizedEmail = email.trim().toLowerCase();
+    const guard = readLoginGuard();
+
+    if (guard.lockedUntil && guard.lockedUntil > Date.now()) {
+      setAuthError(lockoutMessage(guard.lockedUntil));
+      return false;
+    }
 
     if (normalizedEmail === demoUser.email && password === "admin123") {
+      clearLoginGuard();
       setUser(demoUser);
       localStorage.setItem(SESSION_KEY, JSON.stringify(demoUser));
       return true;
@@ -107,6 +141,7 @@ export function AuthProvider({ children }) {
         const firebaseUser = await loginWithEmail(normalizedEmail, password);
         if (firebaseUser) {
           const nextUser = await profileForFirebaseUser(firebaseUser);
+          clearLoginGuard();
           setUser(nextUser);
           localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
           if (nextUser.profileWarning) {
@@ -117,6 +152,7 @@ export function AuthProvider({ children }) {
           return true;
         }
       } catch (error) {
+        registerFailedLogin();
         setAuthError(error.message);
         return false;
       }
@@ -124,12 +160,14 @@ export function AuthProvider({ children }) {
       const localUser = readLocalUsers().find((item) => item.email === normalizedEmail && item.password === password);
       if (localUser) {
         const nextUser = { name: localUser.name, email: localUser.email, source: "local" };
+        clearLoginGuard();
         setUser(nextUser);
         localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
         return true;
       }
     }
 
+    registerFailedLogin();
     setAuthError("Invalid credentials. Demo: admin@smartchestminer.io / admin123");
     return false;
   };
