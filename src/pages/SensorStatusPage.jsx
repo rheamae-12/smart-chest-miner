@@ -1,10 +1,10 @@
-import { C, cardStyle, ghostButtonStyle, pageStyle } from "../theme";
-import { formatLastSeen, formatReading } from "../utils/formatters";
+import { C, cardStyle, pageStyle } from "../theme";
+import { formatLastSeen, formatReading, formatSystemTimestamp } from "../utils/formatters";
 
-export default function SensorStatusPage({ miners }) {
+export default function SensorStatusPage({ miners, activityLogs = [] }) {
   const active = miners.filter((miner) => miner.active).length;
   const sensorWarnings = miners.filter((miner) => miner.finger === false || miner.stale || !miner.active).length;
-  const events = buildEvents(miners);
+  const events = activityLogs.length ? activityLogs.map(mapStoredEvent) : buildEvents(miners);
 
   return (
     <div style={pageStyle}>
@@ -24,7 +24,7 @@ export default function SensorStatusPage({ miners }) {
         <section>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <div style={{ color: C.text, fontSize: 15, fontWeight: 950 }}>Active Sensor Nodes</div>
-            <button style={{ ...ghostButtonStyle, padding: "8px 11px", color: C.primary, fontSize: 11 }}>Refresh Diagnostics</button>
+            <Indicator color={active ? C.green : C.offline} label="Live diagnostics update automatically" />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
             {miners.map((miner) => (
@@ -38,13 +38,13 @@ export default function SensorStatusPage({ miners }) {
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 8 }}>
               <div>
                 <div style={moduleLabel}>Network event log</div>
-                <div style={{ color: C.text, fontSize: 16, fontWeight: 950, marginTop: 4 }}>Sensor Connectivity Events</div>
+                <div style={{ color: C.text, fontSize: 16, fontWeight: 950, marginTop: 4 }}>Miner Activity Records</div>
               </div>
-              <button style={{ ...ghostButtonStyle, padding: "8px 11px", color: C.primary, fontSize: 11 }}>Export Logs</button>
+              <Indicator color={sensorWarnings ? C.amber : C.green} label={`${events.length} recorded events`} />
             </div>
             <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
               {events.map((event) => (
-                <EventRow key={`${event.deviceId}-${event.title}`} event={event} />
+                <EventRow key={event.id || `${event.deviceId}-${event.title}-${event.time}`} event={event} />
               ))}
             </div>
           </div>
@@ -84,6 +84,19 @@ function buildEvents(miners) {
     if (miner.manual_alert) rows.push({ deviceId: miner.id, miner: miner.name, title: "Manual alert pressed", detail: "Miner activated the hardware alert button.", color: C.red, time: formatLastSeen(miner.lastSeen) });
     return rows;
   });
+}
+
+function mapStoredEvent(event) {
+  const color = event.severity === "critical" ? C.red : event.severity === "warning" ? C.amber : event.status === "online" ? C.green : event.status === "offline" ? C.offline : C.primary;
+  return {
+    id: event.id,
+    deviceId: event.deviceId,
+    miner: event.miner || event.deviceId,
+    title: event.title,
+    detail: event.detail,
+    color,
+    time: formatSystemTimestamp(event.timestamp),
+  };
 }
 
 function HeaderStat({ label, value, color }) {
@@ -136,6 +149,15 @@ function EventRow({ event }) {
         <div style={{ color: C.textMuted, fontSize: 11, marginTop: 3 }}>{event.detail}</div>
       </div>
       <span style={{ color: C.primary, fontSize: 11, fontWeight: 900, textAlign: "right" }}>{event.miner}</span>
+    </div>
+  );
+}
+
+function Indicator({ color, label }) {
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 7, color: C.textMuted, fontSize: 11 }}>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, boxShadow: `0 0 10px ${color}` }} />
+      {label}
     </div>
   );
 }

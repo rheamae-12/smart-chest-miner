@@ -34,7 +34,11 @@ export default function LoginPage() {
     setBusy(true);
     const ok = mode === "login" ? await login(email, form.password) : await signUp({ ...form, email });
     setBusy(false);
-    if (ok) navigate(location.state?.from?.pathname || "/dashboard", { replace: true });
+    if (ok) {
+      const loggedOut = sessionStorage.getItem("smart-chest-miner-logged-out") === "true";
+      sessionStorage.removeItem("smart-chest-miner-logged-out");
+      navigate(loggedOut ? "/dashboard" : location.state?.from?.pathname || "/dashboard", { replace: true, state: null });
+    }
   };
 
   const forgotPassword = () => {

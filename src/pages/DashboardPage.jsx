@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import AlertBanner from "../components/AlertBanner";
 import StatCard from "../components/StatCard";
 import StatusBadge from "../components/StatusBadge";
@@ -19,19 +19,19 @@ export default function DashboardPage({ miners, liveData, thresholds }) {
 
   return (
     <div style={pageStyle}>
-      <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
+      <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(420px, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
         <AlertBanner miners={miners} thresholds={thresholds} />
 
         <section style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
-          <StatCard label="Active Miners" value={activeMiners.length} unit={`/${miners.length}`} color={C.green} sub={`${contactCount} with chest contact`} />
+          <StatCard label="Active Miners" value={activeMiners.length} unit={`/${miners.length}`} color={activeMiners.length ? C.green : C.offline} sub={`${contactCount} with chest contact`} />
           <StatCard label="Avg Heart Rate" value={formatReading(average(activeMiners.map((item) => item.hr)), 0)} unit="bpm" color={C.red} sub={`${thresholds.hrMin}-${thresholds.hrMax} normal range`} />
           <StatCard label="Avg SpO2" value={formatReading(average(activeMiners.map((item) => item.spo2)), 0)} unit="%" color={C.primary} sub={`minimum ${thresholds.spo2Min}%`} />
           <StatCard label="Warnings" value={alerts.length ? alerts.length : "Clear"} color={alerts.length ? C.amber : C.green} sub="live conditions" />
         </section>
 
-        <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 288px", gap: 12, minHeight: 0 }}>
-          <main style={{ display: "grid", gridTemplateRows: "minmax(250px, 1fr) auto", gap: 12, minHeight: 0 }}>
-            <div style={{ ...cardStyle, padding: 16, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr" }}>
+        <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 288px", gap: 12, minHeight: 0, overflow: "hidden" }}>
+          <main style={{ display: "grid", gridTemplateRows: "minmax(320px, 1fr) auto", gap: 12, minHeight: 0 }}>
+            <div style={{ ...cardStyle, padding: 16, minHeight: 320, display: "grid", gridTemplateRows: "auto 1fr" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 14, marginBottom: 12 }}>
                 <div>
                   <div style={moduleLabel}>Realtime HR + SpO2 telemetry</div>
@@ -46,13 +46,17 @@ export default function DashboardPage({ miners, liveData, thresholds }) {
                 </div>
               </div>
 
-              <div style={{ minHeight: 0, border: `1px solid ${C.borderSoft}`, borderRadius: 8, background: "#151515", padding: 8 }}>
+              <div style={{ minHeight: 240, border: `1px solid ${C.borderSoft}`, borderRadius: 8, background: "#151515", padding: 8, display: "grid", gridTemplateRows: "1fr auto" }}>
                 {activeVital && chartData.length ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={chartData} margin={{ top: 12, right: 16, left: -20, bottom: 0 }}>
+                      <CartesianGrid stroke={C.borderSoft} vertical={false} />
                       <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={22} />
                       <YAxis yAxisId="hr" domain={[40, 140]} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
                       <YAxis yAxisId="spo2" orientation="right" domain={[85, 100]} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={34} />
+                      <ReferenceLine yAxisId="hr" y={thresholds.hrMax} stroke={C.amber} strokeDasharray="4 4" />
+                      <ReferenceLine yAxisId="hr" y={thresholds.hrMin} stroke={C.amber} strokeDasharray="4 4" />
+                      <ReferenceLine yAxisId="spo2" y={thresholds.spo2Min} stroke={C.primary} strokeDasharray="4 4" />
                       <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
                       <Line yAxisId="hr" type="monotone" dataKey="hr" name="Heart Rate (bpm)" stroke={C.red} strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls />
                       <Line yAxisId="spo2" type="monotone" dataKey="spo2" name="SpO2 (%)" stroke={C.primary} strokeWidth={2.2} dot={false} isAnimationActive={false} connectNulls />
@@ -64,18 +68,22 @@ export default function DashboardPage({ miners, liveData, thresholds }) {
                     text={miner?.active ? "The graph starts once both heart-rate and SpO2 readings are valid." : "No live HR or SpO2 telemetry is being received from this miner."}
                   />
                 )}
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "8px 3px 0", color: C.textMuted, fontSize: 10 }}>
+                  <span>TIME AXIS: {chartData.length ? chartData[chartData.length - 1].time : "WAITING FOR TIMESTAMP"}</span>
+                  <span><b style={{ color: C.red }}>HR</b> BPM | <b style={{ color: C.primary }}>SpO2</b> % | <b style={{ color: C.amber }}>LIMITS</b></span>
+                </div>
               </div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
               <VitalCard label="Heart Rate" value={activeVital ? formatReading(miner.hr, 0) : "--"} unit="bpm" color={C.red} status={activeVital ? getVitalStatus(miner.hr, "hr", thresholds) : "OFFLINE"} />
               <VitalCard label="SpO2" value={activeVital ? formatReading(miner.spo2, 0) : "--"} unit="%" color={C.primary} status={activeVital ? getVitalStatus(miner.spo2, "spo2", thresholds) : "OFFLINE"} />
-              <VitalCard label="Chest Contact" value={miner?.finger === false ? "No" : miner?.active ? "Yes" : "--"} color={miner?.finger === false ? C.amber : C.green} status={miner?.finger === false ? "WARNING" : miner?.active ? "NORMAL" : "OFFLINE"} />
-              <VitalCard label="Manual Alert" value={miner?.manual_alert ? "Active" : "Clear"} color={miner?.manual_alert ? C.red : C.green} status={miner?.manual_alert ? "CRITICAL" : "NORMAL"} />
+              <VitalCard label="Chest Contact" value={miner?.active ? (miner?.finger === false ? "No" : "Yes") : "--"} color={!miner?.active ? C.offline : miner?.finger === false ? C.amber : C.green} status={!miner?.active ? "OFFLINE" : miner?.finger === false ? "WARNING" : "NORMAL"} />
+              <VitalCard label="Manual Alert" value={miner?.active ? (miner?.manual_alert ? "Active" : "Clear") : "--"} color={!miner?.active ? C.offline : miner?.manual_alert ? C.red : C.green} status={!miner?.active ? "OFFLINE" : miner?.manual_alert ? "CRITICAL" : "NORMAL"} />
             </div>
           </main>
 
-          <aside style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 12, minHeight: 0 }}>
+          <aside style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 12, minHeight: 0, overflow: "hidden" }}>
             <section style={{ ...cardStyle, padding: 14 }}>
               <div style={moduleLabel}>Selected miner</div>
               <div style={{ color: C.text, fontSize: 18, fontWeight: 950, marginTop: 8 }}>{miner?.name || "No miner"}</div>
@@ -86,12 +94,12 @@ export default function DashboardPage({ miners, liveData, thresholds }) {
               </div>
             </section>
 
-            <section style={{ minHeight: 0 }}>
+            <section style={{ minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 900 }}>Miner stream</div>
                 <span style={{ color: C.textMuted, fontSize: 11 }}>{miners.length} devices</span>
               </div>
-              <div className="hide-scrollbar" style={{ display: "grid", gap: 8, overflow: "auto", maxHeight: "100%" }}>
+              <div className="hide-scrollbar" style={{ display: "grid", gap: 8, overflow: "auto", minHeight: 0, alignContent: "start" }}>
                 {miners.map((item) => (
                   <button key={item.id} onClick={() => setSelected(item.id)} style={{ ...cardStyle, padding: 11, textAlign: "left", cursor: "pointer", borderColor: selectedId === item.id ? C.primary : C.border, background: selectedId === item.id ? "rgba(255,106,0,0.08)" : cardStyle.background }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
@@ -113,8 +121,8 @@ export default function DashboardPage({ miners, liveData, thresholds }) {
             <section style={{ ...cardStyle, padding: 13 }}>
               <div style={moduleLabel}>Warning indicators</div>
               <Indicator color={miner?.active ? C.green : C.offline} label={miner?.active ? "Telemetry online" : "Telemetry offline"} />
-              <Indicator color={miner?.finger === false ? C.amber : C.green} label={miner?.finger === false ? "Chest contact missing" : "Chest contact normal"} />
-              <Indicator color={miner?.manual_alert ? C.red : C.green} label={miner?.manual_alert ? "Manual alert pressed" : "Manual alert clear"} />
+              <Indicator color={!miner?.active ? C.offline : miner?.finger === false ? C.amber : C.green} label={!miner?.active ? "Chest contact offline" : miner?.finger === false ? "Chest contact missing" : "Chest contact normal"} />
+              <Indicator color={!miner?.active ? C.offline : miner?.manual_alert ? C.red : C.green} label={!miner?.active ? "Manual alert offline" : miner?.manual_alert ? "Manual alert pressed" : "Manual alert clear"} />
             </section>
           </aside>
         </section>

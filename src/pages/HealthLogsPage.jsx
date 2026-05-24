@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { C, cardStyle, controlStyle, pageStyle } from "../theme";
-import { average, formatLastSeen, formatReading } from "../utils/formatters";
+import { average, formatLastSeen, formatReading, formatSystemTimestamp } from "../utils/formatters";
 
 export default function HealthLogsPage({ miners, analyticsData }) {
   const [selected, setSelected] = useState("all");
@@ -63,6 +63,10 @@ export default function HealthLogsPage({ miners, analyticsData }) {
                 ) : (
                   <div style={{ height: "100%", display: "grid", placeItems: "center", color: C.textMuted, fontSize: 13 }}>No historical readings yet.</div>
                 )}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, color: C.textMuted, fontSize: 10, marginTop: 8 }}>
+                <span>TIME AXIS: {chartData[chartData.length - 1]?.time || "NO TIMESTAMP"}</span>
+                <span><b style={{ color: C.red }}>HR</b> BPM | <b style={{ color: C.primary }}>SpO2</b> %</span>
               </div>
             </div>
 
@@ -139,8 +143,8 @@ function buildSessions(miners, analyticsData) {
       stale: miner.stale,
       contact: miner.finger !== false,
       manualAlerts: rows.filter((row) => row.manual_alert).length + (miner.manual_alert ? 1 : 0),
-      start: first?.timestamp ? new Date(first.timestamp).toLocaleString() : "Not started",
-      end: miner.active ? "In progress" : last?.timestamp ? new Date(last.timestamp).toLocaleString() : "No end time",
+      start: first?.timestamp ? formatSystemTimestamp(first.timestamp) : "NOT STARTED",
+      end: miner.active ? "IN PROGRESS" : last?.timestamp ? formatSystemTimestamp(last.timestamp) : "NO END TIME",
       avgHr: formatReading(average(rows.map((row) => row.hr)) || miner.hr, 0),
       avgSpo2: formatReading(average(rows.map((row) => row.spo2)) || miner.spo2, 0),
     };
@@ -153,7 +157,7 @@ function buildChartData(miners, analyticsData) {
     .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
     .slice(-36)
     .map((row) => ({
-      time: row.time || new Date(row.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      time: row.time || formatSystemTimestamp(row.timestamp),
       hr: Number(row.hr) || null,
       spo2: Number(row.spo2) || null,
     }));

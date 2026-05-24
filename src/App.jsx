@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import Modal from "./components/Modal";
 import Sidebar from "./components/Sidebar";
 import Navbar from "./components/Navbar";
@@ -12,14 +12,22 @@ import HealthLogsPage from "./pages/HealthLogsPage";
 import LoginPage from "./pages/LoginPage";
 import SensorStatusPage from "./pages/SensorStatusPage";
 import SettingsPage from "./pages/SettingsPage";
+import WifiConfigPage from "./pages/WifiConfigPage";
 import { useSimulatedMinerSystem } from "./hooks/useSimulatedMinerSystem";
 import { C, ghostButtonStyle, primaryButtonStyle } from "./theme";
 
 export default function App() {
   const { user, logout, authReady } = useAuth();
+  const navigate = useNavigate();
   const system = useSimulatedMinerSystem(Boolean(user));
   const [logoutOpen, setLogoutOpen] = useState(false);
   const confirmLogout = () => setLogoutOpen(true);
+  const handleLogout = async () => {
+    setLogoutOpen(false);
+    sessionStorage.setItem("smart-chest-miner-logged-out", "true");
+    await logout();
+    navigate("/login", { replace: true, state: null });
+  };
 
   if (!authReady) {
     return <div style={{ minHeight: "100vh", background: C.bg0 }} />;
@@ -46,10 +54,7 @@ export default function App() {
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  setLogoutOpen(false);
-                  logout();
-                }}
+                onClick={handleLogout}
                 style={{ ...primaryButtonStyle, padding: "9px 15px" }}
               >
                 Log Out
@@ -78,6 +83,8 @@ export default function App() {
             onLogout={confirmLogout}
             usingRealtime={system.usingRealtime}
             connectionError={system.connectionError}
+            activityLogs={system.activityLogs}
+            thresholds={system.thresholds}
           />
           <main style={{ flex: 1, overflow: "hidden", minHeight: 0 }}>
             {system.connectionError && (
@@ -105,7 +112,11 @@ export default function App() {
               />
               <Route
                 path="/sensor-status"
-                element={<SensorStatusPage miners={system.miners} />}
+                element={<SensorStatusPage miners={system.miners} activityLogs={system.activityLogs} />}
+              />
+              <Route
+                path="/wifi-config"
+                element={<WifiConfigPage miners={system.miners} />}
               />
               <Route
                 path="/settings"

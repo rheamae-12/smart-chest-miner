@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { MINERS_INIT } from "../data/mockMiners";
 import { firebaseConfigured } from "../firebase/config";
-import { subscribeToAllAnalytics, subscribeToDevices, trimAnalyticsHistory } from "../firebase/database";
-import { DEFAULT_THRESHOLDS } from "../utils/alertChecker";
-import { timeLabel } from "../utils/formatters";
+import { subscribeToActivityLogs, subscribeToAllAnalytics, subscribeToDevices, trimAnalyticsHistory, updateDeviceStatus, writeActivityLog } from "../firebase/database";
+import { DEFAULT_THRESHOLDS, getVitalStatus } from "../utils/alertChecker";
+import { formatSystemTimestamp, timeLabel } from "../utils/formatters";
 
 const SYSTEM_STORAGE_KEY = "smart-chest-miner-system";
 const MIN_VALID_EPOCH_MS = 946684800000;
 const MAX_LIVE_POINTS = 30;
 const MAX_ANALYTICS_POINTS = 120;
 const ONLINE_TIMEOUT_MS = 75000;
+const MAX_ACTIVITY_LOGS = 160;
 
 function readStoredSystem() {
   try {
@@ -71,6 +72,7 @@ function toReading(value) {
 
 function mapRealtimeDevices(value) {
   return Object.entries(value || {})
+    .filter(([, device]) => !toBoolean(device?.archived ?? device?.deleted, false))
     .map(([id, device]) => {
       const live = device?.live || device || {};
       const timestamp = normalizeTimestamp(live.timestamp ?? device?.lastSeen);
@@ -79,7 +81,9 @@ function mapRealtimeDevices(value) {
       const firebaseStatus = String(device?.status ?? live.status ?? "").toLowerCase();
       const firebaseActive = toBoolean(device?.active, false) || firebaseStatus === "online";
       const hasSensorPayload = live.heartRate !== undefined || live.hr !== undefined || live.spo2 !== undefined;
-      const active = (firebaseActive || hasSensorPayload) && fresh;
+      const hasValidSensorPayload = toReading(live.heartRate ?? live.hr ?? device?.heartRate) > 0 || toReading(live.spo2 ?? device?.spo2) > 0;
+      const forcedOffline = firebaseStatus === "offline" || String(live.status || "").toLowerCase() === "offline";
+      const active = !forcedOffline && (firebaseActive || hasValidSensorPayload) && fresh;
       const finger = toBoolean(live.finger ?? live.chestDetected, true);
       const manualAlert = toBoolean(live.manual_alert ?? live.manualAlert, false);
 
@@ -168,11 +172,103 @@ function clearLiveDataForDevice(prev, deviceId) {
   };
 }
 
+function applyLocalDeviceOverrides(miners, metadataOverrides, archivedDeviceIds) {
+  return miners
+    .filter((miner) => !archivedDeviceIds.has(miner.id))
+    .map((miner) => {
+      const override = metadataOverrides[miner.id];
+      return override ? { ...miner, ...override } : miner;
+    });
+}
+
+function mapActivityLogs(value) {
+  return Object.entries(value || {})
+    .map(([id, row]) => ({
+      id,
+      deviceId: row?.deviceId || "",
+      miner: row?.miner || row?.deviceId || "Unknown miner",
+      type: row?.type || "activity",
+      status: row?.status || "",
+      severity: row?.severity || "info",
+      title: row?.title || "Miner activity",
+      detail: row?.detail || "",
+      timestamp: normalizeTimestamp(row?.timestamp) || Date.now(),
+    }))
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, MAX_ACTIVITY_LOGS);
+}
+
+function buildStatusLog(miner, previousStatus) {
+  const status = miner.active ? "online" : "offline";
+  return {
+    deviceId: miner.id,
+    miner: miner.name,
+    type: "status",
+    status,
+    severity: status === "online" ? "info" : "warning",
+    title: `Device ${status}`,
+    detail:
+      status === "online"
+        ? `${miner.name} started sending fresh HR and SpO2 telemetry.`
+        : `${miner.name} stopped sending fresh telemetry${previousStatus ? ` after being ${previousStatus}` : ""}.`,
+    timestamp: miner.lastSeen?.getTime?.() || Date.now(),
+  };
+}
+
+function buildVitalLogs(miner, thresholds) {
+  if (!miner.active || miner.finger === false) return [];
+  const hrStatus = getVitalStatus(miner.hr, "hr", thresholds);
+  const spo2Status = getVitalStatus(miner.spo2, "spo2", thresholds);
+  const rows = [];
+
+  if (hrStatus === "HIGH" || hrStatus === "LOW") {
+    rows.push({
+      deviceId: miner.id,
+      miner: miner.name,
+      type: "vital",
+      status: hrStatus.toLowerCase(),
+      severity: "warning",
+      title: `Heart rate ${hrStatus.toLowerCase()}`,
+      detail: `${miner.name} recorded HR ${miner.hr} bpm at ${formatSystemTimestamp(miner.lastSeen)}.`,
+      timestamp: miner.lastSeen?.getTime?.() || Date.now(),
+    });
+  }
+
+  if (spo2Status === "CRITICAL" || spo2Status === "LOW") {
+    rows.push({
+      deviceId: miner.id,
+      miner: miner.name,
+      type: "vital",
+      status: spo2Status.toLowerCase(),
+      severity: spo2Status === "CRITICAL" ? "critical" : "warning",
+      title: `SpO2 ${spo2Status.toLowerCase()}`,
+      detail: `${miner.name} recorded SpO2 ${miner.spo2}% at ${formatSystemTimestamp(miner.lastSeen)}.`,
+      timestamp: miner.lastSeen?.getTime?.() || Date.now(),
+    });
+  }
+
+  if (miner.manual_alert) {
+    rows.push({
+      deviceId: miner.id,
+      miner: miner.name,
+      type: "manual_alert",
+      status: "pressed",
+      severity: "critical",
+      title: "Manual alert pressed",
+      detail: `${miner.name} activated the manual alert button.`,
+      timestamp: miner.lastSeen?.getTime?.() || Date.now(),
+    });
+  }
+
+  return rows;
+}
+
 export function useSimulatedMinerSystem(enabled) {
   const stored = readStoredSystem();
-  const [miners, setMiners] = useState(MINERS_INIT);
+  const [miners, rawSetMiners] = useState(MINERS_INIT);
   const [liveData, setLiveData] = useState(initialLiveData);
   const [analyticsData, setAnalyticsData] = useState(initialAnalyticsData);
+  const [activityLogs, setActivityLogs] = useState([]);
   const [thresholds, setThresholds] = useState(stored?.thresholds || DEFAULT_THRESHOLDS);
   const [pollingInterval, setPollingInterval] = useState(stored?.pollingInterval || 5);
   const [usingRealtime, setUsingRealtime] = useState(false);
@@ -180,10 +276,46 @@ export function useSimulatedMinerSystem(enabled) {
   const minersRef = useRef(miners);
   const lastTrimRef = useRef(0);
   const hasDeviceSnapshotRef = useRef(false);
+  const previousStatusRef = useRef({});
+  const emittedEventRef = useRef(new Set());
+  const thresholdsRef = useRef(thresholds);
+  const metadataOverridesRef = useRef({});
+  const archivedDeviceIdsRef = useRef(new Set());
 
   useEffect(() => {
     minersRef.current = miners;
   }, [miners]);
+
+  const setMiners = (updater) => {
+    rawSetMiners((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      const nextIds = new Set(next.map((miner) => miner.id));
+
+      prev.forEach((miner) => {
+        if (!nextIds.has(miner.id)) {
+          archivedDeviceIdsRef.current.add(miner.id);
+        }
+      });
+
+      next.forEach((miner) => {
+        const previous = prev.find((item) => item.id === miner.id);
+        if (!previous || previous.name !== miner.name || previous.location !== miner.location) {
+          metadataOverridesRef.current[miner.id] = {
+            name: miner.name,
+            location: miner.location,
+          };
+        }
+        archivedDeviceIdsRef.current.delete(miner.id);
+      });
+
+      minersRef.current = next;
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    thresholdsRef.current = thresholds;
+  }, [thresholds]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -201,19 +333,51 @@ export function useSimulatedMinerSystem(enabled) {
 
     const unsubscribeDevices = subscribeToDevices(
       (value) => {
-        const realtimeMiners = mapRealtimeDevices(value);
-        hasDeviceSnapshotRef.current = realtimeMiners.length > 0;
+        const realtimeMiners = applyLocalDeviceOverrides(mapRealtimeDevices(value), metadataOverridesRef.current, archivedDeviceIdsRef.current);
+        hasDeviceSnapshotRef.current = Object.keys(value || {}).length > 0;
         if (realtimeMiners.length === 0) {
-          setUsingRealtime(false);
-          setMiners(MINERS_INIT);
-          minersRef.current = MINERS_INIT;
+          setUsingRealtime(Boolean(value && Object.keys(value).length > 0));
+          rawSetMiners([]);
+          minersRef.current = [];
           return;
         }
 
         setUsingRealtime(true);
         setConnectionError("");
-        setMiners(realtimeMiners);
+        rawSetMiners(realtimeMiners);
         minersRef.current = realtimeMiners;
+
+        realtimeMiners.forEach((miner) => {
+          const expectedStatus = miner.active ? "online" : "offline";
+          const raw = value?.[miner.id] || {};
+          const rawStatus = String(raw.status || "").toLowerCase();
+          const rawLiveStatus = String(raw.live?.status || "").toLowerCase();
+          const rawActive = toBoolean(raw.active, false);
+          const lastSeen = miner.lastSeen?.getTime?.() || raw.lastSeen || Date.now();
+
+          if (rawStatus !== expectedStatus || rawLiveStatus !== expectedStatus || rawActive !== miner.active) {
+            updateDeviceStatus(miner.id, expectedStatus, lastSeen).catch(() => {});
+          }
+
+          const previousStatus = previousStatusRef.current[miner.id];
+          if (previousStatus !== expectedStatus) {
+            previousStatusRef.current[miner.id] = expectedStatus;
+            const statusEvent = buildStatusLog(miner, previousStatus);
+            const key = `${statusEvent.type}:${statusEvent.deviceId}:${statusEvent.status}:${Math.floor(statusEvent.timestamp / 60000)}`;
+            if (!emittedEventRef.current.has(key)) {
+              emittedEventRef.current.add(key);
+              writeActivityLog(statusEvent).catch(() => {});
+            }
+          }
+
+          buildVitalLogs(miner, thresholdsRef.current).forEach((event) => {
+            const key = `${event.type}:${event.deviceId}:${event.status}:${Math.floor(event.timestamp / 60000)}`;
+            if (!emittedEventRef.current.has(key)) {
+              emittedEventRef.current.add(key);
+              writeActivityLog(event).catch(() => {});
+            }
+          });
+        });
 
         setLiveData((prev) => {
           const next = { ...prev };
@@ -245,11 +409,11 @@ export function useSimulatedMinerSystem(enabled) {
       (value) => {
         setConnectionError("");
         const mappedAnalytics = mapRealtimeAnalytics(value);
-        const analyticsMiners = latestAnalyticsMiners(mappedAnalytics);
+        const analyticsMiners = applyLocalDeviceOverrides(latestAnalyticsMiners(mappedAnalytics), metadataOverridesRef.current, archivedDeviceIdsRef.current);
 
         setAnalyticsData((prev) => ({ ...prev, ...mappedAnalytics }));
         if (analyticsMiners.length > 0 && !hasDeviceSnapshotRef.current && !minersRef.current.some((miner) => miner.active)) {
-          setMiners(analyticsMiners);
+          rawSetMiners(analyticsMiners);
           minersRef.current = analyticsMiners;
         }
 
@@ -270,10 +434,58 @@ export function useSimulatedMinerSystem(enabled) {
       (message) => setConnectionError(message),
     );
 
+    const unsubscribeActivity = subscribeToActivityLogs(
+      (value) => {
+        setConnectionError("");
+        setActivityLogs(mapActivityLogs(value));
+      },
+      (message) => setConnectionError(message),
+    );
+
     return () => {
       unsubscribeDevices();
       unsubscribeAnalytics();
+      unsubscribeActivity();
     };
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+
+    const interval = window.setInterval(() => {
+      const staleMiners = minersRef.current.filter((miner) => {
+        const timestamp = miner.lastSeen?.getTime?.() || 0;
+        return miner.active && !isFreshTimestamp(timestamp);
+      });
+
+      if (staleMiners.length === 0) return;
+
+      rawSetMiners((prev) =>
+        prev.map((miner) => {
+          if (!staleMiners.some((stale) => stale.id === miner.id)) return miner;
+          return {
+            ...miner,
+            active: false,
+            status: "offline",
+            stale: true,
+          };
+        }),
+      );
+
+      staleMiners.forEach((miner) => {
+        previousStatusRef.current[miner.id] = "offline";
+        const timestamp = miner.lastSeen?.getTime?.() || Date.now();
+        updateDeviceStatus(miner.id, "offline", timestamp).catch(() => {});
+        const event = buildStatusLog({ ...miner, active: false, status: "offline", stale: true }, "online");
+        const key = `${event.type}:${event.deviceId}:${event.status}:${Math.floor(Date.now() / 60000)}`;
+        if (!emittedEventRef.current.has(key)) {
+          emittedEventRef.current.add(key);
+          writeActivityLog(event).catch(() => {});
+        }
+      });
+    }, 10000);
+
+    return () => window.clearInterval(interval);
   }, [enabled]);
 
   return {
@@ -281,6 +493,7 @@ export function useSimulatedMinerSystem(enabled) {
     setMiners,
     liveData,
     analyticsData,
+    activityLogs,
     thresholds,
     setThresholds,
     pollingInterval,

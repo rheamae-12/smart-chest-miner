@@ -1,4 +1,4 @@
-import { onValue, ref, remove, set, update } from "firebase/database";
+import { onValue, push, ref, serverTimestamp, set, update } from "firebase/database";
 import { db, firebaseDatabaseSecret, firebaseDatabaseUrl } from "./config";
 
 function noopSubscribe(onError) {
@@ -76,6 +76,35 @@ export function subscribeToAllAnalytics(onData, onError) {
   };
 }
 
+export function subscribeToActivityLogs(onData, onError) {
+  if (!db) return subscribeToActivityLogsRest(onData, onError);
+
+  let stopRestPolling = null;
+
+  const unsubscribeSdk = onValue(
+    ref(db, "activityLogs"),
+    (snapshot) => onData(snapshot.val() || {}),
+    (error) => {
+      onError?.(`SDK activity read failed, using REST fallback: ${error.message}`);
+      stopRestPolling ||= subscribeToActivityLogsRest(onData, onError);
+    },
+  );
+
+  return () => {
+    unsubscribeSdk();
+    stopRestPolling?.();
+  };
+}
+
+export function subscribeToWifiConfigurations(onData, onError) {
+  if (!db) return pollFirebasePath("wifiConfigurations", onData, onError, 3000);
+  return onValue(
+    ref(db, "wifiConfigurations"),
+    (snapshot) => onData(snapshot.val() || {}),
+    (error) => onError?.(error.message),
+  );
+}
+
 function firebaseRestUrl(path) {
   if (!firebaseDatabaseUrl || !firebaseDatabaseSecret) return "";
   if (firebaseDatabaseSecret.includes("YOUR_")) return "";
@@ -118,6 +147,10 @@ function subscribeToDevicesRest(onData, onError) {
 
 function subscribeToAnalyticsRest(onData, onError) {
   return pollFirebasePath("analytics", onData, onError);
+}
+
+function subscribeToActivityLogsRest(onData, onError) {
+  return pollFirebasePath("activityLogs", onData, onError, 3000);
 }
 
 async function writeFirebasePath(path, method, payload) {
@@ -165,13 +198,15 @@ export async function registerDevice(device) {
   const payload = {
     name: device.name,
     location: device.location,
+    archived: false,
+    deletedAt: null,
     active: device.active ?? false,
     status: device.status || (device.active ? "online" : "offline"),
-    lastSeen: Number(device.lastSeen) || Date.now(),
+    lastSeen: Number(device.lastSeen) || 0,
     live: {
       heartRate: device.hr || 0,
       spo2: device.spo2 || 0,
-      timestamp: Number(device.lastSeen) || Date.now(),
+      timestamp: Number(device.lastSeen) || 0,
       finger: device.finger ?? false,
       manual_alert: device.manual_alert ?? false,
     },
@@ -189,9 +224,99 @@ export async function updateDevice(deviceId, patch) {
   return true;
 }
 
+export async function updateDeviceStatus(deviceId, status, lastSeen = Date.now()) {
+  const active = status === "online";
+  const lastSeenMs = Number(lastSeen) || 0;
+  const patch = {
+    active,
+    status,
+    lastSeen: lastSeenMs,
+  };
+
+  if (!active) {
+    Object.assign(patch, {
+      live: {
+        heartRate: 0,
+        hr: 0,
+        spo2: 0,
+        status: "offline",
+        timestamp: lastSeenMs,
+        finger: false,
+        manual_alert: false,
+        sim_mode: false,
+        offlineAt: Date.now(),
+      },
+    });
+  } else {
+    Object.assign(patch, {
+      "live/status": "online",
+      "live/timestamp": lastSeenMs,
+    });
+  }
+
+  if (!db) return writeFirebasePath(`devices/${deviceId}`, "PATCH", patch);
+  await update(ref(db, `devices/${deviceId}`), patch);
+  return true;
+}
+
 export async function removeDevice(deviceId) {
-  if (!db) return writeFirebasePath(`devices/${deviceId}`, "DELETE");
-  await remove(ref(db, `devices/${deviceId}`));
+  const timestamp = Date.now();
+  const patch = {
+    archived: true,
+    deletedAt: timestamp,
+    active: false,
+    status: "offline",
+    live: {
+      heartRate: 0,
+      hr: 0,
+      spo2: 0,
+      status: "offline",
+      timestamp,
+      finger: false,
+      manual_alert: false,
+      sim_mode: false,
+      offlineAt: timestamp,
+    },
+  };
+
+  if (!db) return writeFirebasePath(`devices/${deviceId}`, "PATCH", patch);
+  await update(ref(db, `devices/${deviceId}`), patch);
+  return true;
+}
+
+export async function writeActivityLog(event) {
+  const timestamp = Number(event.timestamp) || Date.now();
+  const payload = {
+    deviceId: event.deviceId || "",
+    miner: event.miner || event.deviceId || "Unknown miner",
+    type: event.type || "activity",
+    status: event.status || "",
+    severity: event.severity || "info",
+    title: event.title || "Miner activity",
+    detail: event.detail || "",
+    timestamp,
+  };
+
+  if (!db) return writeFirebasePath("activityLogs", "POST", payload);
+
+  const row = push(ref(db, "activityLogs"));
+  await set(row, { ...payload, createdAt: serverTimestamp() });
+  return true;
+}
+
+export async function saveWifiConfiguration(deviceId, config) {
+  const payload = {
+    deviceId,
+    ssid: config.ssid || "",
+    password: config.password || "",
+    security: config.security || "WPA2",
+    applyOnNextBoot: config.applyOnNextBoot ?? true,
+    status: "pending",
+    updatedAt: Date.now(),
+  };
+
+  if (!db) return writeFirebasePath(`wifiConfigurations/${deviceId}`, "PUT", payload);
+  await set(ref(db, `wifiConfigurations/${deviceId}`), payload);
   return true;
 }
 

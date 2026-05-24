@@ -39,6 +39,15 @@ textarea {
   font: inherit;
 }
 
+strong,
+b,
+[style*="font-weight: 800"],
+[style*="font-weight: 850"],
+[style*="font-weight: 900"],
+[style*="font-weight: 950"] {
+  text-transform: uppercase;
+}
+
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,

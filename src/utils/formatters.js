@@ -1,18 +1,21 @@
 export function timeLabel(date = new Date()) {
-  return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}:${date
-    .getSeconds()
-    .toString()
-    .padStart(2, "0")}`;
+  return formatSystemTimestamp(date);
+}
+
+export function formatSystemTimestamp(value = new Date()) {
+  if (!value) return "NEVER";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "UNKNOWN";
+
+  const month = date.toLocaleString("en-US", { month: "long" }).toUpperCase();
+  const day = date.getDate().toString().padStart(2, "0");
+  const year = date.getFullYear();
+  const time = date.toLocaleString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }).toUpperCase();
+  return `${month} ${day}, ${year} - ${time}`;
 }
 
 export function formatLastSeen(value) {
-  if (!value) return "Never";
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "Unknown";
-  const diff = Date.now() - date.getTime();
-  if (diff < 60000) return "Just now";
-  if (diff < 3600000) return `${Math.round(diff / 60000)} min ago`;
-  return date.toLocaleString();
+  return formatSystemTimestamp(value);
 }
 
 export function formatReading(value, digits = 1) {

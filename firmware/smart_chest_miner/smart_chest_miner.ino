@@ -14,8 +14,8 @@
 // CONFIGURATION - Edit these values to match your setup
 // =============================================================
 
-const char* WIFI_SSID     = "PLDTHOMEFIBR_RazielRenz";
-const char* WIFI_PASSWORD = "kuanwalaypassword";
+const char* DEFAULT_WIFI_SSID     = "PLDTHOMEFIBR_RazielRenz";
+const char* DEFAULT_WIFI_PASSWORD = "kuanwalaypassword";
 
 const char* FIREBASE_DATABASE_URL = "https://smart-chest-miner-default-rtdb.firebaseio.com";
 const char* FIREBASE_DATABASE_SECRET = "GJY8fpUA211duwUw7o92ks0EXlYOFdqWYz5rK6N5";
@@ -45,6 +45,7 @@ const char* MINER_LOCATION = "Shaft A - Level 3";
 #define SENSOR_READ_INTERVAL     10
 #define DEBOUNCE_DELAY_MS        50
 #define WIFI_RECONNECT_INTERVAL  10000
+#define WIFI_CONFIG_CHECK_INTERVAL 30000
 #define RED_LED_BLINK_INTERVAL   200
 #define BUZZER_BEEP_INTERVAL     100
 #define SIM_UPDATE_INTERVAL      2000
@@ -93,6 +94,7 @@ unsigned long lastLiveUploadTime = 0;
 unsigned long lastAnalyticsUploadTime = 0;
 unsigned long lastSensorRead = 0;
 unsigned long lastWiFiReconnect = 0;
+unsigned long lastWifiConfigCheck = 0;
 unsigned long lastRedLedToggle = 0;
 unsigned long lastGreenLedToggle = 0;
 unsigned long lastPrintTime = 0;
@@ -115,6 +117,9 @@ bool buzzerState = false;
 bool fingerDetected = false;
 bool wasFingerDetected = false;
 bool noFingerStateUploaded = false;
+
+char currentWifiSsid[64] = "";
+char currentWifiPassword[96] = "";
 
 // =============================================================
 // INTERRUPT SERVICE ROUTINE
@@ -174,22 +179,9 @@ void setup() {
   particleSensor.setup(ledBrightness, sampleAverage, ledMode, sampleRate, pulseWidth, adcRange);
   particleSensor.setPulseAmplitudeGreen(0);
 
-  Serial.printf("[INIT] Connecting to WiFi: %s ", WIFI_SSID);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  unsigned long wifiStart = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - wifiStart) < 20000) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println();
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("[INIT] WiFi connected! IP: %s\n", WiFi.localIP().toString().c_str());
-  } else {
-    Serial.println("[WARN] WiFi connection failed. Will retry in loop.");
-  }
+  strncpy(currentWifiSsid, DEFAULT_WIFI_SSID, sizeof(currentWifiSsid) - 1);
+  strncpy(currentWifiPassword, DEFAULT_WIFI_PASSWORD, sizeof(currentWifiPassword) - 1);
+  connectToWiFi(20000);
 
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
   waitForTimeSync();
@@ -207,6 +199,7 @@ void loop() {
   unsigned long now = millis();
 
   handleWiFiReconnect(now);
+  applyWifiConfigurationIfAvailable(now);
   handleButton(now);
   handleMonitoring(now);
 }
@@ -437,9 +430,55 @@ void handleWiFiReconnect(unsigned long now) {
       lastWiFiReconnect = now;
       Serial.println("[WIFI] Disconnected. Attempting reconnect...");
       WiFi.disconnect();
-      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      WiFi.begin(currentWifiSsid, currentWifiPassword);
     }
   }
+}
+
+void connectToWiFi(unsigned long timeoutMs) {
+  Serial.printf("[INIT] Connecting to WiFi: %s ", currentWifiSsid);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(currentWifiSsid, currentWifiPassword);
+
+  unsigned long wifiStart = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - wifiStart) < timeoutMs) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("[INIT] WiFi connected! IP: %s\n", WiFi.localIP().toString().c_str());
+  } else {
+    Serial.println("[WARN] WiFi connection failed. Will retry in loop.");
+  }
+}
+
+void applyWifiConfigurationIfAvailable(unsigned long now) {
+  if (WiFi.status() != WL_CONNECTED) return;
+  if (now - lastWifiConfigCheck < WIFI_CONFIG_CHECK_INTERVAL) return;
+  lastWifiConfigCheck = now;
+
+  String payload;
+  if (!firebaseGet("/wifiConfigurations/" + String(DEVICE_ID), payload)) return;
+  if (payload == "null" || payload.length() == 0) return;
+
+  String ssid = extractJsonString(payload, "ssid");
+  String password = extractJsonString(payload, "password");
+  String status = extractJsonString(payload, "status");
+  if (ssid.length() == 0 || status == "applied") return;
+
+  if (ssid == String(currentWifiSsid) && password == String(currentWifiPassword)) {
+    markWifiConfigStatus("applied");
+    return;
+  }
+
+  Serial.printf("[WIFI] Applying queued WiFi config: %s\n", ssid.c_str());
+  ssid.toCharArray(currentWifiSsid, sizeof(currentWifiSsid));
+  password.toCharArray(currentWifiPassword, sizeof(currentWifiPassword));
+  markWifiConfigStatus("applying");
+  WiFi.disconnect();
+  WiFi.begin(currentWifiSsid, currentWifiPassword);
 }
 
 // =============================================================
@@ -460,13 +499,12 @@ void uploadLiveToFirebase(float bpm, float spo2) {
 
   double timestamp = currentTimestampMs();
   String timestampText = String(timestamp, 0);
+  bool liveOnline = fingerDetected && bpm > 0 && spo2 > 0;
   String livePayload = buildReadingPayload(bpm, spo2, timestampText);
 
   String devicePayload = "{";
-  devicePayload += "\"name\":\"" + String(MINER_NAME) + "\",";
-  devicePayload += "\"location\":\"" + String(MINER_LOCATION) + "\",";
-  devicePayload += "\"active\":true,";
-  devicePayload += "\"status\":\"online\",";
+  devicePayload += "\"active\":" + String(liveOnline ? "true" : "false") + ",";
+  devicePayload += "\"status\":\"" + String(liveOnline ? "online" : "offline") + "\",";
   devicePayload += "\"lastSeen\":" + timestampText + ",";
   devicePayload += "\"live\":" + livePayload;
   devicePayload += "}";
@@ -502,14 +540,19 @@ void uploadAnalyticsToFirebase(float avgBPM, float avgSpO2) {
 }
 
 String buildReadingPayload(float bpm, float spo2, String timestampText) {
+  bool liveOnline = fingerDetected && bpm > 0 && spo2 > 0;
   String payload = "{";
-  payload += "\"heartRate\":" + String(bpm, 1) + ",";
-  payload += "\"hr\":" + String(bpm, 1) + ",";
-  payload += "\"spo2\":" + String(spo2, 1) + ",";
-  payload += "\"status\":\"" + String(healthStateToString(healthState)) + "\",";
-  payload += "\"finger\":" + String(fingerDetected ? "true" : "false") + ",";
-  payload += "\"manual_alert\":" + String(manualAlertActive ? "true" : "false") + ",";
+  payload += "\"heartRate\":" + String(liveOnline ? bpm : 0, 1) + ",";
+  payload += "\"hr\":" + String(liveOnline ? bpm : 0, 1) + ",";
+  payload += "\"spo2\":" + String(liveOnline ? spo2 : 0, 1) + ",";
+  payload += "\"status\":\"" + String(liveOnline ? "online" : "offline") + "\",";
+  payload += "\"healthState\":\"" + String(healthStateToString(healthState)) + "\",";
+  payload += "\"finger\":" + String(liveOnline ? "true" : "false") + ",";
+  payload += "\"manual_alert\":" + String(liveOnline && manualAlertActive ? "true" : "false") + ",";
   payload += "\"timestamp\":" + timestampText + ",";
+  if (!liveOnline) {
+    payload += "\"offlineAt\":" + timestampText + ",";
+  }
   payload += "\"sim_mode\":true";
   payload += "}";
   return payload;
@@ -520,10 +563,8 @@ void registerDeviceInfo() {
 
   String timestamp = String(currentTimestampMs(), 0);
   String payload = "{";
-  payload += "\"name\":\"" + String(MINER_NAME) + "\",";
-  payload += "\"location\":\"" + String(MINER_LOCATION) + "\",";
-  payload += "\"active\":true,";
-  payload += "\"status\":\"online\",";
+  payload += "\"active\":false,";
+  payload += "\"status\":\"offline\",";
   payload += "\"lastSeen\":" + timestamp;
   payload += "}";
 
@@ -536,6 +577,30 @@ bool firebasePut(String path, String payload) {
 
 bool firebasePatch(String path, String payload) {
   return firebaseWrite("PATCH", path, payload);
+}
+
+bool firebaseGet(String path, String &response) {
+  HTTPClient http;
+  String url = String(FIREBASE_DATABASE_URL) + path + ".json?auth=" + String(FIREBASE_DATABASE_SECRET);
+
+  http.begin(url);
+  http.setTimeout(5000);
+
+  int httpCode = http.GET();
+  response = http.getString();
+  http.end();
+
+  Serial.printf("[FIREBASE] GET %s -> HTTP %d\n", path.c_str(), httpCode);
+  return httpCode >= 200 && httpCode < 300;
+}
+
+void markWifiConfigStatus(String status) {
+  String timestamp = String(currentTimestampMs(), 0);
+  String payload = "{";
+  payload += "\"status\":\"" + status + "\",";
+  payload += "\"appliedAt\":" + timestamp;
+  payload += "}";
+  firebasePatch("/wifiConfigurations/" + String(DEVICE_ID), payload);
 }
 
 bool firebaseWrite(String method, String path, String payload) {
@@ -604,4 +669,14 @@ const char* healthStateToString(HealthState state) {
     case HEALTH_MANUAL_ALERT: return "MANUAL_ALERT";
     default:                  return "UNKNOWN";
   }
+}
+
+String extractJsonString(String json, String key) {
+  String marker = "\"" + key + "\":\"";
+  int start = json.indexOf(marker);
+  if (start < 0) return "";
+  start += marker.length();
+  int end = json.indexOf("\"", start);
+  if (end < 0) return "";
+  return json.substring(start, end);
 }

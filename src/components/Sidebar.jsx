@@ -9,6 +9,7 @@ const nav = [
   { to: "/devices", label: "Device Registry", icon: "device" },
   { to: "/health-logs", label: "Health Logs", icon: "history" },
   { to: "/sensor-status", label: "Sensor Status", icon: "network" },
+  { to: "/wifi-config", label: "WiFi Config", icon: "wifi" },
   { to: "/settings", label: "System Config", icon: "settings" },
 ];
 
@@ -186,6 +187,16 @@ function NavIcon({ name }) {
         <path d="M12 7v4" />
         <path d="m6.5 17 4-5" />
         <path d="m17.5 17-4-5" />
+      </svg>
+    );
+  }
+  if (name === "wifi") {
+    return (
+      <svg viewBox="0 0 24 24" style={common} aria-hidden="true">
+        <path d="M5 13a10 10 0 0 1 14 0" />
+        <path d="M8.5 16.5a5 5 0 0 1 7 0" />
+        <path d="M12 20h.01" />
+        <path d="M2 9a15 15 0 0 1 20 0" />
       </svg>
     );
   }

@@ -35,6 +35,7 @@ export const pageLabels = {
   "/devices": "Device Registry",
   "/health-logs": "Health Logs",
   "/sensor-status": "Sensor Status",
+  "/wifi-config": "WiFi Configuration",
   "/settings": "System Config",
 };
 

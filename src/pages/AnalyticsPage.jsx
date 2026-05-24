@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle } from "../theme";
-import { average, formatLastSeen, formatReading } from "../utils/formatters";
+import { C, cardStyle, controlStyle, pageStyle } from "../theme";
+import { average, formatLastSeen, formatReading, formatSystemTimestamp } from "../utils/formatters";
 
 export default function AnalyticsPage({ miners, analyticsData }) {
   const [filter, setFilter] = useState({ miner: "all", range: "24H", bucket: "1" });
@@ -82,6 +82,10 @@ export default function AnalyticsPage({ miners, analyticsData }) {
                   <EmptyState />
                 )}
               </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, color: C.textMuted, fontSize: 10, marginTop: 8 }}>
+                <span>TIME AXIS: {chartData[chartData.length - 1]?.time || "NO TIMESTAMP"}</span>
+                <span><b style={{ color: C.red }}>HR</b> BPM | <b style={{ color: C.primary }}>SpO2</b> %</span>
+              </div>
             </div>
 
             <div style={{ ...cardStyle, padding: 14 }}>
@@ -90,7 +94,7 @@ export default function AnalyticsPage({ miners, analyticsData }) {
                   <div style={moduleLabel}>Miner comparison</div>
                   <div style={{ color: C.text, fontSize: 14, fontWeight: 900, marginTop: 3 }}>Latest per-miner readings</div>
                 </div>
-                <button style={{ ...ghostButtonStyle, padding: "8px 11px", fontSize: 11 }}>Refresh View</button>
+                <span style={{ color: C.textMuted, fontSize: 11 }}>{visibleMiners.length} labeled miner series</span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
                 {visibleMiners.map((miner) => (
@@ -145,7 +149,7 @@ function bucketRows(rows, minutes) {
     .sort((a, b) => a.timestamp - b.timestamp)
     .slice(-42)
     .map((bucket) => ({
-      time: bucket.timestamp ? new Date(bucket.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
+      time: bucket.timestamp ? formatSystemTimestamp(bucket.timestamp) : "",
       hr: average(bucket.hrs),
       spo2: average(bucket.spo2s),
     }));
