@@ -1,17 +1,12 @@
 import { useState } from "react";
-import Modal from "../components/Modal";
-import { useAuth } from "../context/useAuth";
 import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
 
 export default function SettingsPage({ miners, thresholds, setThresholds, pollingInterval, setPollingInterval }) {
-  const { user, updateUser } = useAuth();
-  const [account, setAccount] = useState({ name: user?.name || "Admin", email: user?.email || "admin@smartchestminer.io", role: user?.role || "Supervisor", shift: user?.shift || "Night Shift" });
   const [localThresholds, setLocalThresholds] = useState(thresholds);
   const [localInterval, setLocalInterval] = useState(pollingInterval);
   const [preferences, setPreferences] = useState({ critical: true, warning: true, offline: true, sound: false, retainDays: 30, staleSeconds: 75 });
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
-  const [accountOpen, setAccountOpen] = useState(false);
   const [confirmSave, setConfirmSave] = useState(false);
 
   const requestSave = () => {
@@ -21,10 +16,6 @@ export default function SettingsPage({ miners, thresholds, setThresholds, pollin
   const save = () => {
     setError("");
     setConfirmSave(false);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account.email.trim())) {
-      setError("Enter a valid account email address.");
-      return;
-    }
     if (localThresholds.hrMin >= localThresholds.hrMax) {
       setError("Heart-rate minimum must be lower than maximum.");
       return;
@@ -40,7 +31,6 @@ export default function SettingsPage({ miners, thresholds, setThresholds, pollin
 
     setThresholds(localThresholds);
     setPollingInterval(localInterval);
-    updateUser({ name: account.name.trim(), email: account.email.trim().toLowerCase(), role: account.role, shift: account.shift });
     setSaved(true);
     setTimeout(() => setSaved(false), 2400);
   };
@@ -48,32 +38,12 @@ export default function SettingsPage({ miners, thresholds, setThresholds, pollin
   const resetLocalEdits = () => {
     setLocalThresholds(thresholds);
     setLocalInterval(pollingInterval);
-    setAccount({ name: user?.name || "Admin", email: user?.email || "admin@smartchestminer.io", role: user?.role || "Supervisor", shift: user?.shift || "Night Shift" });
     setError("");
     setConfirmSave(false);
   };
 
   return (
     <div style={pageStyle}>
-      {accountOpen && (
-        <Modal
-          title="Account Settings"
-          onClose={() => setAccountOpen(false)}
-          actions={
-            <>
-              <button onClick={() => setAccountOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>Cancel</button>
-              <button onClick={() => setAccountOpen(false)} style={{ ...primaryButtonStyle, padding: "9px 15px" }}>Done</button>
-            </>
-          }
-        >
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
-            <Field label="Full Name" value={account.name} onChange={(value) => setAccount({ ...account, name: value })} />
-            <Field label="Email" value={account.email} onChange={(value) => setAccount({ ...account, email: value })} />
-            <Field label="Role" value={account.role} onChange={(value) => setAccount({ ...account, role: value })} />
-            <Field label="Assigned Shift" value={account.shift} onChange={(value) => setAccount({ ...account, shift: value })} />
-          </div>
-        </Modal>
-      )}
       <div style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 12, height: "100%", minHeight: 0, overflow: "hidden" }}>
         <header style={{ ...cardStyle, padding: 14, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "end", flexWrap: "wrap", minWidth: 0 }}>
           <div style={{ minWidth: 0 }}>
@@ -89,16 +59,6 @@ export default function SettingsPage({ miners, thresholds, setThresholds, pollin
 
         <main style={settingsGrid}>
           <div style={settingsColumn}>
-            <Section title="Account Settings" sub="Supervisor identity shown in audit labels">
-              <div style={{ display: "grid", gap: 6 }}>
-                <DefaultRow label="Name" value={account.name} />
-                <DefaultRow label="Email" value={account.email} />
-                <DefaultRow label="Role" value={account.role} />
-                <DefaultRow label="Shift" value={account.shift} />
-                <button onClick={() => setAccountOpen(true)} style={{ ...ghostButtonStyle, padding: "8px 12px", color: C.primary, fontSize: 12, fontWeight: 900, width: "fit-content", marginTop: 3 }}>Edit Account</button>
-              </div>
-            </Section>
-
             <Section title="System Summary" sub="Current operational view" compact>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
                 <SummaryBox label="Registered" value={miners.length} color={C.primary} />
@@ -123,7 +83,7 @@ export default function SettingsPage({ miners, thresholds, setThresholds, pollin
             <Section title="Monitoring Preferences" sub="Telemetry refresh and retention">
               <div style={compactGrid}>
                 <Field type="number" label="Polling" value={localInterval} onChange={(value) => setLocalInterval(Number(value))} />
-                <Field type="number" label="Stale Window" value={preferences.staleSeconds} onChange={(value) => setPreferences({ ...preferences, staleSeconds: Number(value) })} />
+                <Field type="number" label="Offline Window" value={preferences.staleSeconds} onChange={(value) => setPreferences({ ...preferences, staleSeconds: Number(value) })} />
                 <Field type="number" label="Retention Days" value={preferences.retainDays} onChange={(value) => setPreferences({ ...preferences, retainDays: Number(value) })} />
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 12 }}>
@@ -139,7 +99,7 @@ export default function SettingsPage({ miners, thresholds, setThresholds, pollin
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
                 <RouteItem title="Manual Alert" text="Critical banner until reviewed." color={C.red} />
                 <RouteItem title="No Chest Contact" text="Readings marked invalid." color={C.amber} />
-                <RouteItem title="Offline Device" text="Stale telemetry moves offline." color={C.offline} />
+                <RouteItem title="Offline Device" text="Old telemetry is labeled offline." color={C.offline} />
                 <RouteItem title="Normal Readings" text="Green indicators inside range." color={C.green} />
               </div>
             </Section>

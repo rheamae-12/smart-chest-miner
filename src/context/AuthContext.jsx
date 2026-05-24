@@ -129,7 +129,7 @@ export function AuthProvider({ children }) {
       return false;
     }
 
-    if (normalizedEmail === demoUser.email && password === "admin123") {
+    if (!firebaseConfigured && normalizedEmail === demoUser.email && password === "admin123") {
       clearLoginGuard();
       setUser(demoUser);
       localStorage.setItem(SESSION_KEY, JSON.stringify(demoUser));
@@ -168,7 +168,7 @@ export function AuthProvider({ children }) {
     }
 
     registerFailedLogin();
-    setAuthError("Invalid credentials. Demo: admin@smartchestminer.io / admin123");
+    setAuthError(firebaseConfigured ? "Invalid Firebase credentials." : "Invalid credentials. Demo: admin@smartchestminer.io / admin123");
     return false;
   };
 

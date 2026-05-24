@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import AlertBanner from "../components/AlertBanner";
 import StatCard from "../components/StatCard";
@@ -7,20 +7,30 @@ import { C, cardStyle, pageStyle } from "../theme";
 import { buildAlerts, getVitalStatus } from "../utils/alertChecker";
 import { average, formatLastSeen, formatReading } from "../utils/formatters";
 
-export default function DashboardPage({ miners, liveData, thresholds }) {
-  const [selected, setSelected] = useState(miners[0]?.id || "");
-  const selectedId = miners.some((item) => item.id === selected) ? selected : miners[0]?.id;
-  const miner = miners.find((item) => item.id === selectedId) || miners[0];
+export default function DashboardPage({ miners, liveData, thresholds, dismissedAlertIds = [], onDismissAlerts }) {
+  const sortedMiners = useMemo(() => [...miners].sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)), [miners]);
+  const defaultMinerId = sortedMiners.find((item) => item.active)?.id || sortedMiners[0]?.id || "";
+  const [selected, setSelected] = useState(defaultMinerId);
+  const userSelectedRef = useRef(false);
+  const selectedId = miners.some((item) => item.id === selected) ? selected : defaultMinerId;
+  const miner = miners.find((item) => item.id === selectedId) || sortedMiners[0];
   const activeMiners = miners.filter((item) => item.active);
   const alerts = buildAlerts(miners, thresholds);
   const chartData = useMemo(() => mergeLiveSeries(liveData[miner?.id] || { hr: [], spo2: [] }), [liveData, miner?.id]);
   const activeVital = Boolean(miner?.active && miner.finger !== false);
   const contactCount = miners.filter((item) => item.active && item.finger !== false).length;
 
+  useEffect(() => {
+    if (!userSelectedRef.current || !miners.some((item) => item.id === selected)) {
+      setSelected(defaultMinerId);
+      userSelectedRef.current = false;
+    }
+  }, [defaultMinerId, miners, selected]);
+
   return (
     <div style={pageStyle}>
       <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(420px, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
-        <AlertBanner miners={miners} thresholds={thresholds} />
+        <AlertBanner miners={miners} thresholds={thresholds} dismissedAlertIds={dismissedAlertIds} onDismissAlerts={onDismissAlerts} />
 
         <section style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
           <StatCard label="Active Miners" value={activeMiners.length} unit={`/${miners.length}`} color={activeMiners.length ? C.green : C.offline} sub={`${contactCount} with chest contact`} />
@@ -90,18 +100,25 @@ export default function DashboardPage({ miners, liveData, thresholds }) {
               <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4 }}>{miner?.id || "--"} / {miner?.location || "Unassigned"}</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 14 }}>
                 <MiniMetric label="Status" value={miner?.active ? "Online" : "Offline"} color={miner?.active ? C.green : C.offline} />
-                <MiniMetric label="Signal" value={miner?.stale ? "Stale" : miner?.active ? "Fresh" : "None"} color={miner?.stale ? C.amber : miner?.active ? C.green : C.offline} />
+                <MiniMetric label="Signal" value={miner?.active ? "Fresh" : "Offline"} color={miner?.active ? C.green : C.offline} />
               </div>
             </section>
 
             <section style={{ minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 900 }}>Miner stream</div>
-                <span style={{ color: C.textMuted, fontSize: 11 }}>{miners.length} devices</span>
+                <span style={{ color: C.textMuted, fontSize: 11 }}>{sortedMiners.length} devices</span>
               </div>
               <div className="hide-scrollbar" style={{ display: "grid", gap: 8, overflow: "auto", minHeight: 0, alignContent: "start" }}>
-                {miners.map((item) => (
-                  <button key={item.id} onClick={() => setSelected(item.id)} style={{ ...cardStyle, padding: 11, textAlign: "left", cursor: "pointer", borderColor: selectedId === item.id ? C.primary : C.border, background: selectedId === item.id ? "rgba(255,106,0,0.08)" : cardStyle.background }}>
+                {sortedMiners.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      userSelectedRef.current = true;
+                      setSelected(item.id);
+                    }}
+                    style={{ ...cardStyle, padding: 11, textAlign: "left", cursor: "pointer", borderColor: selectedId === item.id ? C.primary : C.border, background: selectedId === item.id ? "rgba(255,106,0,0.08)" : cardStyle.background }}
+                  >
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ color: C.text, fontSize: 12, fontWeight: 900 }}>{item.name}</div>
@@ -144,6 +161,10 @@ function mergeLiveSeries(series) {
     });
   }
   return rows.slice(-30);
+}
+
+function lastSeenValue(miner) {
+  return miner.lastSeen?.getTime?.() || Number(miner.lastSeen) || 0;
 }
 
 function EmptyState({ title, text }) {

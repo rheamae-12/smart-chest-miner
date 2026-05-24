@@ -1,14 +1,14 @@
 export const C = {
-  bg0: "#111111",
-  bg1: "#181818",
-  bg2: "#1B1B1B",
-  bg3: "#202020",
-  bg4: "#0C0C0C",
-  panel: "#1B1B1B",
-  sidebar: "#141414",
-  navbar: "#181818",
-  border: "#2A2A2A",
-  borderSoft: "rgba(255, 255, 255, 0.08)",
+  bg0: "#0D0F10",
+  bg1: "#121416",
+  bg2: "#17191C",
+  bg3: "#1E2125",
+  bg4: "#090A0B",
+  panel: "#17191C",
+  sidebar: "#111315",
+  navbar: "rgba(18, 20, 22, 0.94)",
+  border: "#2B3036",
+  borderSoft: "rgba(226, 232, 240, 0.08)",
   primary: "#FF6A00",
   primaryHover: "#FF8C1A",
   orange: "#FF6A00",
@@ -22,11 +22,11 @@ export const C = {
   green: "#22C55E",
   lime: "#22C55E",
   offline: "#6B7280",
-  text: "#FFFFFF",
-  textMuted: "#B0B0B0",
-  textDim: "#E5E5E5",
-  shadow: "0 18px 50px rgba(0, 0, 0, 0.38)",
-  primaryGradient: "#FF6A00",
+  text: "#F8FAFC",
+  textMuted: "#94A3B8",
+  textDim: "#CBD5E1",
+  shadow: "0 22px 70px rgba(0, 0, 0, 0.44)",
+  primaryGradient: "linear-gradient(180deg, #FF8A1D 0%, #FF5A00 100%)",
 };
 
 export const pageLabels = {
@@ -40,15 +40,16 @@ export const pageLabels = {
 };
 
 export const cardStyle = {
-  background: "#171717",
+  background: "linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.018))",
   border: `1px solid ${C.border}`,
-  borderRadius: 7,
-  boxShadow: "0 16px 34px rgba(0, 0, 0, 0.24)",
+  borderRadius: 10,
+  boxShadow: "0 18px 42px rgba(0, 0, 0, 0.22)",
+  transition: "border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease",
 };
 
 export const pageStyle = {
-  padding: "16px 20px",
-  overflow: "hidden",
+  padding: "18px 20px",
+  overflow: "auto",
   height: "100%",
   boxSizing: "border-box",
 };
@@ -56,29 +57,31 @@ export const pageStyle = {
 export const controlStyle = {
   background: C.bg3,
   border: `1px solid ${C.border}`,
-  borderRadius: 7,
+  borderRadius: 8,
   color: C.text,
-  padding: "9px 12px",
+  padding: "10px 12px",
   fontSize: 13,
   boxSizing: "border-box",
   outline: "none",
+  transition: "border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease",
 };
 
 export const primaryButtonStyle = {
   border: "none",
-  borderRadius: 7,
-  background: C.primary,
+  borderRadius: 8,
+  background: C.primaryGradient,
   color: C.text,
-  fontWeight: 800,
+  fontWeight: 900,
   cursor: "pointer",
-  transition: "background 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease",
+  boxShadow: "0 10px 22px rgba(255, 106, 0, 0.18)",
+  transition: "background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease",
 };
 
 export const ghostButtonStyle = {
   border: `1px solid ${C.border}`,
-  borderRadius: 7,
-  background: "rgba(255, 255, 255, 0.03)",
+  borderRadius: 8,
+  background: "rgba(255, 255, 255, 0.04)",
   color: C.textDim,
   cursor: "pointer",
-  transition: "border-color 0.16s ease, color 0.16s ease, background 0.16s ease, transform 0.16s ease",
+  transition: "border-color 0.18s ease, color 0.18s ease, background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease",
 };

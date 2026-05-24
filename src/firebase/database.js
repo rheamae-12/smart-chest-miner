@@ -1,4 +1,4 @@
-import { onValue, push, ref, serverTimestamp, set, update } from "firebase/database";
+import { onValue, push, ref, remove, serverTimestamp, set, update } from "firebase/database";
 import { db, firebaseDatabaseSecret, firebaseDatabaseUrl } from "./config";
 
 function noopSubscribe(onError) {
@@ -105,6 +105,15 @@ export function subscribeToWifiConfigurations(onData, onError) {
   );
 }
 
+export function subscribeToWifiConnectionHistory(onData, onError) {
+  if (!db) return pollFirebasePath("wifiConnectionHistory", onData, onError, 3000);
+  return onValue(
+    ref(db, "wifiConnectionHistory"),
+    (snapshot) => onData(snapshot.val() || {}),
+    (error) => onError?.(error.message),
+  );
+}
+
 function firebaseRestUrl(path) {
   if (!firebaseDatabaseUrl || !firebaseDatabaseSecret) return "";
   if (firebaseDatabaseSecret.includes("YOUR_")) return "";
@@ -170,6 +179,28 @@ async function writeFirebasePath(path, method, payload) {
   return true;
 }
 
+async function writeWithSdkFallback(sdkWrite, path, method, payload) {
+  if (!db) return writeFirebasePath(path, method, payload);
+
+  try {
+    await sdkWrite();
+    return true;
+  } catch (error) {
+    const savedWithRest = await writeFirebasePath(path, method, payload);
+    if (savedWithRest) return true;
+    throw error;
+  }
+}
+
+async function updateMultiPath(updates) {
+  return writeWithSdkFallback(
+    () => update(ref(db), updates),
+    "",
+    "PATCH",
+    updates,
+  );
+}
+
 export async function trimAnalyticsHistory(deviceId, keepCount = 120) {
   const url = firebaseRestUrl(`analytics/${deviceId}`);
   if (!url) return false;
@@ -195,6 +226,7 @@ export async function trimAnalyticsHistory(deviceId, keepCount = 120) {
 }
 
 export async function registerDevice(device) {
+  const timestamp = Date.now();
   const payload = {
     name: device.name,
     location: device.location,
@@ -202,26 +234,35 @@ export async function registerDevice(device) {
     deletedAt: null,
     active: device.active ?? false,
     status: device.status || (device.active ? "online" : "offline"),
+    registeredAt: timestamp,
     lastSeen: Number(device.lastSeen) || 0,
     live: {
       heartRate: device.hr || 0,
+      hr: device.hr || 0,
       spo2: device.spo2 || 0,
+      status: device.status || "offline",
       timestamp: Number(device.lastSeen) || 0,
       finger: device.finger ?? false,
       manual_alert: device.manual_alert ?? false,
+      sim_mode: false,
     },
   };
 
-  if (!db) return writeFirebasePath(`devices/${device.id}`, "PUT", payload);
-
-  await set(ref(db, `devices/${device.id}`), payload);
-  return true;
+  return writeWithSdkFallback(
+    () => set(ref(db, `devices/${device.id}`), payload),
+    `devices/${device.id}`,
+    "PUT",
+    payload,
+  );
 }
 
 export async function updateDevice(deviceId, patch) {
-  if (!db) return writeFirebasePath(`devices/${deviceId}`, "PATCH", patch);
-  await update(ref(db, `devices/${deviceId}`), patch);
-  return true;
+  return writeWithSdkFallback(
+    () => update(ref(db, `devices/${deviceId}`), patch),
+    `devices/${deviceId}`,
+    "PATCH",
+    patch,
+  );
 }
 
 export async function updateDeviceStatus(deviceId, status, lastSeen = Date.now()) {
@@ -254,9 +295,12 @@ export async function updateDeviceStatus(deviceId, status, lastSeen = Date.now()
     });
   }
 
-  if (!db) return writeFirebasePath(`devices/${deviceId}`, "PATCH", patch);
-  await update(ref(db, `devices/${deviceId}`), patch);
-  return true;
+  return writeWithSdkFallback(
+    () => update(ref(db, `devices/${deviceId}`), patch),
+    `devices/${deviceId}`,
+    "PATCH",
+    patch,
+  );
 }
 
 export async function removeDevice(deviceId) {
@@ -279,9 +323,12 @@ export async function removeDevice(deviceId) {
     },
   };
 
-  if (!db) return writeFirebasePath(`devices/${deviceId}`, "PATCH", patch);
-  await update(ref(db, `devices/${deviceId}`), patch);
-  return true;
+  return writeWithSdkFallback(
+    () => update(ref(db, `devices/${deviceId}`), patch),
+    `devices/${deviceId}`,
+    "PATCH",
+    patch,
+  );
 }
 
 export async function writeActivityLog(event) {
@@ -300,11 +347,31 @@ export async function writeActivityLog(event) {
   if (!db) return writeFirebasePath("activityLogs", "POST", payload);
 
   const row = push(ref(db, "activityLogs"));
-  await set(row, { ...payload, createdAt: serverTimestamp() });
-  return true;
+  return writeWithSdkFallback(
+    () => set(row, { ...payload, createdAt: serverTimestamp() }),
+    "activityLogs",
+    "POST",
+    payload,
+  );
 }
 
-export async function saveWifiConfiguration(deviceId, config) {
+export async function clearActivityLogs() {
+  return writeWithSdkFallback(
+    () => remove(ref(db, "activityLogs")),
+    "activityLogs",
+    "DELETE",
+  );
+}
+
+export async function clearHealthLogs() {
+  return updateMultiPath({
+    analytics: null,
+  });
+}
+
+export async function saveWifiConfiguration(deviceId, config, recordId = "") {
+  const timestamp = Date.now();
+  const id = recordId || `${deviceId}-${timestamp}`;
   const payload = {
     deviceId,
     ssid: config.ssid || "",
@@ -312,12 +379,27 @@ export async function saveWifiConfiguration(deviceId, config) {
     security: config.security || "WPA2",
     applyOnNextBoot: config.applyOnNextBoot ?? true,
     status: "pending",
-    updatedAt: Date.now(),
+    createdAt: Number(config.createdAt) || timestamp,
+    updatedAt: timestamp,
+    sourceRecordId: id,
   };
 
-  if (!db) return writeFirebasePath(`wifiConfigurations/${deviceId}`, "PUT", payload);
-  await set(ref(db, `wifiConfigurations/${deviceId}`), payload);
-  return true;
+  return updateMultiPath({
+    [`wifiConfigurations/${deviceId}`]: payload,
+    [`wifiConnectionHistory/${id}`]: { ...payload, id },
+  });
+}
+
+export async function removeWifiConnection(record, removeDeviceQueue = false) {
+  const updates = {
+    [`wifiConnectionHistory/${record.id}`]: null,
+  };
+
+  if (removeDeviceQueue) {
+    updates[`wifiConfigurations/${record.deviceId}`] = null;
+  }
+
+  return updateMultiPath(updates);
 }
 
 export async function writeAnalyticsSnapshot(deviceId, avgHR, avgSpo2) {

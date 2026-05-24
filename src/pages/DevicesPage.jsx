@@ -18,11 +18,13 @@ export default function DevicesPage({ miners, setMiners }) {
 
   const filtered = useMemo(
     () =>
-      miners.filter((miner) => {
-        const matchText = `${miner.name} ${miner.id} ${miner.location}`.toLowerCase().includes(search.toLowerCase());
-        const matchStatus = status === "all" || (status === "online" && miner.active) || (status === "offline" && !miner.active) || (status === "attention" && (miner.stale || miner.manual_alert || miner.finger === false));
-        return matchText && matchStatus;
-      }),
+      miners
+        .filter((miner) => {
+          const matchText = `${miner.name} ${miner.id} ${miner.location}`.toLowerCase().includes(search.toLowerCase());
+          const matchStatus = status === "all" || (status === "online" && miner.active) || (status === "offline" && !miner.active) || (status === "attention" && (miner.stale || miner.manual_alert || miner.finger === false));
+          return matchText && matchStatus;
+        })
+        .sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)),
     [miners, search, status],
   );
 
@@ -83,8 +85,19 @@ export default function DevicesPage({ miners, setMiners }) {
         finger: false,
         manual_alert: false,
       };
-      setMiners((prev) => [...prev, newDevice].sort((a, b) => a.id.localeCompare(b.id)));
-      setNotice(await persist(() => registerDevice(newDevice), "Device registered locally. Firebase write was not available."));
+      try {
+        await registerDevice(newDevice);
+      } catch (error) {
+        setMessage(`Firebase registration failed: ${error.message || "Check database rules and connection."}`);
+        return;
+      }
+
+      setNotice("Device registered in Firebase.");
+      setMiners((prev) => {
+        const existing = prev.some((miner) => miner.id === newDevice.id);
+        const nextMiners = existing ? prev.map((miner) => (miner.id === newDevice.id ? { ...miner, ...newDevice } : miner)) : [...prev, newDevice];
+        return nextMiners.sort((a, b) => a.id.localeCompare(b.id));
+      });
       await persist(
         () =>
           writeActivityLog({
@@ -99,8 +112,15 @@ export default function DevicesPage({ miners, setMiners }) {
         "",
       );
     } else {
+      try {
+        await updateDevice(form.id, { name: next.name, location: next.location });
+      } catch (error) {
+        setMessage(`Firebase update failed: ${error.message || "Check database rules and connection."}`);
+        return;
+      }
+
+      setNotice("Device updated in Firebase.");
       setMiners((prev) => prev.map((miner) => (miner.id === form.id ? { ...miner, name: next.name, location: next.location } : miner)));
-      setNotice(await persist(() => updateDevice(form.id, { name: next.name, location: next.location }), "Device updated locally. Firebase write was not available."));
       await persist(
         () =>
           writeActivityLog({
@@ -137,8 +157,15 @@ export default function DevicesPage({ miners, setMiners }) {
   };
 
   const deleteDevice = async () => {
+    try {
+      await removeDevice(form.id);
+    } catch (error) {
+      setMessage(`Firebase removal failed: ${error.message || "Check database rules and connection."}`);
+      return;
+    }
+
     setMiners((prev) => prev.filter((miner) => miner.id !== form.id));
-    setNotice(await persist(() => removeDevice(form.id), "Device removed locally. Firebase write was not available."));
+    setNotice("Device removed from Firebase.");
     await persist(
       () =>
         writeActivityLog({
@@ -259,7 +286,7 @@ export default function DevicesPage({ miners, setMiners }) {
                     <StatePill label={miner.finger === false ? "No contact" : miner.active ? "Contact normal" : "No signal"} color={miner.finger === false ? C.amber : miner.active ? C.green : C.offline} />
                     <StatePill label={miner.manual_alert ? "Manual alert" : "Alert clear"} color={miner.manual_alert ? C.red : C.green} />
                   </div>
-                  <span style={{ color: miner.stale ? C.amber : C.textMuted }}>{miner.stale ? "Stale signal" : formatLastSeen(miner.lastSeen)}</span>
+                  <LastSeenCell miner={miner} />
                   <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     <Button compact onClick={() => openEdit(miner)}>Edit</Button>
                     <Button compact danger onClick={() => confirmRemove(miner)}>Delete</Button>
@@ -346,6 +373,21 @@ function RegistryMetric({ label, value, color }) {
 
 function StatePill({ label, color }) {
   return <span style={{ color, border: `1px solid ${color}55`, background: `${color}14`, borderRadius: 999, padding: "3px 7px", fontSize: 10, fontWeight: 900, width: "fit-content" }}>{label}</span>;
+}
+
+function LastSeenCell({ miner }) {
+  const label = miner.active && !miner.stale ? "Online" : "Offline";
+  const color = miner.active && !miner.stale ? C.green : C.offline;
+  return (
+    <div style={{ display: "grid", gap: 4 }}>
+      <span style={{ color, fontWeight: 900 }}>{label}</span>
+      <span style={{ color: C.textMuted, fontSize: 10 }}>{formatLastSeen(miner.lastSeen)}</span>
+    </div>
+  );
+}
+
+function lastSeenValue(miner) {
+  return miner.lastSeen?.getTime?.() || Number(miner.lastSeen) || 0;
 }
 
 const tableHeader = {

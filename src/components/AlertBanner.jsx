@@ -1,13 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { C, cardStyle } from "../theme";
 import { buildAlerts } from "../utils/alertChecker";
 
-export default function AlertBanner({ miners, thresholds }) {
-  const [dismissed, setDismissed] = useState([]);
+export default function AlertBanner({ miners, thresholds, dismissedAlertIds = [], onDismissAlerts }) {
   const allAlerts = useMemo(() => buildAlerts(miners, thresholds), [miners, thresholds]);
   const alerts = useMemo(
-    () => allAlerts.filter((alert) => !dismissed.includes(alert.id)),
-    [allAlerts, dismissed],
+    () => allAlerts.filter((alert) => !dismissedAlertIds.includes(alert.id)),
+    [allAlerts, dismissedAlertIds],
   );
   const hasAlerts = alerts.length > 0;
   const hasDismissedAlerts = !hasAlerts && allAlerts.length > 0;
@@ -35,7 +34,7 @@ export default function AlertBanner({ miners, thresholds }) {
         <div style={{ color: C.textMuted, fontSize: 11 }}>{hasAlerts ? `${alerts.length} active condition${alerts.length === 1 ? "" : "s"}` : hasDismissedAlerts ? `${allAlerts.length} hidden condition${allAlerts.length === 1 ? "" : "s"}` : "No active banner conditions"}</div>
         {hasAlerts && (
           <button
-            onClick={() => setDismissed(alerts.map((alert) => alert.id))}
+            onClick={() => onDismissAlerts?.(alerts.map((alert) => alert.id))}
             style={{ marginLeft: "auto", border: `1px solid ${C.border}`, borderRadius: 6, background: "rgba(255,255,255,0.03)", color: C.textMuted, cursor: "pointer", fontSize: 11, padding: "5px 8px" }}
           >
             Dismiss all
@@ -47,7 +46,7 @@ export default function AlertBanner({ miners, thresholds }) {
           alerts.map((alert) => (
             <button
               key={alert.id}
-              onClick={() => setDismissed((items) => [...items, alert.id])}
+              onClick={() => onDismissAlerts?.([alert.id])}
               style={{
                 fontSize: 11,
                 color: alert.severity === "critical" ? C.red : C.amber,

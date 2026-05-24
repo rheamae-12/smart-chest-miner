@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MINERS_INIT } from "../data/mockMiners";
 import { firebaseConfigured } from "../firebase/config";
-import { subscribeToActivityLogs, subscribeToAllAnalytics, subscribeToDevices, trimAnalyticsHistory, updateDeviceStatus, writeActivityLog } from "../firebase/database";
+import { clearActivityLogs as clearActivityLogsRemote, clearHealthLogs as clearHealthLogsRemote, subscribeToActivityLogs, subscribeToAllAnalytics, subscribeToDevices, trimAnalyticsHistory, updateDeviceStatus, writeActivityLog } from "../firebase/database";
 import { DEFAULT_THRESHOLDS, getVitalStatus } from "../utils/alertChecker";
 import { formatSystemTimestamp, timeLabel } from "../utils/formatters";
 
@@ -17,6 +17,7 @@ function readStoredSystem() {
     const stored = JSON.parse(localStorage.getItem(SYSTEM_STORAGE_KEY));
     if (!stored) return null;
     return {
+      miners: Array.isArray(stored.miners) ? stored.miners : null,
       thresholds: stored.thresholds,
       pollingInterval: stored.pollingInterval,
     };
@@ -265,7 +266,7 @@ function buildVitalLogs(miner, thresholds) {
 
 export function useSimulatedMinerSystem(enabled) {
   const stored = readStoredSystem();
-  const [miners, rawSetMiners] = useState(MINERS_INIT);
+  const [miners, rawSetMiners] = useState(() => (firebaseConfigured ? [] : stored?.miners || MINERS_INIT));
   const [liveData, setLiveData] = useState(initialLiveData);
   const [analyticsData, setAnalyticsData] = useState(initialAnalyticsData);
   const [activityLogs, setActivityLogs] = useState([]);
@@ -355,7 +356,8 @@ export function useSimulatedMinerSystem(enabled) {
           const rawActive = toBoolean(raw.active, false);
           const lastSeen = miner.lastSeen?.getTime?.() || raw.lastSeen || Date.now();
 
-          if (rawStatus !== expectedStatus || rawLiveStatus !== expectedStatus || rawActive !== miner.active) {
+          const liveStatusNeedsSync = rawLiveStatus === "online" || rawLiveStatus === "offline";
+          if (rawStatus !== expectedStatus || rawActive !== miner.active || (liveStatusNeedsSync && rawLiveStatus !== expectedStatus)) {
             updateDeviceStatus(miner.id, expectedStatus, lastSeen).catch(() => {});
           }
 
@@ -500,5 +502,14 @@ export function useSimulatedMinerSystem(enabled) {
     setPollingInterval,
     usingRealtime,
     connectionError,
+    clearActivityLogs: async () => {
+      await clearActivityLogsRemote();
+      setActivityLogs([]);
+    },
+    clearHealthLogs: async () => {
+      await clearHealthLogsRemote();
+      setAnalyticsData({});
+      setLiveData({});
+    },
   };
 }

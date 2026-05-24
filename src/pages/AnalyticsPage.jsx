@@ -5,7 +5,8 @@ import { average, formatLastSeen, formatReading, formatSystemTimestamp } from ".
 
 export default function AnalyticsPage({ miners, analyticsData }) {
   const [filter, setFilter] = useState({ miner: "all", range: "24H", bucket: "1" });
-  const visibleMiners = filter.miner === "all" ? miners : miners.filter((miner) => miner.id === filter.miner);
+  const sortedMiners = useMemo(() => [...miners].sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)), [miners]);
+  const visibleMiners = filter.miner === "all" ? sortedMiners : sortedMiners.filter((miner) => miner.id === filter.miner);
   const rows = useMemo(() => buildRows(visibleMiners, analyticsData, filter.range), [analyticsData, filter.range, visibleMiners]);
   const chartData = useMemo(() => bucketRows(rows, Number(filter.bucket)), [filter.bucket, rows]);
   const logs = useMemo(() => buildDeviceLogs(miners), [miners]);
@@ -22,7 +23,7 @@ export default function AnalyticsPage({ miners, analyticsData }) {
           <div style={{ display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap", justifyContent: "flex-end" }}>
             <Select label="Miner" value={filter.miner} onChange={(miner) => setFilter({ ...filter, miner })}>
               <option value="all">All miners</option>
-              {miners.map((miner) => (
+              {sortedMiners.map((miner) => (
                 <option key={miner.id} value={miner.id}>{miner.name} ({miner.id})</option>
               ))}
             </Select>
@@ -165,14 +166,20 @@ function getRangeStart(range) {
 }
 
 function buildDeviceLogs(miners) {
-  return miners.map((miner) => ({
-    id: miner.id,
-    name: miner.name,
-    status: miner.active ? "Online" : miner.stale ? "Stale" : "Offline",
-    color: miner.active ? C.green : miner.stale ? C.amber : C.offline,
-    detail: miner.active ? "Receiving fresh HR and SpO2 telemetry." : miner.stale ? "Last telemetry is outside the fresh signal window." : "No live readings are currently available.",
-    time: formatLastSeen(miner.lastSeen),
-  }));
+  return [...miners]
+    .sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id))
+    .map((miner) => ({
+      id: miner.id,
+      name: miner.name,
+      status: miner.active ? "Online" : "Offline",
+      color: miner.active ? C.green : C.offline,
+      detail: miner.active ? "Receiving fresh HR and SpO2 telemetry." : "No live readings are currently available.",
+      time: formatLastSeen(miner.lastSeen),
+    }));
+}
+
+function lastSeenValue(miner) {
+  return miner.lastSeen?.getTime?.() || Number(miner.lastSeen) || 0;
 }
 
 function Select({ label, value, onChange, children }) {

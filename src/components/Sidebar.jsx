@@ -18,10 +18,11 @@ export default function Sidebar() {
 
   return (
     <aside
+      className="app-sidebar"
       style={{
         width: collapsed ? 64 : 172,
         minHeight: "100vh",
-        background: C.sidebar,
+        background: "linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012)), " + C.sidebar,
         borderRight: `1px solid ${C.border}`,
         display: "flex",
         flexDirection: "column",
@@ -40,7 +41,7 @@ export default function Sidebar() {
         )}
       </div>
 
-      <nav style={{ flex: 1, padding: "14px 9px" }}>
+      <nav style={{ flex: 1, padding: "14px 9px", overflow: "auto" }}>
         {nav.map((item) => (
           <NavLink
             key={item.to}
@@ -52,20 +53,20 @@ export default function Sidebar() {
               gap: 11,
               minHeight: 38,
               padding: collapsed ? "0 8px" : "0 11px",
-              borderRadius: 8,
+              borderRadius: 10,
               marginBottom: 5,
               textDecoration: "none",
-              background: isActive ? "rgba(255,106,0,0.14)" : "transparent",
+              background: isActive ? "linear-gradient(90deg, rgba(255,106,0,0.18), rgba(255,106,0,0.06))" : "transparent",
               color: isActive ? C.text : C.textMuted,
               border: `1px solid ${isActive ? "rgba(255,106,0,0.4)" : "transparent"}`,
-              boxShadow: isActive ? "inset 3px 0 0 #FF6A00" : "none",
+              boxShadow: isActive ? "inset 3px 0 0 #FF6A00, 0 10px 20px rgba(255,106,0,0.08)" : "none",
             })}
           >
             <span
               style={{
                 width: 28,
                 height: 28,
-                borderRadius: 7,
+                borderRadius: 9,
                 display: "grid",
                 placeItems: "center",
                 background: "rgba(255,255,255,0.04)",
@@ -81,11 +82,11 @@ export default function Sidebar() {
       </nav>
 
       {!collapsed && (
-        <div style={{ margin: "0 12px 12px", padding: 12, borderRadius: 8, border: `1px solid ${C.border}`, background: "rgba(255,106,0,0.06)" }}>
+        <div style={{ margin: "0 12px 12px", padding: 12, borderRadius: 10, border: `1px solid rgba(255,106,0,0.24)`, background: "linear-gradient(180deg, rgba(255,106,0,0.10), rgba(255,255,255,0.025))" }}>
           <div style={{ fontSize: 11, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.08em" }}>Safety Mode</div>
           <div style={{ fontSize: 13, color: C.text, fontWeight: 800, marginTop: 5 }}>System Health</div>
           <div style={{ height: 4, borderRadius: 999, background: C.border, marginTop: 10, overflow: "hidden" }}>
-            <div style={{ width: "82%", height: "100%", background: C.primary }} />
+            <div style={{ width: "82%", height: "100%", background: C.primaryGradient }} />
           </div>
         </div>
       )}

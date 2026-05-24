@@ -1,13 +1,56 @@
-import { C, cardStyle, pageStyle } from "../theme";
+import { useMemo, useState } from "react";
+import Modal from "../components/Modal";
+import { C, cardStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
 import { formatLastSeen, formatReading, formatSystemTimestamp } from "../utils/formatters";
 
-export default function SensorStatusPage({ miners, activityLogs = [] }) {
+export default function SensorStatusPage({ miners, activityLogs = [], onClearActivityLogs }) {
+  const [clearLogsOpen, setClearLogsOpen] = useState(false);
+  const [clearLogsError, setClearLogsError] = useState("");
+  const [clearingLogs, setClearingLogs] = useState(false);
   const active = miners.filter((miner) => miner.active).length;
+  const sortedMiners = useMemo(() => [...miners].sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)), [miners]);
   const sensorWarnings = miners.filter((miner) => miner.finger === false || miner.stale || !miner.active).length;
-  const events = activityLogs.length ? activityLogs.map(mapStoredEvent) : buildEvents(miners);
+  const events = activityLogs.map(mapStoredEvent).sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+
+  const confirmClearLogs = async () => {
+    setClearingLogs(true);
+    setClearLogsError("");
+
+    try {
+      await onClearActivityLogs?.();
+      setClearLogsOpen(false);
+    } catch (error) {
+      setClearLogsError(error.message || "Unable to clear activity logs.");
+    } finally {
+      setClearingLogs(false);
+    }
+  };
 
   return (
     <div style={pageStyle}>
+      {clearLogsOpen && (
+        <Modal
+          title="Clear Activity Logs"
+          onClose={() => {
+            if (!clearingLogs) setClearLogsOpen(false);
+          }}
+          actions={
+            <>
+              <button disabled={clearingLogs} onClick={() => setClearLogsOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 15px", opacity: clearingLogs ? 0.5 : 1 }}>
+                Cancel
+              </button>
+              <button disabled={clearingLogs} onClick={confirmClearLogs} style={{ ...primaryButtonStyle, padding: "9px 15px", opacity: clearingLogs ? 0.75 : 1 }}>
+                {clearingLogs ? "Clearing..." : "Confirm Clear"}
+              </button>
+            </>
+          }
+        >
+          <div style={{ color: C.textMuted, fontSize: 13, lineHeight: 1.55 }}>
+            Clear all miner activity records from the event log? This removes the stored log entries from Firebase.
+          </div>
+          {clearLogsError && <div style={{ color: C.amber, fontSize: 12, marginTop: 10 }}>{clearLogsError}</div>}
+        </Modal>
+      )}
       <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
         <section style={{ ...cardStyle, padding: 16, display: "flex", justifyContent: "space-between", gap: 14, alignItems: "end" }}>
           <div>
@@ -27,7 +70,7 @@ export default function SensorStatusPage({ miners, activityLogs = [] }) {
             <Indicator color={active ? C.green : C.offline} label="Live diagnostics update automatically" />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-            {miners.map((miner) => (
+            {sortedMiners.map((miner) => (
               <SensorNode key={miner.id} miner={miner} />
             ))}
           </div>
@@ -40,12 +83,28 @@ export default function SensorStatusPage({ miners, activityLogs = [] }) {
                 <div style={moduleLabel}>Network event log</div>
                 <div style={{ color: C.text, fontSize: 16, fontWeight: 950, marginTop: 4 }}>Miner Activity Records</div>
               </div>
-              <Indicator color={sensorWarnings ? C.amber : C.green} label={`${events.length} recorded events`} />
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Indicator color={sensorWarnings ? C.amber : C.green} label={`${events.length} recorded events`} />
+                <button
+                  disabled={!events.length || !onClearActivityLogs}
+                  onClick={() => {
+                    setClearLogsError("");
+                    setClearLogsOpen(true);
+                  }}
+                  style={{ ...ghostButtonStyle, padding: "8px 11px", fontSize: 11, opacity: events.length && onClearActivityLogs ? 1 : 0.5, cursor: events.length && onClearActivityLogs ? "pointer" : "not-allowed" }}
+                >
+                  Clear All Logs
+                </button>
+              </div>
             </div>
             <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
-              {events.map((event) => (
-                <EventRow key={event.id || `${event.deviceId}-${event.title}-${event.time}`} event={event} />
-              ))}
+              {events.length === 0 ? (
+                <div style={{ color: C.textMuted, fontSize: 13, padding: "18px 0", borderTop: `1px solid ${C.borderSoft}` }}>No miner activity records are stored.</div>
+              ) : (
+                events.map((event) => (
+                  <EventRow key={event.id || `${event.deviceId}-${event.title}-${event.time}`} event={event} />
+                ))
+              )}
             </div>
           </div>
 
@@ -55,12 +114,12 @@ export default function SensorStatusPage({ miners, activityLogs = [] }) {
               <Integrity label="Heart-rate sensors online" value={`${miners.filter((miner) => miner.active && miner.hr > 0).length}/${miners.length}`} color={C.red} />
               <Integrity label="SpO2 sensors online" value={`${miners.filter((miner) => miner.active && miner.spo2 > 0).length}/${miners.length}`} color={C.primary} />
               <Integrity label="Chest contact valid" value={`${miners.filter((miner) => miner.active && miner.finger !== false).length}/${miners.length}`} color={C.green} />
-              <Integrity label="Stale signals" value={miners.filter((miner) => miner.stale).length} color={miners.some((miner) => miner.stale) ? C.amber : C.green} />
+              <Integrity label="Offline signals" value={miners.filter((miner) => miner.stale).length} color={miners.some((miner) => miner.stale) ? C.offline : C.green} />
             </section>
             <section style={{ ...cardStyle, padding: 15, minHeight: 0 }}>
               <div style={moduleLabel}>Sensor notes</div>
               <div className="hide-scrollbar" style={{ display: "grid", gap: 8, marginTop: 12, overflow: "auto", maxHeight: "100%" }}>
-                {miners.map((miner) => (
+                {sortedMiners.map((miner) => (
                   <Note key={miner.id} miner={miner} />
                 ))}
               </div>
@@ -72,20 +131,6 @@ export default function SensorStatusPage({ miners, activityLogs = [] }) {
   );
 }
 
-function buildEvents(miners) {
-  return miners.flatMap((miner) => {
-    const rows = [];
-    if (!miner.active) {
-      rows.push({ deviceId: miner.id, miner: miner.name, title: "Device offline", detail: "HR and SpO2 sensor streams are not available.", color: C.offline, time: formatLastSeen(miner.lastSeen) });
-    } else {
-      rows.push({ deviceId: miner.id, miner: miner.name, title: "Device online", detail: "Fresh HR and SpO2 telemetry is being received.", color: C.green, time: formatLastSeen(miner.lastSeen) });
-    }
-    if (miner.finger === false) rows.push({ deviceId: miner.id, miner: miner.name, title: "Chest contact missing", detail: "Sensor contact is required before readings are treated as valid.", color: C.amber, time: formatLastSeen(miner.lastSeen) });
-    if (miner.manual_alert) rows.push({ deviceId: miner.id, miner: miner.name, title: "Manual alert pressed", detail: "Miner activated the hardware alert button.", color: C.red, time: formatLastSeen(miner.lastSeen) });
-    return rows;
-  });
-}
-
 function mapStoredEvent(event) {
   const color = event.severity === "critical" ? C.red : event.severity === "warning" ? C.amber : event.status === "online" ? C.green : event.status === "offline" ? C.offline : C.primary;
   return {
@@ -95,6 +140,7 @@ function mapStoredEvent(event) {
     title: event.title,
     detail: event.detail,
     color,
+    timestamp: event.timestamp,
     time: formatSystemTimestamp(event.timestamp),
   };
 }
@@ -174,6 +220,10 @@ function Integrity({ label, value, color }) {
 function Note({ miner }) {
   const text = miner.active ? "Both sensor channels are evaluated against the current fresh-signal window." : "Sensor checks will resume automatically when new telemetry arrives.";
   return <div style={{ color: C.textMuted, fontSize: 12, lineHeight: 1.45, border: `1px solid ${C.borderSoft}`, borderRadius: 7, padding: 10 }}>{miner.name}: {text}</div>;
+}
+
+function lastSeenValue(miner) {
+  return miner.lastSeen?.getTime?.() || Number(miner.lastSeen) || 0;
 }
 
 const moduleLabel = { color: C.primary, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 900 };

@@ -10,6 +10,7 @@ export default function LoginPage() {
   const [localError, setLocalError] = useState("");
   const [localMessage, setLocalMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [remember, setRemember] = useState(true);
   const { login, signUp, authError } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -53,20 +54,33 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{ height: "100vh", background: C.bg0, display: "grid", placeItems: "center", overflow: "hidden", position: "relative", padding: 24, boxSizing: "border-box" }}>
-      <div style={{ position: "absolute", inset: "20% 0 auto", height: 160, borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, opacity: 0.5 }} />
-      <div style={{ width: "min(420px, 100%)", position: "relative" }} className="soft-in">
-        <div style={{ display: "grid", placeItems: "center", marginBottom: 20 }}>
-          <Logo size={64} />
-          <div style={{ color: C.text, fontSize: 18, fontWeight: 900, marginTop: 10 }}>Smart Chest Miner</div>
-          <div style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 6 }}>Authentication Protocol</div>
-        </div>
+    <div className="login-stage" style={{ height: "100vh", background: C.bg0, display: "grid", placeItems: "center", overflow: "hidden", position: "relative", padding: 24, boxSizing: "border-box" }}>
+      <div className="login-gridline" />
+      <div className="login-orb login-orb-a" />
+      <div className="login-orb login-orb-b" />
+      <div className="login-pulse-field" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
 
-          <div style={{ ...cardStyle, padding: 26, background: "rgba(27,27,27,0.94)" }}>
-            <div style={{ marginBottom: 22 }}>
-              <div style={{ color: C.text, fontSize: 20, fontWeight: 900 }}>{mode === "login" ? "System Access" : "Request Access"}</div>
-              <div style={{ color: C.textMuted, fontSize: 12, marginTop: 6 }}>{mode === "login" ? "Supervisor credentials required for telemetry link." : "Create a supervisor profile for this browser."}</div>
+      <div style={{ width: "min(500px, 100%)", position: "relative" }} className="soft-in">
+          <div className="login-card" style={{ ...cardStyle, padding: 28, background: "linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.028)), rgba(23,25,28,0.96)", position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", top: -70, right: -60, width: 150, height: 150, borderRadius: "50%", background: "rgba(255,106,0,0.12)", filter: "blur(4px)" }} />
+            <div style={{ position: "absolute", bottom: -80, left: -70, width: 170, height: 170, borderRadius: "50%", background: "rgba(34,197,94,0.07)", filter: "blur(5px)" }} />
+            <div style={{ position: "relative" }}>
+            <div style={{ display: "grid", placeItems: "center", textAlign: "center", marginBottom: 24 }}>
+              <Logo size={58} />
+              <div style={{ color: C.text, fontSize: 18, fontWeight: 950, marginTop: 12 }}>Smart Chest Miner</div>
+              <div style={{ color: C.textMuted, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 4 }}>Secure telemetry access</div>
             </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ color: C.text, fontSize: 22, fontWeight: 900 }}>{mode === "login" ? "Welcome Back" : "Request Access"}</div>
+              <div style={{ color: C.textMuted, fontSize: 12, marginTop: 6 }}>{mode === "login" ? "Sign in to monitor miner vitals and alerts." : "Create a supervisor profile for this browser."}</div>
+            </div>
+
+            <LivePulseInline />
 
             <div style={{ display: "grid", gap: 14 }}>
               {mode === "signup" && <Field label="Full Name" value={form.name} autoComplete="name" onChange={(name) => setForm({ ...form, name })} placeholder="Juan Dela Cruz" />}
@@ -75,9 +89,15 @@ export default function LoginPage() {
             </div>
 
             {mode === "login" && (
-              <button onClick={forgotPassword} style={{ border: "none", background: "transparent", color: C.primary, cursor: "pointer", padding: "10px 0 0", fontSize: 12, fontWeight: 800 }}>
-                Forgot password?
-              </button>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginTop: 12 }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 8, color: C.textMuted, fontSize: 11, cursor: "pointer" }}>
+                  <input type="checkbox" checked={remember} onChange={() => setRemember((value) => !value)} style={{ minHeight: 0 }} />
+                  Remember me
+                </label>
+                <button onClick={forgotPassword} style={{ border: "none", background: "transparent", color: C.primary, cursor: "pointer", padding: 0, fontSize: 11, fontWeight: 800 }}>
+                  Forgot password?
+                </button>
+              </div>
             )}
 
             {(localError || authError) && <Notice tone="danger">{localError || authError}</Notice>}
@@ -87,6 +107,16 @@ export default function LoginPage() {
               {busy ? "Checking..." : mode === "login" ? "Open Dashboard" : "Create Account"}
             </button>
 
+            <div className="login-divider">
+              <span>{mode === "login" ? "or continue with" : "quick identity options"}</span>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "center", gap: 12 }}>
+              <QuickAccess label="G" color="#EA4335" />
+              <QuickAccess label="A" color="#F8FAFC" dark />
+              <QuickAccess label="F" color="#2563EB" />
+            </div>
+
             <div style={{ display: "flex", justifyContent: "center", gap: 6, color: C.textMuted, fontSize: 12, marginTop: 16 }}>
               <span>{mode === "login" ? "Don't have an account?" : "Already have an account?"}</span>
               <button onClick={switchMode} style={{ border: "none", background: "transparent", color: C.primary, cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 900 }}>
@@ -94,6 +124,9 @@ export default function LoginPage() {
               </button>
             </div>
 
+            <div style={{ color: C.textMuted, fontSize: 10, textAlign: "center", marginTop: 22 }}>Smart Chest Miner © 2026</div>
+
+            </div>
           </div>
       </div>
     </div>
@@ -128,4 +161,46 @@ function Field({ label, value, onChange, type = "text", placeholder, autoComplet
 function Notice({ tone, children }) {
   const color = tone === "good" ? C.green : C.red;
   return <div style={{ color, background: `${color}12`, border: `1px solid ${color}35`, borderRadius: 7, padding: "9px 11px", fontSize: 12, marginTop: 14 }}>{children}</div>;
+}
+
+function QuickAccess({ label, color, dark }) {
+  return (
+    <button
+      title="Prototype quick access option"
+      style={{
+        width: 42,
+        height: 42,
+        borderRadius: "50%",
+        border: `1px solid ${dark ? "rgba(248,250,252,0.28)" : `${color}55`}`,
+        background: dark ? "#111315" : `${color}18`,
+        color,
+        display: "grid",
+        placeItems: "center",
+        fontSize: 16,
+        fontWeight: 950,
+        cursor: "pointer",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function LivePulseInline() {
+  return (
+    <div className="login-inline-pulse">
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+        <div>
+          <div style={{ color: C.textMuted, fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase" }}>Live Pulse</div>
+          <div style={{ color: C.green, fontSize: 12, fontWeight: 900, marginTop: 3 }}>Telemetry standby</div>
+        </div>
+        <span className="login-live-dot" />
+      </div>
+      <div className="login-wave compact" aria-hidden="true">
+        {Array.from({ length: 24 }).map((_, index) => (
+          <span key={index} style={{ height: `${8 + Math.abs(Math.sin(index * 0.72)) * 24}px`, animationDelay: `${index * 0.045}s` }} />
+        ))}
+      </div>
+    </div>
+  );
 }
