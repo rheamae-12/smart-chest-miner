@@ -51,6 +51,18 @@ function lockoutMessage(lockedUntil) {
   return `Too many failed attempts. Try again in ${seconds} seconds.`;
 }
 
+// Returns whichever storage currently holds the session, defaulting to localStorage.
+function activeSessionStore() {
+  return sessionStorage.getItem(SESSION_KEY) ? sessionStorage : localStorage;
+}
+
+function saveSession(user, remember) {
+  const store = remember ? localStorage : sessionStorage;
+  const other = remember ? sessionStorage : localStorage;
+  store.setItem(SESSION_KEY, JSON.stringify(user));
+  other.removeItem(SESSION_KEY);
+}
+
 async function profileForFirebaseUser(firebaseUser, fallbackName) {
   let existingProfile = null;
   let profileWarning = "";
@@ -85,7 +97,7 @@ async function profileForFirebaseUser(firebaseUser, fallbackName) {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem(SESSION_KEY));
+      return JSON.parse(localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY));
     } catch {
       return null;
     }
@@ -100,7 +112,8 @@ export function AuthProvider({ children }) {
     return observeFirebaseAuth(async (firebaseUser) => {
       try {
         if (!firebaseUser) {
-          const storedSession = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+          const store = activeSessionStore();
+          const storedSession = JSON.parse(store.getItem(SESSION_KEY) || "null");
           setUser(storedSession?.source === "firebase" ? null : storedSession);
           setAuthReady(true);
           return;
@@ -108,7 +121,8 @@ export function AuthProvider({ children }) {
 
         const nextUser = await profileForFirebaseUser(firebaseUser);
         setUser(nextUser);
-        localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
+        // Preserve whichever storage the user chose at login.
+        activeSessionStore().setItem(SESSION_KEY, JSON.stringify(nextUser));
         if (nextUser.profileWarning) setAuthError(nextUser.profileWarning);
       } catch (error) {
         setAuthError(error.message);
@@ -118,7 +132,7 @@ export function AuthProvider({ children }) {
     });
   }, []);
 
-  const login = async (email, password) => {
+  const login = async (email, password, remember = true) => {
     setAuthError("");
     setAuthMessage("");
     const normalizedEmail = email.trim().toLowerCase();
@@ -132,7 +146,7 @@ export function AuthProvider({ children }) {
     if (!firebaseConfigured && normalizedEmail === demoUser.email && password === "admin123") {
       clearLoginGuard();
       setUser(demoUser);
-      localStorage.setItem(SESSION_KEY, JSON.stringify(demoUser));
+      saveSession(demoUser, remember);
       return true;
     }
 
@@ -143,7 +157,7 @@ export function AuthProvider({ children }) {
           const nextUser = await profileForFirebaseUser(firebaseUser);
           clearLoginGuard();
           setUser(nextUser);
-          localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
+          saveSession(nextUser, remember);
           if (nextUser.profileWarning) {
             setAuthError(nextUser.profileWarning);
           } else {
@@ -162,7 +176,7 @@ export function AuthProvider({ children }) {
         const nextUser = { name: localUser.name, email: localUser.email, source: "local" };
         clearLoginGuard();
         setUser(nextUser);
-        localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
+        saveSession(nextUser, remember);
         return true;
       }
     }
@@ -197,7 +211,7 @@ export function AuthProvider({ children }) {
         if (firebaseUser) {
           const nextUser = await profileForFirebaseUser(firebaseUser, cleanName);
           setUser(nextUser);
-          localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
+          saveSession(nextUser, true);
           if (nextUser.profileWarning) {
             setAuthError(nextUser.profileWarning);
           } else {
@@ -223,7 +237,7 @@ export function AuthProvider({ children }) {
     writeLocalUsers([...readLocalUsers(), newUser]);
     const nextUser = { name: newUser.name, email: newUser.email, source: "local" };
     setUser(nextUser);
-    localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
+    saveSession(nextUser, true);
     setAuthMessage("Account created successfully.");
     return true;
   };
@@ -232,7 +246,7 @@ export function AuthProvider({ children }) {
     if (!user) return;
     const nextUser = { ...user, ...patch };
     setUser(nextUser);
-    localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
+    activeSessionStore().setItem(SESSION_KEY, JSON.stringify(nextUser));
     if (user.source === "firebase" && user.uid) {
       updateUserProfile(user.uid, {
         name: nextUser.name,
@@ -249,6 +263,7 @@ export function AuthProvider({ children }) {
     await logoutFirebase();
     setUser(null);
     localStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(SESSION_KEY);
   };
 
   const value = { user, authReady, login, signUp, updateUser, logout, authError, authMessage };

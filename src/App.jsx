@@ -6,6 +6,8 @@ import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { useAuth } from "./context/useAuth";
 import { useSimulatedMinerSystem } from "./hooks/useSimulatedMinerSystem";
+import { useAlertNotifications } from "./hooks/useAlertNotifications";
+import { buildAlerts } from "./utils/alertChecker";
 import { C, ghostButtonStyle, primaryButtonStyle } from "./theme";
 
 const DISMISSED_ALERTS_STORAGE_KEY = "smart-chest-miner-dismissed-alerts";
@@ -23,6 +25,7 @@ export default function App() {
   const navigate = useNavigate();
   const system = useSimulatedMinerSystem(Boolean(user));
   const [logoutOpen, setLogoutOpen] = useState(false);
+  useAlertNotifications(user ? buildAlerts(system.miners, system.thresholds) : []);
   const [dismissedAlertIds, setDismissedAlertIds] = useState(() => readStoredStringArray(DISMISSED_ALERTS_STORAGE_KEY));
   const dismissAlerts = (ids) => {
     setDismissedAlertIds((current) => [...new Set([...current, ...ids])]);
@@ -116,7 +119,7 @@ export default function App() {
                 />
                 <Route
                   path="/analytics"
-                  element={<AnalyticsPage miners={system.miners} analyticsData={system.analyticsData} />}
+                  element={<AnalyticsPage miners={system.miners} analyticsData={system.analyticsData} activityLogs={system.activityLogs} />}
                 />
                 <Route
                   path="/devices"
@@ -141,8 +144,8 @@ export default function App() {
                       miners={system.miners}
                       thresholds={system.thresholds}
                       setThresholds={system.setThresholds}
-                      pollingInterval={system.pollingInterval}
-                      setPollingInterval={system.setPollingInterval}
+                      staleSeconds={system.staleSeconds}
+                      setStaleSeconds={system.setStaleSeconds}
                     />
                   }
                 />

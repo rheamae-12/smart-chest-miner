@@ -33,7 +33,7 @@ export default function LoginPage() {
     }
 
     setBusy(true);
-    const ok = mode === "login" ? await login(email, form.password) : await signUp({ ...form, email });
+    const ok = mode === "login" ? await login(email, form.password, remember) : await signUp({ ...form, email });
     setBusy(false);
     if (ok) {
       const loggedOut = sessionStorage.getItem("smart-chest-miner-logged-out") === "true";
@@ -72,7 +72,7 @@ export default function LoginPage() {
             <div style={{ display: "grid", placeItems: "center", textAlign: "center", marginBottom: 24 }}>
               <Logo size={58} />
               <div style={{ color: C.text, fontSize: 18, fontWeight: 950, marginTop: 12 }}>Smart Chest Miner</div>
-              <div style={{ color: C.textMuted, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 4 }}>Secure telemetry access</div>
+              <div style={{ color: C.textMuted, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 4 }}>Secure sensor access</div>
             </div>
 
             <div style={{ marginBottom: 20 }}>
@@ -106,16 +106,6 @@ export default function LoginPage() {
             <button disabled={busy} onClick={submit} style={{ ...primaryButtonStyle, width: "100%", padding: 12, marginTop: 18, fontSize: 14 }}>
               {busy ? "Checking..." : mode === "login" ? "Open Dashboard" : "Create Account"}
             </button>
-
-            <div className="login-divider">
-              <span>{mode === "login" ? "or continue with" : "quick identity options"}</span>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "center", gap: 12 }}>
-              <QuickAccess label="G" color="#EA4335" />
-              <QuickAccess label="A" color="#F8FAFC" dark />
-              <QuickAccess label="F" color="#2563EB" />
-            </div>
 
             <div style={{ display: "flex", justifyContent: "center", gap: 6, color: C.textMuted, fontSize: 12, marginTop: 16 }}>
               <span>{mode === "login" ? "Don't have an account?" : "Already have an account?"}</span>
@@ -163,36 +153,13 @@ function Notice({ tone, children }) {
   return <div style={{ color, background: `${color}12`, border: `1px solid ${color}35`, borderRadius: 7, padding: "9px 11px", fontSize: 12, marginTop: 14 }}>{children}</div>;
 }
 
-function QuickAccess({ label, color, dark }) {
-  return (
-    <button
-      title="Prototype quick access option"
-      style={{
-        width: 42,
-        height: 42,
-        borderRadius: "50%",
-        border: `1px solid ${dark ? "rgba(248,250,252,0.28)" : `${color}55`}`,
-        background: dark ? "#111315" : `${color}18`,
-        color,
-        display: "grid",
-        placeItems: "center",
-        fontSize: 16,
-        fontWeight: 950,
-        cursor: "pointer",
-      }}
-    >
-      {label}
-    </button>
-  );
-}
-
 function LivePulseInline() {
   return (
     <div className="login-inline-pulse">
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
         <div>
           <div style={{ color: C.textMuted, fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase" }}>Live Pulse</div>
-          <div style={{ color: C.green, fontSize: 12, fontWeight: 900, marginTop: 3 }}>Telemetry standby</div>
+          <div style={{ color: C.green, fontSize: 12, fontWeight: 900, marginTop: 3 }}>Sensor standby</div>
         </div>
         <span className="login-live-dot" />
       </div>

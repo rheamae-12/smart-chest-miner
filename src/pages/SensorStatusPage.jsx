@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import Modal from "../components/Modal";
-import { C, cardStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
-import { formatLastSeen, formatReading, formatSystemTimestamp } from "../utils/formatters";
+import { C, cardStyle, ghostButtonStyle, moduleLabel, pageStyle, primaryButtonStyle } from "../theme";
+import { formatLastSeen, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 
 export default function SensorStatusPage({ miners, activityLogs = [], onClearActivityLogs }) {
   const [clearLogsOpen, setClearLogsOpen] = useState(false);
@@ -10,7 +10,13 @@ export default function SensorStatusPage({ miners, activityLogs = [], onClearAct
   const active = miners.filter((miner) => miner.active).length;
   const sortedMiners = useMemo(() => [...miners].sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)), [miners]);
   const sensorWarnings = miners.filter((miner) => miner.finger === false || miner.stale || !miner.active).length;
-  const events = activityLogs.map(mapStoredEvent).sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+  const rawEvents = activityLogs.map(mapStoredEvent).sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+  const events = rawEvents.filter((event, index) => {
+    if (index === 0) return true;
+    const prev = rawEvents[index - 1];
+    const timeDiff = Math.abs(Number(event.timestamp || 0) - Number(prev.timestamp || 0));
+    return !(event.deviceId === prev.deviceId && event.title === prev.title && timeDiff < 60_000);
+  });
 
   const confirmClearLogs = async () => {
     setClearingLogs(true);
@@ -155,8 +161,9 @@ function HeaderStat({ label, value, color }) {
 }
 
 function SensorNode({ miner }) {
+  const statusColor = miner.active ? C.green : C.offline;
   return (
-    <div style={{ ...cardStyle, padding: 13 }}>
+    <div style={{ ...cardStyle, padding: 13, borderLeft: `3px solid ${statusColor}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
         <div>
           <div style={{ color: C.text, fontSize: 14, fontWeight: 950 }}>{miner.name}</div>
@@ -188,7 +195,7 @@ function SensorMetric({ label, value, color, state }) {
 
 function EventRow({ event }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "90px minmax(0, 1fr) 130px", gap: 12, padding: "11px 0", borderTop: `1px solid ${C.borderSoft}`, alignItems: "center" }}>
+    <div className="data-row" style={{ display: "grid", gridTemplateColumns: "90px minmax(0, 1fr) 130px", gap: 12, padding: "11px 6px", borderTop: `1px solid ${C.borderSoft}`, alignItems: "center" }}>
       <span style={{ color: C.textMuted, fontSize: 11 }}>{event.time}</span>
       <div style={{ borderLeft: `3px solid ${event.color}`, paddingLeft: 10 }}>
         <div style={{ color: C.text, fontSize: 12, fontWeight: 950 }}>{event.title}</div>
@@ -218,12 +225,13 @@ function Integrity({ label, value, color }) {
 }
 
 function Note({ miner }) {
-  const text = miner.active ? "Both sensor channels are evaluated against the current fresh-signal window." : "Sensor checks will resume automatically when new telemetry arrives.";
-  return <div style={{ color: C.textMuted, fontSize: 12, lineHeight: 1.45, border: `1px solid ${C.borderSoft}`, borderRadius: 7, padding: 10 }}>{miner.name}: {text}</div>;
+  const color = miner.active ? C.green : C.offline;
+  const text = miner.active ? "Both sensor channels are being evaluated in the live window." : "Sensor checks will resume automatically when new data arrives.";
+  return (
+    <div style={{ border: `1px solid ${C.borderSoft}`, borderLeft: `3px solid ${color}`, borderRadius: 7, padding: "9px 12px" }}>
+      <div style={{ color: C.text, fontSize: 12, fontWeight: 900 }}>{miner.name}</div>
+      <div style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.4, marginTop: 4 }}>{text}</div>
+    </div>
+  );
 }
 
-function lastSeenValue(miner) {
-  return miner.lastSeen?.getTime?.() || Number(miner.lastSeen) || 0;
-}
-
-const moduleLabel = { color: C.primary, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 900 };

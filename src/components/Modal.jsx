@@ -25,8 +25,17 @@ export default function Modal({ title, children, actions, onClose }) {
         style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02)), " + C.bg2, border: `1px solid ${C.border}`, borderRadius: 14, padding: 24, width: "min(520px, calc(100vw - 32px))", boxShadow: C.shadow }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-          <div style={{ width: 8, height: 34, borderRadius: 999, background: C.primaryGradient, boxShadow: "0 0 22px rgba(255,106,0,0.28)" }} />
-          <div style={{ fontSize: 17, fontWeight: 900, color: C.text, letterSpacing: "0.01em" }}>{title}</div>
+          <div style={{ width: 8, height: 34, borderRadius: 999, background: C.primaryGradient, boxShadow: "0 0 22px rgba(255,106,0,0.28)", flexShrink: 0 }} />
+          <div style={{ fontSize: 17, fontWeight: 900, color: C.text, letterSpacing: "0.01em", flex: 1 }}>{title}</div>
+          {onClose && (
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              style={{ width: 28, height: 28, borderRadius: 7, background: "rgba(255,255,255,0.05)", border: `1px solid ${C.border}`, color: C.textMuted, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0, fontSize: 13, lineHeight: 1 }}
+            >
+              ✕
+            </button>
+          )}
         </div>
         {children}
         {actions && <div style={{ display: "flex", gap: 10, marginTop: 22, justifyContent: "flex-end", flexWrap: "wrap" }}>{actions}</div>}

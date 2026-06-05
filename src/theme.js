@@ -77,6 +77,14 @@ export const primaryButtonStyle = {
   transition: "background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease",
 };
 
+export const moduleLabel = {
+  color: C.primary,
+  fontSize: 10,
+  letterSpacing: "0.12em",
+  textTransform: "uppercase",
+  fontWeight: 900,
+};
+
 export const ghostButtonStyle = {
   border: `1px solid ${C.border}`,
   borderRadius: 8,

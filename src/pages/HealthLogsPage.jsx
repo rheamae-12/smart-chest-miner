@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import Modal from "../components/Modal";
-import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
+import { C, cardStyle, controlStyle, ghostButtonStyle, moduleLabel, pageStyle, primaryButtonStyle } from "../theme";
 import { DEFAULT_THRESHOLDS } from "../utils/alertChecker";
-import { average, formatLastSeen, formatReading, formatSystemTimestamp } from "../utils/formatters";
+import { average, formatLastSeen, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 
 const SESSION_GAP_MS = 3 * 60 * 1000;
 
@@ -172,7 +172,7 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
               <StatusMetric label="Manual alerts" value={visibleMiners.filter((miner) => miner.manual_alert).length} color={C.red} />
             </InfoCard>
             <InfoCard title="Recent Alert Notes">
-              <div className="hide-scrollbar" style={{ overflow: "auto", maxHeight: "100%", display: "grid", gap: 8 }}>
+              <div className="hide-scrollbar" style={{ overflow: "auto", flex: 1, display: "grid", gap: 8, alignContent: "start", minHeight: 0 }}>
                 {visibleMiners.map((miner) => (
                   <AlertNote key={miner.id} miner={miner} />
                 ))}
@@ -241,10 +241,6 @@ function sessionSortValue(session) {
   if (session.end === "IN PROGRESS") return Date.now();
   const parsed = Date.parse(session.end);
   return Number.isNaN(parsed) ? 0 : parsed;
-}
-
-function lastSeenValue(miner) {
-  return miner.lastSeen?.getTime?.() || Number(miner.lastSeen) || 0;
 }
 
 function countManualPresses(miner, rows, activityLogs, startTimestamp, endTimestamp, includeLive) {
@@ -329,8 +325,8 @@ function SpikeText({ spike }) {
 
 function InfoCard({ title, children }) {
   return (
-    <section style={{ ...cardStyle, padding: 15, minHeight: 0 }}>
-      <div style={{ color: C.text, fontSize: 14, fontWeight: 950, marginBottom: 12 }}>{title}</div>
+    <section style={{ ...cardStyle, padding: 15, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ color: C.text, fontSize: 14, fontWeight: 950, marginBottom: 12, flexShrink: 0 }}>{title}</div>
       {children}
     </section>
   );
@@ -389,4 +385,3 @@ const tableRow = {
   fontSize: 12,
 };
 
-const moduleLabel = { color: C.primary, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 900 };

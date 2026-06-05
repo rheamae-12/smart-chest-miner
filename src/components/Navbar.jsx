@@ -21,6 +21,13 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
   const { pathname } = useLocation();
   const onlineCount = miners.filter((miner) => miner.active).length;
   const alerts = buildAlerts(miners, thresholds).filter((alert) => !dismissedAlertIds.includes(alert.id));
+  const sortedLogs = [...activityLogs].sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+  const dedupedLogs = sortedLogs.filter((log, index) => {
+    if (index === 0) return true;
+    const prev = sortedLogs[index - 1];
+    const timeDiff = Math.abs(Number(log.timestamp || 0) - Number(prev.timestamp || 0));
+    return !(log.deviceId === prev.deviceId && log.title === prev.title && timeDiff < 60_000);
+  });
   const allEvents = [
     ...alerts.map((alert) => ({
       id: alert.id,
@@ -30,7 +37,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
       severity: alert.severity,
       timestamp: null,
     })),
-    ...activityLogs,
+    ...dedupedLogs,
   ];
   const unreadEvents = allEvents.filter((event) => !clearedNotifications.includes(notificationKey(event)));
   const recentEvents = unreadEvents.slice(0, 18);
@@ -107,53 +114,63 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
       {notificationsOpen && (
         <Modal
           title="Miner Notifications"
-          onClose={() => {
-            setNotificationsOpen(false);
-            setClearConfirmOpen(false);
-          }}
+          onClose={() => setNotificationsOpen(false)}
           actions={
-            clearConfirmOpen ? (
-              <>
-                <button onClick={() => setClearConfirmOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 16px" }}>
-                  Cancel
-                </button>
-                <button onClick={clearAllNotifications} style={{ ...primaryButtonStyle, padding: "9px 16px" }}>
-                  Confirm Clear
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => setClearConfirmOpen(true)}
-                  disabled={notificationCount === 0}
-                  style={{ ...ghostButtonStyle, padding: "9px 16px", opacity: notificationCount ? 1 : 0.5, cursor: notificationCount ? "pointer" : "not-allowed" }}
-                >
-                  Clear
-                </button>
-                <button onClick={() => setNotificationsOpen(false)} style={{ ...primaryButtonStyle, padding: "9px 16px" }}>
-                  Done
-                </button>
-              </>
-            )
+            <>
+              <button
+                onClick={() => setClearConfirmOpen(true)}
+                disabled={notificationCount === 0}
+                style={{ ...ghostButtonStyle, padding: "9px 16px", opacity: notificationCount ? 1 : 0.5, cursor: notificationCount ? "pointer" : "not-allowed" }}
+              >
+                Clear
+              </button>
+              <button onClick={() => setNotificationsOpen(false)} style={{ ...primaryButtonStyle, padding: "9px 16px" }}>
+                Done
+              </button>
+            </>
           }
         >
           <div style={{ color: C.textMuted, fontSize: 12, lineHeight: 1.45, marginBottom: 10 }}>
             {notificationCount ? `${notificationCount} unread miner notification${notificationCount === 1 ? "" : "s"}.` : "All miner notifications are clear."}
           </div>
-          {clearConfirmOpen && (
-            <div style={{ border: `1px solid rgba(255,106,0,0.45)`, background: "rgba(255,106,0,0.08)", borderRadius: 7, padding: 12, marginBottom: 10 }}>
-              <div style={{ color: C.text, fontSize: 12, fontWeight: 900, textTransform: "uppercase", marginBottom: 4 }}>Clear notifications?</div>
-              <div style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.45 }}>
-                This will clear all current bell notifications, including device alert banners tied to these alerts.
-              </div>
-            </div>
-          )}
           <div className="hide-scrollbar" style={{ display: "grid", gap: 8, maxHeight: 390, overflow: "auto" }}>
             {recentEvents.length === 0 ? (
               <div style={{ color: C.textMuted, fontSize: 13 }}>No unread miner activity has been recorded yet.</div>
             ) : (
               recentEvents.map((event) => <NotificationRow key={notificationKey(event)} event={event} />)
             )}
+          </div>
+        </Modal>
+      )}
+
+      {clearConfirmOpen && (
+        <Modal
+          title="Clear Notifications"
+          onClose={() => setClearConfirmOpen(false)}
+          actions={
+            <>
+              <button onClick={() => setClearConfirmOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 16px" }}>
+                Cancel
+              </button>
+              <button onClick={clearAllNotifications} style={{ ...primaryButtonStyle, padding: "9px 16px" }}>
+                Confirm Clear
+              </button>
+            </>
+          }
+        >
+          <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+            <div style={{ width: 38, height: 38, borderRadius: 8, background: `${C.amber}18`, border: `1px solid ${C.amber}44`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+              <BellIcon color={C.amber} />
+            </div>
+            <div>
+              <div style={{ color: C.text, fontSize: 14, fontWeight: 900 }}>Clear all notifications?</div>
+              <div style={{ color: C.textMuted, fontSize: 13, lineHeight: 1.65, marginTop: 6 }}>
+                This will dismiss all {notificationCount} unread notification{notificationCount === 1 ? "" : "s"}, including device alert banners tied to live conditions.
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: 14, padding: "10px 12px", background: `${C.amber}0D`, border: `1px solid ${C.amber}2A`, borderRadius: 8 }}>
+            <div style={{ color: C.amber, fontSize: 11, fontWeight: 700 }}>Active alerts will be dismissed from the dashboard banner until the condition changes again.</div>
           </div>
         </Modal>
       )}
@@ -336,9 +353,9 @@ function Pill({ children, tone }) {
 
 function SecurityRow({ label, value, good }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: 12, alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
-      <div style={{ color: C.textMuted, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
-      <div style={{ color: good ? C.green : C.amber, fontSize: 13, fontWeight: 800 }}>{value}</div>
+    <div style={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: 12, alignItems: "start", padding: "10px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
+      <div style={{ color: C.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", paddingTop: 2 }}>{label}</div>
+      <div style={{ color: good ? C.green : C.amber, fontSize: 13, fontWeight: 700, textTransform: "none", lineHeight: 1.45 }}>{value}</div>
     </div>
   );
 }
@@ -358,9 +375,9 @@ function NotificationRow({ event }) {
   );
 }
 
-function BellIcon() {
+function BellIcon({ color = "currentColor" }) {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: 17, height: 17, fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }}>
+    <svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: 17, height: 17, fill: "none", stroke: color, strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }}>
       <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
       <path d="M13.7 21a2 2 0 0 1-3.4 0" />
     </svg>

@@ -1,15 +1,15 @@
 import { useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { C, cardStyle, controlStyle, pageStyle } from "../theme";
-import { average, formatLastSeen, formatReading, formatSystemTimestamp } from "../utils/formatters";
+import { C, cardStyle, controlStyle, moduleLabel, pageStyle } from "../theme";
+import { average, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 
-export default function AnalyticsPage({ miners, analyticsData }) {
+export default function AnalyticsPage({ miners, analyticsData, activityLogs = [] }) {
   const [filter, setFilter] = useState({ miner: "all", range: "24H", bucket: "1" });
   const sortedMiners = useMemo(() => [...miners].sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)), [miners]);
   const visibleMiners = filter.miner === "all" ? sortedMiners : sortedMiners.filter((miner) => miner.id === filter.miner);
   const rows = useMemo(() => buildRows(visibleMiners, analyticsData, filter.range), [analyticsData, filter.range, visibleMiners]);
   const chartData = useMemo(() => bucketRows(rows, Number(filter.bucket)), [filter.bucket, rows]);
-  const logs = useMemo(() => buildDeviceLogs(miners), [miners]);
+  const logs = useMemo(() => buildActivityLogEntries(activityLogs, filter.miner), [activityLogs, filter.miner]);
 
   return (
     <div style={pageStyle}>
@@ -17,7 +17,7 @@ export default function AnalyticsPage({ miners, analyticsData }) {
         <section style={{ ...cardStyle, padding: 16, display: "flex", alignItems: "end", justifyContent: "space-between", gap: 16 }}>
           <div>
             <div style={moduleLabel}>Sensor analytics</div>
-            <div style={{ color: C.text, fontSize: 25, fontWeight: 950, marginTop: 4 }}>Telemetry Trends</div>
+            <div style={{ color: C.text, fontSize: 25, fontWeight: 950, marginTop: 4 }}>Reading Trends</div>
             <div style={{ color: C.textMuted, fontSize: 12, marginTop: 5 }}>Filter HR and SpO2 readings by miner and readings-per-minute interval.</div>
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -108,13 +108,19 @@ export default function AnalyticsPage({ miners, analyticsData }) {
           <aside style={{ ...cardStyle, padding: 15, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr" }}>
             <div style={{ marginBottom: 10 }}>
               <div style={moduleLabel}>Device activity logs</div>
-              <div style={{ color: C.text, fontSize: 16, fontWeight: 950, marginTop: 4 }}>Online / Offline Events</div>
-              <div style={{ color: C.textMuted, fontSize: 11, marginTop: 4 }}>Status history based on the latest device telemetry window.</div>
+              <div style={{ color: C.text, fontSize: 16, fontWeight: 950, marginTop: 4 }}>Miner Events</div>
+              <div style={{ color: C.textMuted, fontSize: 11, marginTop: 4 }}>
+                {logs.length ? `${logs.length} recorded event${logs.length === 1 ? "" : "s"}` : "No events recorded yet."}
+              </div>
             </div>
             <div className="hide-scrollbar" style={{ overflow: "auto", display: "grid", gap: 8, alignContent: "start" }}>
-              {logs.map((log) => (
-                <ActivityLog key={`${log.id}-${log.status}`} log={log} />
-              ))}
+              {logs.length === 0 ? (
+                <div style={{ color: C.textMuted, fontSize: 12, padding: "12px 0" }}>Activity events will appear here as miners come online and send readings.</div>
+              ) : (
+                logs.map((log) => (
+                  <ActivityLog key={`${log.id}-${log.timestamp}`} log={log} />
+                ))
+              )}
             </div>
           </aside>
         </section>
@@ -165,21 +171,19 @@ function getRangeStart(range) {
   return 0;
 }
 
-function buildDeviceLogs(miners) {
-  return [...miners]
-    .sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id))
-    .map((miner) => ({
-      id: miner.id,
-      name: miner.name,
-      status: miner.active ? "Online" : "Offline",
-      color: miner.active ? C.green : C.offline,
-      detail: miner.active ? "Receiving fresh HR and SpO2 telemetry." : "No live readings are currently available.",
-      time: formatLastSeen(miner.lastSeen),
+function buildActivityLogEntries(activityLogs, minerFilter) {
+  return activityLogs
+    .filter((log) => minerFilter === "all" || log.deviceId === minerFilter)
+    .slice(0, 40)
+    .map((log) => ({
+      id: log.id,
+      name: log.miner || log.deviceId,
+      title: log.title,
+      detail: log.detail,
+      color: log.severity === "critical" ? C.red : log.severity === "warning" ? C.amber : log.status === "online" ? C.green : C.offline,
+      timestamp: log.timestamp,
+      time: formatSystemTimestamp(log.timestamp),
     }));
-}
-
-function lastSeenValue(miner) {
-  return miner.lastSeen?.getTime?.() || Number(miner.lastSeen) || 0;
 }
 
 function Select({ label, value, onChange, children }) {
@@ -242,10 +246,10 @@ function ActivityLog({ log }) {
     <div style={{ borderLeft: `3px solid ${log.color}`, borderRadius: 6, background: "rgba(255,255,255,0.02)", padding: "10px 10px 10px 12px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
         <strong style={{ color: C.text, fontSize: 12 }}>{log.name}</strong>
-        <span style={{ color: log.color, fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>{log.status}</span>
+        <span style={{ color: log.color, fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>{log.title}</span>
       </div>
       <div style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.4, marginTop: 5 }}>{log.detail}</div>
-      <div style={{ color: C.textMuted, fontSize: 10, marginTop: 7 }}>{log.id} / {log.time}</div>
+      <div style={{ color: C.textMuted, fontSize: 10, marginTop: 7 }}>{log.time}</div>
     </div>
   );
 }
@@ -254,4 +258,3 @@ function EmptyState() {
   return <div style={{ height: "100%", display: "grid", placeItems: "center", color: C.textMuted, fontSize: 13 }}>No valid HR or SpO2 analytics for this filter yet.</div>;
 }
 
-const moduleLabel = { color: C.primary, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 900 };

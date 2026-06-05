@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import Modal from "../components/Modal";
 import StatusBadge from "../components/StatusBadge";
 import { removeWifiConnection, saveWifiConfiguration, subscribeToWifiConfigurations, subscribeToWifiConnectionHistory, writeActivityLog } from "../firebase/database";
-import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
-import { formatSystemTimestamp } from "../utils/formatters";
+import { C, cardStyle, controlStyle, ghostButtonStyle, moduleLabel, pageStyle, primaryButtonStyle } from "../theme";
+import { formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 
 const EMPTY_FORM = {
   deviceId: "",
@@ -252,7 +252,7 @@ export default function WifiConfigPage({ miners }) {
                 <span>Actions</span>
               </div>
               {rows.map(({ miner, config }) => (
-                <div key={config?.id || `empty-${miner.id}`} style={tableRow}>
+                <div key={config?.id || `empty-${miner.id}`} className="data-row" style={tableRow}>
                   <div>
                     <div style={{ color: C.text, fontWeight: 900 }}>{miner.name}</div>
                     <div style={{ color: C.textMuted, fontSize: 10, marginTop: 3 }}>{miner.id} / {miner.location}</div>
@@ -305,12 +305,13 @@ function ActionButton({ children, danger, disabled, onClick }) {
       onClick={onClick}
       style={{
         ...ghostButtonStyle,
-        padding: "6px 8px",
+        padding: "5px 10px",
         color: danger ? C.red : C.textDim,
         fontSize: 11,
         fontWeight: 900,
         opacity: disabled ? 0.45 : 1,
         cursor: disabled ? "not-allowed" : "pointer",
+        ...(danger && { borderColor: `${C.red}44`, background: `${C.red}0A` }),
       }}
     >
       {children}
@@ -359,10 +360,6 @@ function wifiRowTime(row) {
   return Number(row.config?.updatedAt) || Number(row.config?.createdAt) || lastSeenValue(row.miner);
 }
 
-function lastSeenValue(miner) {
-  return miner.lastSeen?.getTime?.() || Number(miner.lastSeen) || 0;
-}
-
 const tableHeader = {
   display: "grid",
   gridTemplateColumns: "1.2fr 0.75fr 1fr 0.7fr 1.15fr 110px",
@@ -387,4 +384,3 @@ const tableRow = {
   fontSize: 12,
 };
 
-const moduleLabel = { color: C.primary, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 900 };

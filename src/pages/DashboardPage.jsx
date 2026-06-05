@@ -3,9 +3,9 @@ import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Too
 import AlertBanner from "../components/AlertBanner";
 import StatCard from "../components/StatCard";
 import StatusBadge from "../components/StatusBadge";
-import { C, cardStyle, pageStyle } from "../theme";
+import { C, cardStyle, moduleLabel, pageStyle } from "../theme";
 import { buildAlerts, getVitalStatus } from "../utils/alertChecker";
-import { average, formatLastSeen, formatReading } from "../utils/formatters";
+import { average, formatLastSeen, formatReading, lastSeenValue } from "../utils/formatters";
 
 export default function DashboardPage({ miners, liveData, thresholds, dismissedAlertIds = [], onDismissAlerts }) {
   const sortedMiners = useMemo(() => [...miners].sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)), [miners]);
@@ -44,7 +44,7 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
             <div style={{ ...cardStyle, padding: 16, minHeight: 320, display: "grid", gridTemplateRows: "auto 1fr" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 14, marginBottom: 12 }}>
                 <div>
-                  <div style={moduleLabel}>Realtime HR + SpO2 telemetry</div>
+                  <div style={moduleLabel}>Live HR + SpO2 readings</div>
                   <div style={{ color: C.text, fontSize: 22, fontWeight: 950, marginTop: 4 }}>Live Sensor Monitoring</div>
                   <div style={{ color: C.textMuted, fontSize: 12, marginTop: 5 }}>
                     {miner ? `${miner.name} (${miner.id}) - ${miner.location}` : "Waiting for registered miner devices"}
@@ -75,7 +75,7 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
                 ) : (
                   <EmptyState
                     title={miner?.active ? "Waiting for valid chest contact" : "Device offline"}
-                    text={miner?.active ? "The graph starts once both heart-rate and SpO2 readings are valid." : "No live HR or SpO2 telemetry is being received from this miner."}
+                    text={miner?.active ? "The graph starts once both heart-rate and SpO2 readings are valid." : "No live HR or SpO2 data is being received from this miner."}
                   />
                 )}
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "8px 3px 0", color: C.textMuted, fontSize: 10 }}>
@@ -117,6 +117,7 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
                       userSelectedRef.current = true;
                       setSelected(item.id);
                     }}
+                    className={selectedId === item.id ? "card-selected" : ""}
                     style={{ ...cardStyle, padding: 11, textAlign: "left", cursor: "pointer", borderColor: selectedId === item.id ? C.primary : C.border, background: selectedId === item.id ? "rgba(255,106,0,0.08)" : cardStyle.background }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
@@ -136,8 +137,8 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
             </section>
 
             <section style={{ ...cardStyle, padding: 13 }}>
-              <div style={moduleLabel}>Warning indicators</div>
-              <Indicator color={miner?.active ? C.green : C.offline} label={miner?.active ? "Telemetry online" : "Telemetry offline"} />
+              <div style={{ color: C.text, fontSize: 12, fontWeight: 950, marginBottom: 2 }}>Warning Indicators</div>
+              <Indicator color={miner?.active ? C.green : C.offline} label={miner?.active ? "Readings online" : "Readings offline"} />
               <Indicator color={!miner?.active ? C.offline : miner?.finger === false ? C.amber : C.green} label={!miner?.active ? "Chest contact offline" : miner?.finger === false ? "Chest contact missing" : "Chest contact normal"} />
               <Indicator color={!miner?.active ? C.offline : miner?.manual_alert ? C.red : C.green} label={!miner?.active ? "Manual alert offline" : miner?.manual_alert ? "Manual alert pressed" : "Manual alert clear"} />
             </section>
@@ -163,10 +164,6 @@ function mergeLiveSeries(series) {
   return rows.slice(-30);
 }
 
-function lastSeenValue(miner) {
-  return miner.lastSeen?.getTime?.() || Number(miner.lastSeen) || 0;
-}
-
 function EmptyState({ title, text }) {
   return (
     <div style={{ height: "100%", display: "grid", placeItems: "center", border: `1px dashed ${C.border}`, borderRadius: 8 }}>
@@ -181,10 +178,17 @@ function EmptyState({ title, text }) {
 function VitalCard({ label, value, unit, color, status }) {
   const statusColor = status === "NORMAL" ? C.green : status === "OFFLINE" ? C.offline : status === "CRITICAL" || status === "HIGH" ? C.red : C.amber;
   return (
-    <div style={{ ...cardStyle, padding: 13 }}>
+    <div style={{ ...cardStyle, padding: 13, borderLeft: `3px solid ${color}` }}>
       <div style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
-      <div style={{ color, fontSize: 27, fontWeight: 950, marginTop: 8, lineHeight: 1 }}>{value}<span style={{ color: C.textMuted, fontSize: 11, marginLeft: 4 }}>{unit}</span></div>
-      <div style={{ color: statusColor, fontSize: 10, fontWeight: 900, marginTop: 8 }}>{status || "NO DATA"}</div>
+      <div style={{ color, fontSize: 27, fontWeight: 950, marginTop: 8, lineHeight: 1 }}>
+        {value}<span style={{ color: C.textMuted, fontSize: 11, marginLeft: 4 }}>{unit}</span>
+      </div>
+      <div style={{
+        display: "inline-flex", alignItems: "center", gap: 5,
+        color: statusColor, fontSize: 9, fontWeight: 900,
+        marginTop: 8, background: `${statusColor}14`, border: `1px solid ${statusColor}30`,
+        borderRadius: 999, padding: "3px 8px",
+      }}>{status || "NO DATA"}</div>
     </div>
   );
 }
@@ -209,11 +213,15 @@ function SmallReading({ label, value, color }) {
 
 function Indicator({ color, label }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
-      <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, boxShadow: `0 0 12px ${color}` }} />
+    <div style={{
+      display: "flex", alignItems: "center", gap: 10,
+      padding: "9px 12px", marginTop: 7, borderRadius: 8,
+      background: `${color}0A`, border: `1px solid ${color}22`,
+      transition: "background 0.18s, border-color 0.18s",
+    }}>
+      <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 10px ${color}`, flexShrink: 0 }} />
       <span style={{ color: C.textDim, fontSize: 12 }}>{label}</span>
     </div>
   );
 }
 
-const moduleLabel = { color: C.primary, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 900 };

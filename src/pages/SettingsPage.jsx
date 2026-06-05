@@ -1,131 +1,244 @@
 import { useState } from "react";
+import Modal from "../components/Modal";
 import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
 
-export default function SettingsPage({ miners, thresholds, setThresholds, pollingInterval, setPollingInterval }) {
+const PUSH_ENABLED_KEY = "smart-chest-miner-push-enabled";
+
+export default function SettingsPage({ miners, thresholds, setThresholds, staleSeconds, setStaleSeconds }) {
   const [localThresholds, setLocalThresholds] = useState(thresholds);
-  const [localInterval, setLocalInterval] = useState(pollingInterval);
-  const [preferences, setPreferences] = useState({ critical: true, warning: true, offline: true, sound: false, retainDays: 30, staleSeconds: 75 });
+  const [localStaleSeconds, setLocalStaleSeconds] = useState(staleSeconds ?? 75);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
-  const [confirmSave, setConfirmSave] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(() => localStorage.getItem(PUSH_ENABLED_KEY) !== "false");
 
-  const requestSave = () => {
-    setConfirmSave(true);
+  const handlePushToggle = (enabled) => {
+    setPushEnabled(enabled);
+    localStorage.setItem(PUSH_ENABLED_KEY, String(enabled));
   };
 
-  const save = () => {
+  const setHr = (patch) => setLocalThresholds((prev) => ({ ...prev, ...patch }));
+
+  const requestSave = () => {
     setError("");
-    setConfirmSave(false);
     if (localThresholds.hrMin >= localThresholds.hrMax) {
-      setError("Heart-rate minimum must be lower than maximum.");
+      setError("Heart-rate minimum must be lower than the maximum.");
       return;
     }
     if (localThresholds.spo2Min < 70 || localThresholds.spo2Min > 100) {
       setError("SpO2 minimum must be between 70 and 100.");
       return;
     }
-    if (localInterval < 1 || localInterval > 60) {
-      setError("Polling interval must be between 1 and 60 seconds.");
+    if (localStaleSeconds < 10 || localStaleSeconds > 300) {
+      setError("Offline timeout must be between 10 and 300 seconds.");
       return;
     }
+    setConfirmOpen(true);
+  };
 
+  const executeSave = () => {
     setThresholds(localThresholds);
-    setPollingInterval(localInterval);
+    setStaleSeconds?.(localStaleSeconds);
+    setConfirmOpen(false);
     setSaved(true);
-    setTimeout(() => setSaved(false), 2400);
+    setTimeout(() => setSaved(false), 2800);
   };
 
-  const resetLocalEdits = () => {
+  const discard = () => {
     setLocalThresholds(thresholds);
-    setLocalInterval(pollingInterval);
+    setLocalStaleSeconds(staleSeconds ?? 75);
     setError("");
-    setConfirmSave(false);
   };
+
+  const online = miners.filter((m) => m.active).length;
+  const offline = miners.filter((m) => !m.active).length;
+  const warnings = miners.filter((m) => m.finger === false || m.manual_alert).length;
 
   return (
     <div style={pageStyle}>
-      <div style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 12, height: "100%", minHeight: 0, overflow: "hidden" }}>
-        <header style={{ ...cardStyle, padding: 14, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "end", flexWrap: "wrap", minWidth: 0 }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={moduleLabel}>System controls</div>
-            <div style={{ color: C.text, fontSize: 22, fontWeight: 950, marginTop: 4 }}>System Configuration</div>
-            <div style={{ color: C.textMuted, fontSize: 12, marginTop: 5 }}>Account, safety thresholds, monitoring preferences, alerts, and device defaults.</div>
+      {confirmOpen && (
+        <Modal
+          title="Save Settings"
+          onClose={() => setConfirmOpen(false)}
+          actions={
+            <>
+              <button onClick={() => setConfirmOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>Cancel</button>
+              <button onClick={executeSave} style={{ ...primaryButtonStyle, padding: "9px 15px" }}>Confirm Save</button>
+            </>
+          }
+        >
+          <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+            <div style={{ width: 38, height: 38, borderRadius: 8, background: `${C.primary}18`, border: `1px solid ${C.primary}40`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+              <span style={{ color: C.primary, fontSize: 10, fontWeight: 900 }}>SAV</span>
+            </div>
+            <div>
+              <div style={{ color: C.text, fontSize: 14, fontWeight: 900 }}>Apply these settings?</div>
+              <div style={{ color: C.textMuted, fontSize: 13, lineHeight: 1.65, marginTop: 6 }}>
+                The new thresholds and offline timeout will take effect immediately for all connected miners.
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: 14, display: "grid", gap: 7 }}>
+            <SettingSummaryRow label="Heart Rate Range" value={`${localThresholds.hrMin} – ${localThresholds.hrMax} BPM`} color={C.red} />
+            <SettingSummaryRow label="SpO2 Minimum" value={`${localThresholds.spo2Min}%`} color={C.primary} />
+            <SettingSummaryRow label="Offline Timeout" value={`${localStaleSeconds} seconds`} color={C.amber} />
+          </div>
+        </Modal>
+      )}
+
+      <div style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gap: 14, height: "100%", minHeight: 0 }}>
+
+        <header style={{ ...cardStyle, padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ color: C.primary, fontSize: 10, letterSpacing: "0.15em", textTransform: "uppercase", fontWeight: 900 }}>Configuration</div>
+            <div style={{ color: C.text, fontSize: 22, fontWeight: 950, marginTop: 4 }}>System Settings</div>
+            <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4 }}>Adjust alert thresholds and monitoring behavior for all connected miners.</div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <StatusPill label={`${miners.filter((miner) => miner.active).length}/${miners.length} online`} color={C.green} />
-            <StatusPill label={`${miners.filter((miner) => !miner.active).length} offline`} color={C.offline} />
+            <Pill value={online} label="Online" color={C.green} />
+            <Pill value={offline} label="Offline" color={C.offline} />
+            {warnings > 0 && <Pill value={warnings} label="Warnings" color={C.amber} />}
           </div>
         </header>
 
-        <main style={settingsGrid}>
-          <div style={settingsColumn}>
-            <Section title="System Summary" sub="Current operational view" compact>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
-                <SummaryBox label="Registered" value={miners.length} color={C.primary} />
-                <SummaryBox label="Online" value={miners.filter((miner) => miner.active).length} color={C.green} />
-                <SummaryBox label="Manual Alerts" value={miners.filter((miner) => miner.manual_alert).length} color={C.red} />
-                <SummaryBox label="Contact Warn" value={miners.filter((miner) => miner.finger === false).length} color={C.amber} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, alignContent: "start", minHeight: 0 }}>
+
+          <div style={{ display: "grid", gap: 14, alignContent: "start" }}>
+            <SettingsCard
+              number="01"
+              title="Vital Alert Thresholds"
+              description="Set the safe limits for heart rate and blood oxygen. Readings outside these bounds trigger alerts on connected miners."
+            >
+              <div style={{ display: "grid", gap: 10 }}>
+                {/* Heart Rate row */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderRadius: 10, border: `1px solid ${C.red}30`, background: `${C.red}08` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 108 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.red, boxShadow: `0 0 8px ${C.red}`, flexShrink: 0 }} />
+                    <span style={{ color: C.text, fontSize: 12, fontWeight: 950 }}>Heart Rate</span>
+                  </div>
+                  <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
+                    <StepperField
+                      label="Min"
+                      value={localThresholds.hrMin}
+                      onChange={(v) => setHr({ hrMin: Math.min(v, localThresholds.hrMax - 1) })}
+                      min={20}
+                      max={localThresholds.hrMax - 1}
+                    />
+                    <span style={{ color: C.textMuted, fontSize: 16, fontWeight: 300, alignSelf: "flex-end", paddingBottom: 3, userSelect: "none" }}>—</span>
+                    <StepperField
+                      label="Max"
+                      value={localThresholds.hrMax}
+                      onChange={(v) => setHr({ hrMax: Math.max(v, localThresholds.hrMin + 1) })}
+                      min={localThresholds.hrMin + 1}
+                      max={250}
+                    />
+                  </div>
+                  <span style={{ color: C.red, fontSize: 11, fontWeight: 900, minWidth: 30, textAlign: "right" }}>BPM</span>
+                </div>
+
+                {/* SpO2 row */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderRadius: 10, border: `1px solid ${C.primary}30`, background: `${C.primary}08` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 108 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.primary, boxShadow: `0 0 8px ${C.primary}`, flexShrink: 0 }} />
+                    <span style={{ color: C.text, fontSize: 12, fontWeight: 950 }}>Blood Oxygen</span>
+                  </div>
+                  <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
+                    <StepperField
+                      label="Min"
+                      value={localThresholds.spo2Min}
+                      onChange={(v) => setHr({ spo2Min: v })}
+                      min={70}
+                      max={100}
+                    />
+                    <span style={{ color: C.textMuted, fontSize: 11, alignSelf: "flex-end", paddingBottom: 6, userSelect: "none" }}>or above</span>
+                  </div>
+                  <span style={{ color: C.primary, fontSize: 11, fontWeight: 900, minWidth: 30, textAlign: "right" }}>%</span>
+                </div>
+
+                {/* Range preview bars */}
+                <div style={{ display: "grid", gap: 7, padding: "6px 0 2px" }}>
+                  <RangeBar label="HR safe band" valueText={`${localThresholds.hrMin} – ${localThresholds.hrMax} BPM`} color={C.red} />
+                  <RangeBar label="SpO2 floor" valueText={`${localThresholds.spo2Min}% and above`} color={C.primary} />
+                </div>
               </div>
-            </Section>
+            </SettingsCard>
+
+            <SettingsCard
+              number="03"
+              title="System Status"
+              description="Live count of all registered miners and their current state."
+            >
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+                <StatusBox label="Total Miners" value={miners.length} color={C.primary} desc="Registered" />
+                <StatusBox label="Online Now" value={online} color={C.green} desc="Active" />
+                <StatusBox label="Offline" value={offline} color={C.offline} desc="No signal" />
+                <StatusBox label="Needs Attention" value={warnings} color={warnings ? C.amber : C.green} desc={warnings ? "Check required" : "All clear"} />
+              </div>
+            </SettingsCard>
           </div>
 
-          <div style={settingsColumn}>
-            <Section title="Safety Thresholds" sub="Alert limits for miner vitals">
-              <div style={compactGrid}>
-                <Field type="number" label="HR Min" value={localThresholds.hrMin} onChange={(value) => setLocalThresholds({ ...localThresholds, hrMin: Number(value) })} />
-                <Field type="number" label="HR Max" value={localThresholds.hrMax} onChange={(value) => setLocalThresholds({ ...localThresholds, hrMax: Number(value) })} />
-                <Field type="number" label="SpO2 Min" value={localThresholds.spo2Min} onChange={(value) => setLocalThresholds({ ...localThresholds, spo2Min: Number(value) })} />
+          <div style={{ display: "grid", gap: 14, alignContent: "start" }}>
+            <SettingsCard
+              number="02"
+              title="Monitoring Timing"
+              description="How long the system waits before marking a device as offline when it stops sending readings."
+            >
+              <div style={{ marginBottom: 14 }}>
+                <SettingField
+                  label="Offline Timeout"
+                  unit="seconds"
+                  value={localStaleSeconds}
+                  onChange={(v) => setLocalStaleSeconds(Number(v))}
+                  hint="Mark a miner offline after this many seconds with no data (10–300)"
+                />
               </div>
-              <ThresholdPreview label="Heart Rate Safe Band" text={`${localThresholds.hrMin} to ${localThresholds.hrMax} BPM`} color={C.red} />
-              <ThresholdPreview label="Oxygen Minimum" text={`${localThresholds.spo2Min}% and above`} color={C.primary} />
-            </Section>
+              <InfoRow
+                label="How it works"
+                text="The sensor data stream is live — if a miner stops sending readings for longer than this timeout, it is automatically marked offline."
+              />
+            </SettingsCard>
 
-            <Section title="Monitoring Preferences" sub="Telemetry refresh and retention">
-              <div style={compactGrid}>
-                <Field type="number" label="Polling" value={localInterval} onChange={(value) => setLocalInterval(Number(value))} />
-                <Field type="number" label="Offline Window" value={preferences.staleSeconds} onChange={(value) => setPreferences({ ...preferences, staleSeconds: Number(value) })} />
-                <Field type="number" label="Retention Days" value={preferences.retainDays} onChange={(value) => setPreferences({ ...preferences, retainDays: Number(value) })} />
+            <SettingsCard
+              number="04"
+              title="Alert Notifications"
+              description="Control how the system notifies you when a miner condition is triggered."
+            >
+              {/* Push notification toggle */}
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: 9, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.025)", marginBottom: 12 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: C.text, fontSize: 13, fontWeight: 900 }}>Push Notifications</div>
+                  <div style={{ color: C.textMuted, fontSize: 11, marginTop: 3, lineHeight: 1.5 }}>Alert beep and browser notification when conditions fire</div>
+                </div>
+                <Toggle value={pushEnabled} onChange={handlePushToggle} />
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 12 }}>
-                <Preference label="Critical" checked={preferences.critical} onChange={() => setPreferences({ ...preferences, critical: !preferences.critical })} />
-                <Preference label="Warning" checked={preferences.warning} onChange={() => setPreferences({ ...preferences, warning: !preferences.warning })} />
-                <Preference label="Offline" checked={preferences.offline} onChange={() => setPreferences({ ...preferences, offline: !preferences.offline })} />
-              </div>
-            </Section>
-          </div>
-
-          <div style={settingsColumn}>
-            <Section title="Alert Routing" sub="Escalation behavior for warnings">
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
-                <RouteItem title="Manual Alert" text="Critical banner until reviewed." color={C.red} />
-                <RouteItem title="No Chest Contact" text="Readings marked invalid." color={C.amber} />
-                <RouteItem title="Offline Device" text="Old telemetry is labeled offline." color={C.offline} />
-                <RouteItem title="Normal Readings" text="Green indicators inside range." color={C.green} />
-              </div>
-            </Section>
-
-            <Section title="Device Defaults" sub="Applied to registered miners">
+              {!pushEnabled && (
+                <div style={{ padding: "9px 12px", background: `${C.amber}0D`, border: `1px solid ${C.amber}2A`, borderRadius: 8, marginBottom: 12 }}>
+                  <div style={{ color: C.amber, fontSize: 11, fontWeight: 700 }}>Notifications are off — alerts will still appear on screen but no sound or browser pop-up will fire.</div>
+                </div>
+              )}
+              {"Notification" in window && Notification.permission === "denied" && pushEnabled && (
+                <div style={{ padding: "9px 12px", background: `${C.red}0D`, border: `1px solid ${C.red}2A`, borderRadius: 8, marginBottom: 12 }}>
+                  <div style={{ color: C.red, fontSize: 11, fontWeight: 700 }}>Browser notifications are blocked. Allow them in your browser settings to receive pop-up alerts.</div>
+                </div>
+              )}
               <div style={{ display: "grid", gap: 8 }}>
-                <DefaultRow label="Device ID format" value="MCM-###" />
-                <DefaultRow label="Default status" value="Offline until telemetry arrives" />
-                <DefaultRow label="Required sensors" value="Heart-rate + SpO2" />
-                <DefaultRow label="Valid reading" value="Chest contact required" />
+                <AlertRow label="Critical Alert" description="Manual button pressed or SpO2 dangerously low" color={C.red} />
+                <AlertRow label="Warning Alert" description="Heart rate out of range or chest contact lost" color={C.amber} />
+                <AlertRow label="Device Offline" description="A miner stops sending data past the offline timeout" color={C.offline} />
               </div>
-            </Section>
+            </SettingsCard>
           </div>
-        </main>
+        </div>
 
-        <footer style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", minWidth: 0 }}>
-          <button onClick={requestSave} style={{ ...primaryButtonStyle, padding: "11px 24px", fontSize: 13 }}>Save Settings</button>
-          <button onClick={resetLocalEdits} style={{ ...ghostButtonStyle, padding: "11px 16px", fontSize: 13 }}>Reset Local Edits</button>
-          {confirmSave && (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, border: `1px solid ${C.amber}55`, background: `${C.amber}12`, color: C.textDim, borderRadius: 7, padding: "8px 10px", fontSize: 12, flexWrap: "wrap" }}>
-              Confirm settings update?
-              <button onClick={() => setConfirmSave(false)} style={{ ...ghostButtonStyle, padding: "5px 8px", fontSize: 11 }}>Cancel</button>
-              <button onClick={save} style={{ ...primaryButtonStyle, padding: "5px 8px", fontSize: 11 }}>Confirm</button>
+        <footer style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingTop: 2 }}>
+          <button onClick={requestSave} style={{ ...primaryButtonStyle, padding: "11px 28px", fontSize: 13 }}>Save Changes</button>
+          <button onClick={discard} style={{ ...ghostButtonStyle, padding: "11px 18px", fontSize: 13 }}>Discard Changes</button>
+          {saved && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: C.green, fontWeight: 800 }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.green, display: "inline-block" }} />
+              Settings saved
             </span>
           )}
-          {saved && <span style={{ fontSize: 12, color: C.green, fontWeight: 800 }}>Settings saved successfully</span>}
           {error && <span style={{ fontSize: 12, color: C.red, fontWeight: 800 }}>{error}</span>}
         </footer>
       </div>
@@ -133,98 +246,166 @@ export default function SettingsPage({ miners, thresholds, setThresholds, pollin
   );
 }
 
-function Section({ title, sub, children, compact }) {
+function StepperField({ label, value, onChange, min, max }) {
+  const dec = () => onChange(Math.max(min ?? -Infinity, value - 1));
+  const inc = () => onChange(Math.min(max ?? Infinity, value + 1));
   return (
-    <section style={{ ...cardStyle, padding: compact ? "12px 14px" : "13px 15px", minWidth: 0, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-      <div style={{ marginBottom: 12, flexShrink: 0 }}>
-        <div style={moduleLabel}>CFG-MOD</div>
-        <div style={{ fontSize: 15, fontWeight: 950, color: C.text, marginTop: 3 }}>{title}</div>
-        <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>{sub}</div>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
+      <span style={{ color: C.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 900 }}>{label}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <button onClick={dec} style={stepBtnStyle} disabled={min !== undefined && value <= min}>−</button>
+        <div style={{ color: C.text, fontSize: 22, fontWeight: 950, minWidth: 46, textAlign: "center", lineHeight: 1, userSelect: "none" }}>{value}</div>
+        <button onClick={inc} style={stepBtnStyle} disabled={max !== undefined && value >= max}>+</button>
       </div>
-      <div style={{ minHeight: 0 }}>{children}</div>
+    </div>
+  );
+}
+
+const stepBtnStyle = {
+  width: 28,
+  height: 28,
+  borderRadius: 7,
+  background: "rgba(255,255,255,0.06)",
+  border: `1px solid rgba(255,255,255,0.12)`,
+  color: C.text,
+  fontSize: 16,
+  fontWeight: 700,
+  cursor: "pointer",
+  display: "grid",
+  placeItems: "center",
+  lineHeight: 1,
+  flexShrink: 0,
+};
+
+function Toggle({ value, onChange }) {
+  return (
+    <button
+      onClick={() => onChange(!value)}
+      role="switch"
+      aria-checked={value}
+      style={{
+        width: 44,
+        height: 24,
+        borderRadius: 999,
+        background: value ? C.green : "rgba(255,255,255,0.1)",
+        border: `1px solid ${value ? C.green : "rgba(255,255,255,0.15)"}`,
+        cursor: "pointer",
+        position: "relative",
+        flexShrink: 0,
+        padding: 0,
+        transition: "background 0.18s, border-color 0.18s",
+      }}
+    >
+      <span
+        style={{
+          position: "absolute",
+          top: 3,
+          left: value ? 21 : 3,
+          width: 16,
+          height: 16,
+          borderRadius: "50%",
+          background: C.text,
+          transition: "left 0.18s",
+        }}
+      />
+    </button>
+  );
+}
+
+function SettingsCard({ number, title, description, children }) {
+  return (
+    <section style={{ ...cardStyle, padding: "18px 20px", minWidth: 0 }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 16 }}>
+        <div style={{ width: 30, height: 30, borderRadius: 8, background: `${C.primary}1A`, border: `1px solid ${C.primary}44`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+          <span style={{ color: C.primary, fontSize: 11, fontWeight: 900 }}>{number}</span>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ color: C.text, fontSize: 15, fontWeight: 950 }}>{title}</div>
+          <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4, lineHeight: 1.5 }}>{description}</div>
+        </div>
+      </div>
+      {children}
     </section>
   );
 }
 
-function Field({ label, value, onChange, type = "text" }) {
+function SettingField({ label, unit, value, onChange, hint }) {
   return (
-    <label>
-      <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 6, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 900 }}>{label}</div>
-      <input type={type} value={value} onChange={(event) => onChange(event.target.value)} style={{ ...controlStyle, width: "100%" }} />
+    <label style={{ display: "grid", gap: 5 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <span style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 900 }}>{label}</span>
+        <span style={{ color: C.primary, fontSize: 9, fontWeight: 900, textTransform: "uppercase" }}>{unit}</span>
+      </div>
+      <input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ ...controlStyle, width: "100%", textAlign: "center", fontSize: 20, fontWeight: 950, padding: "10px 8px" }}
+      />
+      <span style={{ color: C.textMuted, fontSize: 10, lineHeight: 1.4 }}>{hint}</span>
     </label>
   );
 }
 
-function ThresholdPreview({ label, text, color }) {
+function RangeBar({ label, valueText, color }) {
   return (
-    <div style={{ marginTop: 13 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, color: C.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", flexWrap: "wrap" }}>
-        <span>{label}</span>
-        <span>{text}</span>
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+        <span style={{ color: C.textMuted, fontSize: 11 }}>{label}</span>
+        <span style={{ color, fontSize: 11, fontWeight: 900 }}>{valueText}</span>
       </div>
-      <div style={{ height: 4, borderRadius: 999, background: C.border, marginTop: 7, overflow: "hidden" }}>
-        <div style={{ width: "72%", height: "100%", marginLeft: "14%", background: color }} />
+      <div style={{ height: 3, borderRadius: 999, background: C.border, overflow: "hidden" }}>
+        <div style={{ width: "68%", height: "100%", marginLeft: "16%", background: color, borderRadius: 999 }} />
       </div>
     </div>
   );
 }
 
-function Preference({ label, checked, onChange }) {
+function StatusBox({ label, value, color, desc }) {
   return (
-    <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 9px", borderRadius: 7, border: `1px solid ${checked ? "rgba(255,106,0,0.36)" : C.border}`, background: checked ? "rgba(255,106,0,0.08)" : "rgba(255,255,255,0.02)", minWidth: 0 }}>
-      <span style={{ color: C.textDim, fontSize: 12, fontWeight: 800 }}>{label}</span>
-      <input type="checkbox" checked={checked} onChange={onChange} />
-    </label>
-  );
-}
-
-function RouteItem({ title, text, color }) {
-  return (
-    <div style={{ borderLeft: `3px solid ${color}`, padding: "8px 9px 8px 11px", background: "rgba(255,255,255,0.02)", borderRadius: 6, minWidth: 0 }}>
-      <div style={{ color: C.text, fontSize: 12, fontWeight: 950 }}>{title}</div>
-      <div style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.45, marginTop: 3 }}>{text}</div>
-    </div>
-  );
-}
-
-function DefaultRow({ label, value }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: `1px solid ${C.borderSoft}`, minWidth: 0 }}>
-      <span style={{ color: C.textMuted, fontSize: 12, minWidth: 0 }}>{label}</span>
-      <strong style={{ color: C.text, fontSize: 12, textAlign: "right", minWidth: 0, overflowWrap: "anywhere" }}>{value}</strong>
-    </div>
-  );
-}
-
-function SummaryBox({ label, value, color }) {
-  return (
-    <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 7, padding: 10, background: "rgba(255,255,255,0.02)", minWidth: 0 }}>
+    <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 8, padding: "11px 13px", background: "rgba(255,255,255,0.02)" }}>
       <div style={{ color: C.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
-      <div style={{ color, fontSize: 22, fontWeight: 950, marginTop: 5 }}>{value}</div>
+      <div style={{ color, fontSize: 26, fontWeight: 950, marginTop: 4 }}>{value}</div>
+      <div style={{ color: C.textMuted, fontSize: 10, marginTop: 2 }}>{desc}</div>
     </div>
   );
 }
 
-function StatusPill({ label, color }) {
-  return <span style={{ color, border: `1px solid ${color}55`, background: `${color}14`, borderRadius: 999, padding: "7px 10px", fontSize: 11, fontWeight: 900 }}>{label}</span>;
+function InfoRow({ label, text }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 10, padding: "9px 11px", background: "rgba(255,255,255,0.025)", borderRadius: 7, border: `1px solid ${C.borderSoft}` }}>
+      <span style={{ color: C.primary, fontSize: 11, fontWeight: 900, whiteSpace: "nowrap", paddingTop: 1 }}>{label}</span>
+      <span style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.5 }}>{text}</span>
+    </div>
+  );
 }
 
-const settingsGrid = {
-  display: "grid",
-  gridTemplateColumns: "0.95fr 1.45fr 1.45fr",
-  gap: 12,
-  minHeight: 0,
-  overflow: "hidden",
-};
+function AlertRow({ label, description, color }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 8, border: `1px solid ${color}2A`, background: `${color}08` }}>
+      <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0, boxShadow: `0 0 8px ${color}` }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ color: C.text, fontSize: 13, fontWeight: 900 }}>{label}</div>
+        <div style={{ color: C.textMuted, fontSize: 11, marginTop: 2 }}>{description}</div>
+      </div>
+    </div>
+  );
+}
 
-const settingsColumn = {
-  display: "grid",
-  gridTemplateRows: "auto auto",
-  alignContent: "start",
-  gap: 12,
-  minWidth: 0,
-  minHeight: 0,
-};
+function Pill({ value, label, color }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color, border: `1px solid ${color}44`, background: `${color}12`, borderRadius: 999, padding: "6px 12px", fontSize: 12, fontWeight: 900 }}>
+      <span style={{ fontSize: 15, fontWeight: 950 }}>{value}</span>
+      {label}
+    </span>
+  );
+}
 
-const compactGrid = { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 };
-const moduleLabel = { color: C.primary, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 900 };
+function SettingSummaryRow({ label, value, color }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "8px 10px", background: "rgba(255,255,255,0.025)", borderRadius: 7, border: `1px solid ${C.borderSoft}` }}>
+      <span style={{ color: C.textMuted, fontSize: 12 }}>{label}</span>
+      <strong style={{ color, fontSize: 12 }}>{value}</strong>
+    </div>
+  );
+}

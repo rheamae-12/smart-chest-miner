@@ -2,19 +2,20 @@ import { useMemo, useState } from "react";
 import Modal from "../components/Modal";
 import StatusBadge from "../components/StatusBadge";
 import { registerDevice, removeDevice, updateDevice, writeActivityLog } from "../firebase/database";
-import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
-import { formatLastSeen, formatReading } from "../utils/formatters";
+import { C, cardStyle, controlStyle, ghostButtonStyle, moduleLabel, pageStyle, primaryButtonStyle } from "../theme";
+import { formatLastSeen, formatReading, lastSeenValue } from "../utils/formatters";
 
 const EMPTY_FORM = { id: "", name: "", location: "" };
 
 export default function DevicesPage({ miners, setMiners }) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
-  const [modal, setModal] = useState(null);
+  const [formModal, setFormModal] = useState(null); // "register" | "edit" | null
   const [form, setForm] = useState(EMPTY_FORM);
-  const [message, setMessage] = useState("");
+  const [formError, setFormError] = useState("");
+  const [confirmModal, setConfirmModal] = useState(null); // { type, title, detail, payload?, error? }
+  const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState("");
-  const [confirm, setConfirm] = useState(null);
 
   const filtered = useMemo(
     () =>
@@ -36,184 +37,150 @@ export default function DevicesPage({ miners, setMiners }) {
   };
 
   const openRegister = () => {
-    setMessage("");
-    setConfirm(null);
+    setFormError("");
     setForm(EMPTY_FORM);
-    setModal("register");
+    setFormModal("register");
   };
 
   const openEdit = (miner) => {
-    setMessage("");
-    setConfirm(null);
+    setFormError("");
     setForm({ id: miner.id, name: miner.name, location: miner.location });
-    setModal("edit");
+    setFormModal("edit");
   };
 
-  const requestSaveDevice = () => {
+  const requestSave = () => {
     const next = {
       id: form.id.trim().toUpperCase(),
       name: form.name.trim(),
       location: form.location.trim(),
     };
-
     if (!next.id || !next.name || !next.location) {
-      setMessage("Device ID, miner name, and location are required.");
+      setFormError("Device ID, miner name, and location are required.");
       return;
     }
-    if (modal === "register" && miners.some((miner) => miner.id.toLowerCase() === next.id.toLowerCase())) {
-      setMessage("A device with that ID already exists.");
+    if (formModal === "register" && miners.some((m) => m.id.toLowerCase() === next.id.toLowerCase())) {
+      setFormError("A device with that ID already exists.");
       return;
     }
-
-    setConfirm({
-      action: "save",
-      title: modal === "register" ? "Confirm device registration" : "Confirm device update",
-      detail: modal === "register" ? `Register ${next.name} as ${next.id}?` : `Save changes for ${next.name}?`,
+    setFormModal(null);
+    setFormError("");
+    setConfirmModal({
+      type: formModal,
+      title: formModal === "register" ? "Confirm Registration" : "Confirm Update",
+      detail: formModal === "register"
+        ? `Register ${next.name} as device ${next.id} at ${next.location}?`
+        : `Save changes to ${next.name} (${next.id})?`,
       payload: next,
     });
   };
 
-  const saveDevice = async (next) => {
-    if (modal === "register") {
-      const newDevice = {
-        ...next,
-        active: false,
-        status: "offline",
-        lastSeen: null,
-        hr: 0,
-        spo2: 0,
-        finger: false,
-        manual_alert: false,
-      };
-      try {
-        await registerDevice(newDevice);
-      } catch (error) {
-        setMessage(`Firebase registration failed: ${error.message || "Check database rules and connection."}`);
-        return;
-      }
-
-      setNotice("Device registered in Firebase.");
-      setMiners((prev) => {
-        const existing = prev.some((miner) => miner.id === newDevice.id);
-        const nextMiners = existing ? prev.map((miner) => (miner.id === newDevice.id ? { ...miner, ...newDevice } : miner)) : [...prev, newDevice];
-        return nextMiners.sort((a, b) => a.id.localeCompare(b.id));
-      });
-      await persist(
-        () =>
-          writeActivityLog({
-            deviceId: newDevice.id,
-            miner: newDevice.name,
-            type: "crud",
-            status: "registered",
-            severity: "info",
-            title: "Device registered",
-            detail: `${newDevice.name} was added to the miner registry.`,
-          }),
-        "",
-      );
-    } else {
-      try {
-        await updateDevice(form.id, { name: next.name, location: next.location });
-      } catch (error) {
-        setMessage(`Firebase update failed: ${error.message || "Check database rules and connection."}`);
-        return;
-      }
-
-      setNotice("Device updated in Firebase.");
-      setMiners((prev) => prev.map((miner) => (miner.id === form.id ? { ...miner, name: next.name, location: next.location } : miner)));
-      await persist(
-        () =>
-          writeActivityLog({
-            deviceId: form.id,
-            miner: next.name,
-            type: "crud",
-            status: "updated",
-            severity: "info",
-            title: "Device updated",
-            detail: `${next.name} registry details were updated.`,
-          }),
-        "",
-      );
-    }
-
-    setConfirm(null);
-    setModal(null);
-    setForm(EMPTY_FORM);
-  };
-
-  const confirmRemove = (miner) => {
-    setMessage("");
-    setConfirm(null);
-    setForm({ id: miner.id, name: miner.name, location: miner.location });
-    setModal("remove");
-  };
-
-  const requestDeleteDevice = () => {
-    setConfirm({
-      action: "remove",
-      title: "Confirm device removal",
-      detail: `Remove ${form.name} (${form.id}) from the registry and Firebase when available?`,
+  const requestRemove = (miner) => {
+    setConfirmModal({
+      type: "remove",
+      title: "Remove Device",
+      detail: `Remove ${miner.name} (${miner.id}) from the registry? The device will be archived so it cannot automatically re-register.`,
+      payload: { id: miner.id, name: miner.name, location: miner.location },
     });
   };
 
-  const deleteDevice = async () => {
-    try {
-      await removeDevice(form.id);
-    } catch (error) {
-      setMessage(`Firebase removal failed: ${error.message || "Check database rules and connection."}`);
-      return;
-    }
+  const executeConfirmed = async () => {
+    setSubmitting(true);
+    const { type, payload } = confirmModal;
 
-    setMiners((prev) => prev.filter((miner) => miner.id !== form.id));
-    setNotice("Device removed from Firebase.");
-    await persist(
-      () =>
-        writeActivityLog({
-          deviceId: form.id,
-          miner: form.name,
-          type: "crud",
-          status: "removed",
-          severity: "warning",
-          title: "Device removed",
-          detail: `${form.name} was removed from the miner registry.`,
-        }),
-      "",
-    );
-    setConfirm(null);
-    setModal(null);
-    setForm(EMPTY_FORM);
+    try {
+      if (type === "register") {
+        const newDevice = { ...payload, active: false, status: "offline", lastSeen: null, hr: 0, spo2: 0, finger: false, manual_alert: false };
+        await registerDevice(newDevice);
+        setMiners((prev) => {
+          const existing = prev.some((m) => m.id === newDevice.id);
+          return (existing
+            ? prev.map((m) => (m.id === newDevice.id ? { ...m, ...newDevice } : m))
+            : [...prev, newDevice]
+          ).sort((a, b) => a.id.localeCompare(b.id));
+        });
+        await persist(() => writeActivityLog({ deviceId: newDevice.id, miner: newDevice.name, type: "crud", status: "registered", severity: "info", title: "Device registered", detail: `${newDevice.name} was added to the miner registry.` }), "");
+        showNotice(`${payload.name} registered successfully.`);
+
+      } else if (type === "edit") {
+        await updateDevice(payload.id, { name: payload.name, location: payload.location });
+        setMiners((prev) => prev.map((m) => (m.id === payload.id ? { ...m, name: payload.name, location: payload.location } : m)));
+        await persist(() => writeActivityLog({ deviceId: payload.id, miner: payload.name, type: "crud", status: "updated", severity: "info", title: "Device updated", detail: `${payload.name} registry details were updated.` }), "");
+        showNotice(`${payload.name} updated successfully.`);
+
+      } else if (type === "remove") {
+        await removeDevice(payload.id);
+        setMiners((prev) => prev.filter((m) => m.id !== payload.id));
+        await persist(() => writeActivityLog({ deviceId: payload.id, miner: payload.name, type: "crud", status: "removed", severity: "warning", title: "Device removed", detail: `${payload.name} was removed from the miner registry.` }), "");
+        showNotice(`${payload.name} removed.`);
+      }
+
+      setConfirmModal(null);
+      setForm(EMPTY_FORM);
+    } catch (error) {
+      setConfirmModal((prev) => ({ ...prev, error: `Failed: ${error.message || "Check database rules and connection."}` }));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const title = modal === "register" ? "Register Device" : modal === "edit" ? "Edit Device" : "Remove Device";
+  const showNotice = (text) => {
+    setNotice(text);
+    setTimeout(() => setNotice(""), 3000);
+  };
 
   return (
     <div style={pageStyle}>
-      {modal && (
+
+      {/* Form modal — register or edit */}
+      {formModal && (
         <Modal
-          title={title}
-          onClose={() => setModal(null)}
+          title={formModal === "register" ? "Register New Device" : "Edit Device"}
+          onClose={() => setFormModal(null)}
           actions={
             <>
-              <Button onClick={() => setModal(null)}>Cancel</Button>
-              {modal === "remove" ? <Button danger onClick={requestDeleteDevice}>Remove</Button> : <Button primary onClick={requestSaveDevice}>Save</Button>}
+              <Button onClick={() => setFormModal(null)}>Cancel</Button>
+              <Button primary onClick={requestSave}>
+                {formModal === "register" ? "Register" : "Save Changes"}
+              </Button>
             </>
           }
         >
-          {modal === "remove" ? (
-            <div style={{ color: C.textDim, fontSize: 13, lineHeight: 1.6 }}>
-              Remove <strong style={{ color: C.text }}>{form.name}</strong> from the registry? The device will be archived in Firebase so active hardware cannot automatically add it back.
+          <DeviceForm form={form} setForm={setForm} lockId={formModal === "edit"} />
+          {formError && <div style={{ marginTop: 12, color: C.amber, fontSize: 12 }}>{formError}</div>}
+        </Modal>
+      )}
+
+      {/* Confirmation modal — separate from form modal */}
+      {confirmModal && (
+        <Modal
+          title={confirmModal.title}
+          onClose={() => { if (!submitting) setConfirmModal(null); }}
+          actions={
+            <>
+              <Button onClick={() => setConfirmModal(null)} disabled={submitting}>Cancel</Button>
+              <Button
+                primary={confirmModal.type !== "remove"}
+                danger={confirmModal.type === "remove"}
+                onClick={executeConfirmed}
+                disabled={submitting}
+              >
+                {submitting
+                  ? "Processing..."
+                  : confirmModal.type === "remove"
+                  ? "Remove Device"
+                  : confirmModal.type === "register"
+                  ? "Register"
+                  : "Save Changes"}
+              </Button>
+            </>
+          }
+        >
+          <ConfirmBody modal={confirmModal} />
+          {confirmModal.error && (
+            <div style={{ marginTop: 12, padding: "9px 12px", background: `${C.red}0D`, border: `1px solid ${C.red}2A`, borderRadius: 8, color: C.red, fontSize: 12 }}>
+              {confirmModal.error}
             </div>
-          ) : (
-            <DeviceForm form={form} setForm={setForm} lockId={modal === "edit"} />
           )}
-          {confirm && (
-            <ConfirmationStrip
-              confirm={confirm}
-              onCancel={() => setConfirm(null)}
-              onConfirm={() => (confirm.action === "remove" ? deleteDevice() : saveDevice(confirm.payload))}
-            />
-          )}
-          {message && <div style={{ marginTop: 12, color: C.amber, fontSize: 12 }}>{message}</div>}
         </Modal>
       )}
 
@@ -236,7 +203,11 @@ export default function DevicesPage({ miners, setMiners }) {
           </div>
         </section>
 
-        {notice && <div style={{ color: C.amber, fontSize: 12 }}>{notice}</div>}
+        {notice && (
+          <div style={{ padding: "9px 14px", background: `${C.green}0F`, border: `1px solid ${C.green}2A`, borderRadius: 8, color: C.green, fontSize: 12, fontWeight: 700 }}>
+            {notice}
+          </div>
+        )}
 
         <section style={{ display: "grid", gridTemplateColumns: "210px minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
           <aside style={{ display: "grid", gridTemplateRows: "auto auto 1fr", gap: 12, minHeight: 0 }}>
@@ -249,7 +220,7 @@ export default function DevicesPage({ miners, setMiners }) {
             </div>
             <div style={{ ...cardStyle, padding: 14 }}>
               <div style={moduleLabel}>Registration guide</div>
-              <p style={{ color: C.textMuted, fontSize: 12, lineHeight: 1.5, margin: "10px 0 0" }}>Use stable IDs like MCM-001. The device becomes online automatically when fresh telemetry is received.</p>
+              <p style={{ color: C.textMuted, fontSize: 12, lineHeight: 1.5, margin: "10px 0 0" }}>Use stable IDs like MCM-001. The device becomes online automatically when new sensor data is received.</p>
             </div>
           </aside>
 
@@ -268,7 +239,7 @@ export default function DevicesPage({ miners, setMiners }) {
                 <span>Actions</span>
               </div>
               {filtered.map((miner) => (
-                <div key={miner.id} style={tableRow}>
+                <div key={miner.id} className="data-row" style={tableRow}>
                   <div>
                     <div style={{ color: C.primary, fontWeight: 900 }}>{miner.id}</div>
                     <div style={{ color: C.textMuted, fontSize: 10, marginTop: 3 }}>{miner.location}</div>
@@ -276,7 +247,6 @@ export default function DevicesPage({ miners, setMiners }) {
                   <div>
                     <div style={{ color: C.text, fontWeight: 900 }}>{miner.name}</div>
                     <StatusBadge active={miner.active} />
-                    <div style={{ color: miner.active ? C.green : C.offline, fontSize: 10, fontWeight: 900, marginTop: 4 }}>{miner.active ? "ONLINE IN FIREBASE" : "OFFLINE IN FIREBASE"}</div>
                   </div>
                   <div style={{ display: "grid", gap: 4 }}>
                     <span style={{ color: C.red, fontWeight: 900 }}>HR {miner.active ? formatReading(miner.hr, 0) : "--"} bpm</span>
@@ -289,7 +259,7 @@ export default function DevicesPage({ miners, setMiners }) {
                   <LastSeenCell miner={miner} />
                   <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     <Button compact onClick={() => openEdit(miner)}>Edit</Button>
-                    <Button compact danger onClick={() => confirmRemove(miner)}>Delete</Button>
+                    <Button compact danger onClick={() => requestRemove(miner)}>Delete</Button>
                   </span>
                 </div>
               ))}
@@ -302,14 +272,32 @@ export default function DevicesPage({ miners, setMiners }) {
   );
 }
 
-async function persist(action, fallbackMessage) {
-  try {
-    const saved = await action();
-    if (saved === false) return fallbackMessage;
-  } catch {
-    return fallbackMessage;
-  }
-  return "";
+async function persist(action) {
+  try { await action(); } catch { /* activity log failure is non-fatal */ }
+}
+
+function ConfirmBody({ modal }) {
+  const isRemove = modal.type === "remove";
+  const accentColor = isRemove ? C.red : C.primary;
+  const iconLabel = isRemove ? "DEL" : modal.type === "register" ? "NEW" : "UPD";
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+        <div style={{ width: 38, height: 38, borderRadius: 8, background: `${accentColor}18`, border: `1px solid ${accentColor}40`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+          <span style={{ color: accentColor, fontSize: 10, fontWeight: 900, letterSpacing: "0.05em" }}>{iconLabel}</span>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ color: C.text, fontSize: 14, fontWeight: 900 }}>{modal.title}</div>
+          <div style={{ color: C.textMuted, fontSize: 13, lineHeight: 1.65, marginTop: 6 }}>{modal.detail}</div>
+        </div>
+      </div>
+      {isRemove && (
+        <div style={{ marginTop: 14, padding: "10px 12px", background: `${C.red}0D`, border: `1px solid ${C.red}2A`, borderRadius: 8 }}>
+          <div style={{ color: C.red, fontSize: 11, fontWeight: 700 }}>This action archives the device in Firebase. It will not automatically re-register.</div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function DeviceForm({ form, setForm, lockId }) {
@@ -331,34 +319,25 @@ function Field({ label, value, onChange, placeholder, disabled }) {
   );
 }
 
-function Button({ children, primary, danger, compact, onClick }) {
+function Button({ children, primary, danger, compact, disabled, onClick }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       style={{
         ...(primary ? primaryButtonStyle : ghostButtonStyle),
-        padding: compact ? "6px 8px" : "9px 15px",
+        padding: compact ? "5px 10px" : "9px 15px",
         color: primary ? C.text : danger ? C.red : C.textDim,
         fontWeight: primary ? 900 : 800,
         fontSize: compact ? 11 : 13,
         whiteSpace: "nowrap",
+        opacity: disabled ? 0.5 : 1,
+        cursor: disabled ? "not-allowed" : "pointer",
+        ...(danger && !primary && { borderColor: `${C.red}44`, background: `${C.red}0A` }),
       }}
     >
       {children}
     </button>
-  );
-}
-
-function ConfirmationStrip({ confirm, onCancel, onConfirm }) {
-  return (
-    <div style={{ marginTop: 13, border: `1px solid ${C.amber}55`, background: `${C.amber}12`, borderRadius: 7, padding: 12 }}>
-      <div style={{ color: C.amber, fontSize: 12, fontWeight: 900 }}>{confirm.title}</div>
-      <div style={{ color: C.textDim, fontSize: 12, lineHeight: 1.45, marginTop: 4 }}>{confirm.detail}</div>
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
-        <Button compact onClick={onCancel}>Cancel</Button>
-        <Button compact primary onClick={onConfirm}>Confirm</Button>
-      </div>
-    </div>
   );
 }
 
@@ -386,10 +365,6 @@ function LastSeenCell({ miner }) {
   );
 }
 
-function lastSeenValue(miner) {
-  return miner.lastSeen?.getTime?.() || Number(miner.lastSeen) || 0;
-}
-
 const tableHeader = {
   display: "grid",
   gridTemplateColumns: "1.1fr 1fr 1fr 1.15fr 1fr 110px",
@@ -413,5 +388,3 @@ const tableRow = {
   alignItems: "center",
   fontSize: 12,
 };
-
-const moduleLabel = { color: C.primary, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 900 };

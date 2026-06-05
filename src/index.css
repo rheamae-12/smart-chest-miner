@@ -581,6 +581,30 @@ input:-webkit-autofill:focus {
   }
 }
 
+/* Staggered page-in reveal for card sections */
+.stagger-1 { animation: pageIn 0.26s ease 0.04s both; }
+.stagger-2 { animation: pageIn 0.26s ease 0.10s both; }
+.stagger-3 { animation: pageIn 0.26s ease 0.16s both; }
+.stagger-4 { animation: pageIn 0.26s ease 0.22s both; }
+
+/* Smooth table / list row hover */
+.data-row {
+  transition: background 0.14s ease;
+}
+.data-row:hover {
+  background: rgba(255, 255, 255, 0.026) !important;
+}
+
+/* Selected card orange glow */
+.card-selected {
+  box-shadow: 0 0 0 1px rgba(255, 106, 0, 0.30), 0 8px 28px rgba(255, 106, 0, 0.10) !important;
+}
+
+/* Active / online pulse dot */
+.dot-live {
+  animation: pulse 2.2s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
