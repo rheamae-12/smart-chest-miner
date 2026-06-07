@@ -13,6 +13,7 @@ const EMPTY_FORM = {
   applyOnNextBoot: true,
 };
 
+// WifiConfigPage — WiFi provisioning table: assign, edit, and delete per-device network configurations
 export default function WifiConfigPage({ miners }) {
   const [configs, setConfigs] = useState({});
   const [history, setHistory] = useState({});
@@ -261,9 +262,21 @@ export default function WifiConfigPage({ miners }) {
                   <span style={{ color: config?.ssid ? C.primary : C.textMuted, fontWeight: 900 }}>{config?.ssid || "Not configured"}</span>
                   <span style={{ color: C.textDim }}>{config?.security || "--"}</span>
                   <span style={{ color: C.textMuted }}>{config?.updatedAt ? formatSystemTimestamp(config.updatedAt) : "NEVER"}</span>
-                  <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <ActionButton disabled={!config} onClick={() => openEdit({ miner, config })}>Edit</ActionButton>
-                    <ActionButton danger disabled={!config} onClick={() => setDeleteRecord(config)}>Delete</ActionButton>
+                  <span style={{ display: "flex", gap: 6 }}>
+                    <IconButton title="Edit connection" disabled={!config} onClick={() => openEdit({ miner, config })}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                    </IconButton>
+                    <IconButton title="Delete connection" danger disabled={!config} onClick={() => setDeleteRecord(config)}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                        <path d="M10 11v6M14 11v6" />
+                        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                      </svg>
+                    </IconButton>
                   </span>
                 </div>
               ))}
@@ -276,6 +289,7 @@ export default function WifiConfigPage({ miners }) {
   );
 }
 
+// Field — labelled form field wrapper used inside the assign/edit modal
 function Field({ label, children }) {
   return (
     <label style={{ display: "grid", gap: 6 }}>
@@ -285,10 +299,12 @@ function Field({ label, children }) {
   );
 }
 
+// StatusPill — outlined count pill shown in the page header (e.g. "3 connection rows")
 function StatusPill({ label, color }) {
   return <span style={{ color, border: `1px solid ${color}55`, background: `${color}14`, borderRadius: 999, padding: "7px 10px", fontSize: 11, fontWeight: 900 }}>{label}</span>;
 }
 
+// Indicator — glowing dot + label used to explain the "Pending" queue status
 function Indicator({ label, color }) {
   return (
     <div style={{ display: "inline-flex", alignItems: "center", gap: 7, color: C.textMuted, fontSize: 11 }}>
@@ -298,20 +314,25 @@ function Indicator({ label, color }) {
   );
 }
 
-function ActionButton({ children, danger, disabled, onClick }) {
+// IconButton — 30×30 square icon button for Edit (pencil) and Delete (trash) WiFi rows
+function IconButton({ children, danger, disabled, onClick, title }) {
   return (
     <button
       disabled={disabled}
       onClick={onClick}
+      title={title}
       style={{
-        ...ghostButtonStyle,
-        padding: "5px 10px",
+        width: 30,
+        height: 30,
+        border: `1px solid ${danger ? `${C.red}44` : C.borderSoft}`,
+        borderRadius: 7,
+        background: danger ? `${C.red}0A` : "transparent",
         color: danger ? C.red : C.textDim,
-        fontSize: 11,
-        fontWeight: 900,
-        opacity: disabled ? 0.45 : 1,
+        display: "grid",
+        placeItems: "center",
         cursor: disabled ? "not-allowed" : "pointer",
-        ...(danger && { borderColor: `${C.red}44`, background: `${C.red}0A` }),
+        opacity: disabled ? 0.4 : 1,
+        flexShrink: 0,
       }}
     >
       {children}
@@ -319,6 +340,7 @@ function ActionButton({ children, danger, disabled, onClick }) {
   );
 }
 
+// buildRows — merges history records + legacy device configs + unconfigured miners into a sortable table list
 function buildRows(miners, history, configs, search) {
   const minerById = new Map(miners.map((miner) => [miner.id, miner]));
   const historyRows = Object.entries(history || {}).map(([id, config]) => {
@@ -352,17 +374,19 @@ function buildRows(miners, history, configs, search) {
     .sort((a, b) => wifiRowTime(b) - wifiRowTime(a) || a.miner.id.localeCompare(b.miner.id));
 }
 
+// isSuccessMessage — returns true when the status message indicates a completed operation (green text)
 function isSuccessMessage(message) {
   return /saved|updated|deleted|queued/i.test(message);
 }
 
+// wifiRowTime — extracts the best available timestamp for sorting a WiFi table row
 function wifiRowTime(row) {
   return Number(row.config?.updatedAt) || Number(row.config?.createdAt) || lastSeenValue(row.miner);
 }
 
 const tableHeader = {
   display: "grid",
-  gridTemplateColumns: "1.2fr 0.75fr 1fr 0.7fr 1.15fr 110px",
+  gridTemplateColumns: "1.2fr 0.75fr 1fr 0.7fr 1.15fr 72px",
   gap: 12,
   minWidth: 980,
   padding: "10px 14px",
@@ -375,7 +399,7 @@ const tableHeader = {
 
 const tableRow = {
   display: "grid",
-  gridTemplateColumns: "1.2fr 0.75fr 1fr 0.7fr 1.15fr 110px",
+  gridTemplateColumns: "1.2fr 0.75fr 1fr 0.7fr 1.15fr 72px",
   gap: 12,
   minWidth: 980,
   padding: "13px 14px",

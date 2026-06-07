@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { C } from "../theme";
 
+// Modal — centered overlay dialog. Closes on Escape key or backdrop click.
+// Props: title (header text), children (body), actions (footer buttons), onClose (handler)
 export default function Modal({ title, children, actions, onClose }) {
   useEffect(() => {
     const onKeyDown = (event) => {

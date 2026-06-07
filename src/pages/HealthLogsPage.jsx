@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import Modal from "../components/Modal";
 import { C, cardStyle, controlStyle, ghostButtonStyle, moduleLabel, pageStyle, primaryButtonStyle } from "../theme";
 import { DEFAULT_THRESHOLDS } from "../utils/alertChecker";
@@ -72,11 +72,12 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
           </label>
         </section>
 
-        <section style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+        <section style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <Summary label="Sessions" value={sessions.length} color={C.primary} />
           <Summary label="Manual Alerts" value={manualAlerts} color={manualAlerts ? C.red : C.green} />
           <Summary label="Healthy Miners" value={visibleMiners.length - unhealthy} unit={`/${visibleMiners.length}`} color={unhealthy ? C.amber : C.green} />
           <Summary label="Readings Logged" value={chartData.length} color={C.amber} />
+          <Summary label="Avg Body Temp" value={formatReading(average(chartData.map((row) => row.temp).filter(Boolean)), 1)} unit="°C" color={C.teal} />
         </section>
 
         <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 300px", gap: 12, minHeight: 0 }}>
@@ -86,7 +87,7 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
               <div style={{ minHeight: 0, border: `1px solid ${C.borderSoft}`, borderRadius: 8, background: "#151515", padding: 8 }}>
                 {chartData.length ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData} margin={{ top: 8, right: 16, left: -18, bottom: 0 }}>
+                    <ComposedChart data={chartData} margin={{ top: 8, right: 44, left: -18, bottom: 0 }}>
                       <defs>
                         <linearGradient id="healthHr" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor={C.red} stopOpacity={0.2} />
@@ -95,11 +96,13 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
                       </defs>
                       <CartesianGrid stroke={C.borderSoft} vertical={false} />
                       <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={24} />
-                      <YAxis tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
+                      <YAxis yAxisId="vital" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
+                      <YAxis yAxisId="temp" orientation="right" domain={[34, 42]} tick={{ fill: C.teal, fontSize: 10 }} axisLine={false} tickLine={false} width={38} unit="°C" />
                       <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
-                      <Area type="monotone" dataKey="hr" name="Heart Rate" stroke={C.red} fill="url(#healthHr)" strokeWidth={2} dot={false} isAnimationActive={false} />
-                      <Area type="monotone" dataKey="spo2" name="SpO2" stroke={C.primary} fill="transparent" strokeWidth={1.8} dot={false} isAnimationActive={false} />
-                    </AreaChart>
+                      <Area yAxisId="vital" type="monotone" dataKey="hr" name="Heart Rate" stroke={C.red} fill="url(#healthHr)" strokeWidth={2} dot={false} isAnimationActive={false} />
+                      <Area yAxisId="vital" type="monotone" dataKey="spo2" name="SpO2" stroke={C.primary} fill="transparent" strokeWidth={1.8} dot={false} isAnimationActive={false} />
+                      <Line yAxisId="temp" type="monotone" dataKey="temp" name="Body Temp" stroke={C.teal} strokeWidth={1.8} dot={false} isAnimationActive={false} connectNulls />
+                    </ComposedChart>
                   </ResponsiveContainer>
                 ) : (
                   <div style={{ height: "100%", display: "grid", placeItems: "center", color: C.textMuted, fontSize: 13 }}>No historical readings yet.</div>
@@ -107,7 +110,7 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, color: C.textMuted, fontSize: 10, marginTop: 8 }}>
                 <span>TIME AXIS: {chartData[chartData.length - 1]?.time || "NO TIMESTAMP"}</span>
-                <span><b style={{ color: C.red }}>HR</b> BPM | <b style={{ color: C.primary }}>SpO2</b> %</span>
+                <span><b style={{ color: C.red }}>HR</b> BPM | <b style={{ color: C.primary }}>SpO2</b> % | <b style={{ color: C.teal }}>Temp</b> °C</span>
               </div>
             </div>
 
@@ -131,6 +134,7 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
                   <span>Start</span>
                   <span>End</span>
                   <span>Readings</span>
+                  <span>Avg Temp</span>
                   <span>Status</span>
                   <span>Press Count</span>
                   <span>Manual Alert</span>
@@ -148,6 +152,7 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
                       <span style={{ color: C.red, fontWeight: 900 }}>HR {session.avgHr} bpm</span>
                       <span style={{ color: C.primary, fontWeight: 900 }}>SpO2 {session.avgSpo2}%</span>
                     </div>
+                    <span style={{ color: C.teal, fontWeight: 900 }}>{session.avgTemp ? `${session.avgTemp}°C` : "--"}</span>
                     <StatusText session={session} />
                     <span style={{ color: session.manualPressCount ? C.red : C.textMuted, fontWeight: 900 }}>{session.manualPressCount}</span>
                     <span style={{ color: session.manualAlerts ? C.red : C.green, fontWeight: 900 }}>{session.manualAlerts ? "Pressed" : "Clear"}</span>
@@ -230,6 +235,7 @@ function buildSessions(miners, analyticsData, activityLogs, thresholds) {
           end: active ? "IN PROGRESS" : formatSystemTimestamp(last.timestamp),
           avgHr: formatReading(average(sessionRows.map((row) => row.hr)) || (active ? miner.hr : 0), 0),
           avgSpo2: formatReading(average(sessionRows.map((row) => row.spo2)) || (active ? miner.spo2 : 0), 0),
+          avgTemp: formatReading(average(sessionRows.map((row) => row.temp).filter(Boolean)) || (active && miner.temp ? miner.temp : 0), 1) || null,
         };
       })
       .sort((a, b) => sessionSortValue(b) - sessionSortValue(a));
@@ -261,9 +267,12 @@ function detectSensorSpike(miner, rows, thresholds) {
   const hr = Number(latest.hr || miner.hr || 0);
   const spo2 = Number(latest.spo2 || miner.spo2 || 0);
 
+  const temp = Number(latest.temp || miner.temp || 0);
   if (hr > thresholds.hrMax) return { sensor: "Heart Rate", label: `HR high spike: ${formatReading(hr, 0)} bpm`, color: C.red };
   if (hr > 0 && hr < thresholds.hrMin) return { sensor: "Heart Rate", label: `HR low spike: ${formatReading(hr, 0)} bpm`, color: C.amber };
   if (spo2 > 0 && spo2 < thresholds.spo2Min) return { sensor: "SpO2", label: `SpO2 low spike: ${formatReading(spo2, 0)}%`, color: C.red };
+  if (temp > 0 && temp > thresholds.tempMax) return { sensor: "Body Temp", label: `Temp high: ${formatReading(temp, 1)}°C`, color: C.red };
+  if (temp > 0 && temp < thresholds.tempMin) return { sensor: "Body Temp", label: `Temp low: ${formatReading(temp, 1)}°C`, color: C.amber };
 
   for (let index = 1; index < validRows.length; index += 1) {
     const previous = validRows[index - 1];
@@ -287,6 +296,7 @@ function buildChartData(miners, analyticsData) {
       time: row.time || formatSystemTimestamp(row.timestamp),
       hr: Number(row.hr) || null,
       spo2: Number(row.spo2) || null,
+      temp: Number(row.temp) || null,
     }));
 }
 
@@ -363,8 +373,8 @@ function AlertNote({ miner }) {
 
 const tableHeader = {
   display: "grid",
-  gridTemplateColumns: "1fr 1.15fr 1.15fr 0.9fr 0.9fr 0.75fr 0.85fr 1fr",
-  minWidth: 1120,
+  gridTemplateColumns: "1fr 1.1fr 1.1fr 0.85fr 0.7fr 0.85fr 0.7fr 0.8fr 1fr",
+  minWidth: 1260,
   gap: 12,
   padding: "10px 14px",
   color: C.textMuted,
@@ -376,8 +386,8 @@ const tableHeader = {
 
 const tableRow = {
   display: "grid",
-  gridTemplateColumns: "1fr 1.15fr 1.15fr 0.9fr 0.9fr 0.75fr 0.85fr 1fr",
-  minWidth: 1120,
+  gridTemplateColumns: "1fr 1.1fr 1.1fr 0.85fr 0.7fr 0.85fr 0.7fr 0.8fr 1fr",
+  minWidth: 1260,
   gap: 12,
   padding: "12px 14px",
   alignItems: "center",

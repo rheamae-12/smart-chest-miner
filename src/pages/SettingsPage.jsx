@@ -1,11 +1,13 @@
 import { useState } from "react";
 import Modal from "../components/Modal";
 import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
+import { DEFAULT_THRESHOLDS } from "../utils/alertChecker";
 
 const PUSH_ENABLED_KEY = "smart-chest-miner-push-enabled";
 
+// SettingsPage — system configuration: vital alert thresholds, offline timeout, notifications, and miner status
 export default function SettingsPage({ miners, thresholds, setThresholds, staleSeconds, setStaleSeconds }) {
-  const [localThresholds, setLocalThresholds] = useState(thresholds);
+  const [localThresholds, setLocalThresholds] = useState({ ...DEFAULT_THRESHOLDS, ...thresholds });
   const [localStaleSeconds, setLocalStaleSeconds] = useState(staleSeconds ?? 75);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -29,6 +31,14 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
       setError("SpO2 minimum must be between 70 and 100.");
       return;
     }
+    if (localThresholds.tempMin >= localThresholds.tempMax) {
+      setError("Body temperature minimum must be lower than the maximum.");
+      return;
+    }
+    if (localThresholds.tempMin < 30 || localThresholds.tempMax > 45) {
+      setError("Body temperature range must be between 30°C and 45°C.");
+      return;
+    }
     if (localStaleSeconds < 10 || localStaleSeconds > 300) {
       setError("Offline timeout must be between 10 and 300 seconds.");
       return;
@@ -45,7 +55,7 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
   };
 
   const discard = () => {
-    setLocalThresholds(thresholds);
+    setLocalThresholds({ ...DEFAULT_THRESHOLDS, ...thresholds });
     setLocalStaleSeconds(staleSeconds ?? 75);
     setError("");
   };
@@ -81,18 +91,19 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
           <div style={{ marginTop: 14, display: "grid", gap: 7 }}>
             <SettingSummaryRow label="Heart Rate Range" value={`${localThresholds.hrMin} – ${localThresholds.hrMax} BPM`} color={C.red} />
             <SettingSummaryRow label="SpO2 Minimum" value={`${localThresholds.spo2Min}%`} color={C.primary} />
+            <SettingSummaryRow label="Body Temp Range" value={`${localThresholds.tempMin} – ${localThresholds.tempMax}°C`} color={C.teal} />
             <SettingSummaryRow label="Offline Timeout" value={`${localStaleSeconds} seconds`} color={C.amber} />
           </div>
         </Modal>
       )}
 
-      <div style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gap: 14, height: "100%", minHeight: 0 }}>
+      <div style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10, height: "100%", minHeight: 0 }}>
 
-        <header style={{ ...cardStyle, padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <header style={{ ...cardStyle, padding: "12px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <div>
             <div style={{ color: C.primary, fontSize: 10, letterSpacing: "0.15em", textTransform: "uppercase", fontWeight: 900 }}>Configuration</div>
-            <div style={{ color: C.text, fontSize: 22, fontWeight: 950, marginTop: 4 }}>System Settings</div>
-            <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4 }}>Adjust alert thresholds and monitoring behavior for all connected miners.</div>
+            <div style={{ color: C.text, fontSize: 20, fontWeight: 950, marginTop: 3 }}>System Settings</div>
+            <div style={{ color: C.textMuted, fontSize: 11, marginTop: 2 }}>Adjust alert thresholds and monitoring behavior for all connected miners.</div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Pill value={online} label="Online" color={C.green} />
@@ -101,17 +112,17 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
           </div>
         </header>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, alignContent: "start", minHeight: 0 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, alignContent: "start", minHeight: 0 }}>
 
-          <div style={{ display: "grid", gap: 14, alignContent: "start" }}>
+          <div style={{ display: "grid", gap: 10, alignContent: "start" }}>
             <SettingsCard
               number="01"
               title="Vital Alert Thresholds"
               description="Set the safe limits for heart rate and blood oxygen. Readings outside these bounds trigger alerts on connected miners."
             >
-              <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ display: "grid", gap: 6 }}>
                 {/* Heart Rate row */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderRadius: 10, border: `1px solid ${C.red}30`, background: `${C.red}08` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 9, border: `1px solid ${C.red}30`, background: `${C.red}08` }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 108 }}>
                     <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.red, boxShadow: `0 0 8px ${C.red}`, flexShrink: 0 }} />
                     <span style={{ color: C.text, fontSize: 12, fontWeight: 950 }}>Heart Rate</span>
@@ -137,7 +148,7 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
                 </div>
 
                 {/* SpO2 row */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderRadius: 10, border: `1px solid ${C.primary}30`, background: `${C.primary}08` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 9, border: `1px solid ${C.primary}30`, background: `${C.primary}08` }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 108 }}>
                     <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.primary, boxShadow: `0 0 8px ${C.primary}`, flexShrink: 0 }} />
                     <span style={{ color: C.text, fontSize: 12, fontWeight: 950 }}>Blood Oxygen</span>
@@ -155,10 +166,39 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
                   <span style={{ color: C.primary, fontSize: 11, fontWeight: 900, minWidth: 30, textAlign: "right" }}>%</span>
                 </div>
 
+                {/* Body Temperature row */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 9, border: `1px solid ${C.teal}30`, background: `${C.teal}08` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 108 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.teal, boxShadow: `0 0 8px ${C.teal}`, flexShrink: 0 }} />
+                    <span style={{ color: C.text, fontSize: 12, fontWeight: 950 }}>Body Temp</span>
+                  </div>
+                  <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
+                    <StepperFieldFloat
+                      label="Min"
+                      value={localThresholds.tempMin}
+                      onChange={(v) => setHr({ tempMin: Math.min(v, localThresholds.tempMax - 0.1) })}
+                      min={30}
+                      max={localThresholds.tempMax - 0.1}
+                      step={0.5}
+                    />
+                    <span style={{ color: C.textMuted, fontSize: 16, fontWeight: 300, alignSelf: "flex-end", paddingBottom: 3, userSelect: "none" }}>—</span>
+                    <StepperFieldFloat
+                      label="Max"
+                      value={localThresholds.tempMax}
+                      onChange={(v) => setHr({ tempMax: Math.max(v, localThresholds.tempMin + 0.1) })}
+                      min={localThresholds.tempMin + 0.1}
+                      max={45}
+                      step={0.5}
+                    />
+                  </div>
+                  <span style={{ color: C.teal, fontSize: 11, fontWeight: 900, minWidth: 30, textAlign: "right" }}>°C</span>
+                </div>
+
                 {/* Range preview bars */}
-                <div style={{ display: "grid", gap: 7, padding: "6px 0 2px" }}>
+                <div style={{ display: "grid", gap: 4, padding: "2px 0 0" }}>
                   <RangeBar label="HR safe band" valueText={`${localThresholds.hrMin} – ${localThresholds.hrMax} BPM`} color={C.red} />
                   <RangeBar label="SpO2 floor" valueText={`${localThresholds.spo2Min}% and above`} color={C.primary} />
+                  <RangeBar label="Body temp safe band" valueText={`${localThresholds.tempMin} – ${localThresholds.tempMax}°C`} color={C.teal} />
                 </div>
               </div>
             </SettingsCard>
@@ -168,7 +208,7 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
               title="System Status"
               description="Live count of all registered miners and their current state."
             >
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 7 }}>
                 <StatusBox label="Total Miners" value={miners.length} color={C.primary} desc="Registered" />
                 <StatusBox label="Online Now" value={online} color={C.green} desc="Active" />
                 <StatusBox label="Offline" value={offline} color={C.offline} desc="No signal" />
@@ -177,13 +217,13 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
             </SettingsCard>
           </div>
 
-          <div style={{ display: "grid", gap: 14, alignContent: "start" }}>
+          <div style={{ display: "grid", gap: 10, alignContent: "start" }}>
             <SettingsCard
               number="02"
               title="Monitoring Timing"
               description="How long the system waits before marking a device as offline when it stops sending readings."
             >
-              <div style={{ marginBottom: 14 }}>
+              <div style={{ marginBottom: 10 }}>
                 <SettingField
                   label="Offline Timeout"
                   unit="seconds"
@@ -204,7 +244,7 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
               description="Control how the system notifies you when a miner condition is triggered."
             >
               {/* Push notification toggle */}
-              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: 9, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.025)", marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 11px", borderRadius: 8, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.025)", marginBottom: 9 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: C.text, fontSize: 13, fontWeight: 900 }}>Push Notifications</div>
                   <div style={{ color: C.textMuted, fontSize: 11, marginTop: 3, lineHeight: 1.5 }}>Alert beep and browser notification when conditions fire</div>
@@ -221,9 +261,9 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
                   <div style={{ color: C.red, fontSize: 11, fontWeight: 700 }}>Browser notifications are blocked. Allow them in your browser settings to receive pop-up alerts.</div>
                 </div>
               )}
-              <div style={{ display: "grid", gap: 8 }}>
-                <AlertRow label="Critical Alert" description="Manual button pressed or SpO2 dangerously low" color={C.red} />
-                <AlertRow label="Warning Alert" description="Heart rate out of range or chest contact lost" color={C.amber} />
+              <div style={{ display: "grid", gap: 6 }}>
+                <AlertRow label="Critical Alert" description="Manual button pressed, SpO2 dangerously low, or body temp too high" color={C.red} />
+                <AlertRow label="Warning Alert" description="Heart rate out of range, chest contact lost, or body temp too low" color={C.amber} />
                 <AlertRow label="Device Offline" description="A miner stops sending data past the offline timeout" color={C.offline} />
               </div>
             </SettingsCard>
@@ -246,6 +286,7 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
   );
 }
 
+// StepperField — integer increment/decrement control used for HR and SpO2 threshold inputs
 function StepperField({ label, value, onChange, min, max }) {
   const dec = () => onChange(Math.max(min ?? -Infinity, value - 1));
   const inc = () => onChange(Math.min(max ?? Infinity, value + 1));
@@ -254,7 +295,23 @@ function StepperField({ label, value, onChange, min, max }) {
       <span style={{ color: C.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 900 }}>{label}</span>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <button onClick={dec} style={stepBtnStyle} disabled={min !== undefined && value <= min}>−</button>
-        <div style={{ color: C.text, fontSize: 22, fontWeight: 950, minWidth: 46, textAlign: "center", lineHeight: 1, userSelect: "none" }}>{value}</div>
+        <div style={{ color: C.text, fontSize: 18, fontWeight: 950, minWidth: 40, textAlign: "center", lineHeight: 1, userSelect: "none" }}>{value}</div>
+        <button onClick={inc} style={stepBtnStyle} disabled={max !== undefined && value >= max}>+</button>
+      </div>
+    </div>
+  );
+}
+
+// StepperFieldFloat — decimal increment/decrement control for body temperature thresholds (0.5°C steps)
+function StepperFieldFloat({ label, value, onChange, min, max, step = 0.5 }) {
+  const dec = () => onChange(Math.round(Math.max(min ?? -Infinity, value - step) * 10) / 10);
+  const inc = () => onChange(Math.round(Math.min(max ?? Infinity, value + step) * 10) / 10);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
+      <span style={{ color: C.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 900 }}>{label}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <button onClick={dec} style={stepBtnStyle} disabled={min !== undefined && value <= min}>−</button>
+        <div style={{ color: C.text, fontSize: 18, fontWeight: 950, minWidth: 40, textAlign: "center", lineHeight: 1, userSelect: "none" }}>{value.toFixed(1)}</div>
         <button onClick={inc} style={stepBtnStyle} disabled={max !== undefined && value >= max}>+</button>
       </div>
     </div>
@@ -262,13 +319,13 @@ function StepperField({ label, value, onChange, min, max }) {
 }
 
 const stepBtnStyle = {
-  width: 28,
-  height: 28,
-  borderRadius: 7,
+  width: 24,
+  height: 24,
+  borderRadius: 6,
   background: "rgba(255,255,255,0.06)",
   border: `1px solid rgba(255,255,255,0.12)`,
   color: C.text,
-  fontSize: 16,
+  fontSize: 14,
   fontWeight: 700,
   cursor: "pointer",
   display: "grid",
@@ -277,6 +334,7 @@ const stepBtnStyle = {
   flexShrink: 0,
 };
 
+// Toggle — custom on/off switch used for the Push Notifications setting
 function Toggle({ value, onChange }) {
   return (
     <button
@@ -312,16 +370,17 @@ function Toggle({ value, onChange }) {
   );
 }
 
+// SettingsCard — numbered section card wrapping a group of related settings controls
 function SettingsCard({ number, title, description, children }) {
   return (
-    <section style={{ ...cardStyle, padding: "18px 20px", minWidth: 0 }}>
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 16 }}>
-        <div style={{ width: 30, height: 30, borderRadius: 8, background: `${C.primary}1A`, border: `1px solid ${C.primary}44`, display: "grid", placeItems: "center", flexShrink: 0 }}>
-          <span style={{ color: C.primary, fontSize: 11, fontWeight: 900 }}>{number}</span>
+    <section style={{ ...cardStyle, padding: "12px 14px", minWidth: 0 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 10 }}>
+        <div style={{ width: 26, height: 26, borderRadius: 7, background: `${C.primary}1A`, border: `1px solid ${C.primary}44`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+          <span style={{ color: C.primary, fontSize: 10, fontWeight: 900 }}>{number}</span>
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ color: C.text, fontSize: 15, fontWeight: 950 }}>{title}</div>
-          <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4, lineHeight: 1.5 }}>{description}</div>
+          <div style={{ color: C.text, fontSize: 14, fontWeight: 950 }}>{title}</div>
+          <div style={{ color: C.textMuted, fontSize: 11, marginTop: 2, lineHeight: 1.4 }}>{description}</div>
         </div>
       </div>
       {children}
@@ -329,6 +388,7 @@ function SettingsCard({ number, title, description, children }) {
   );
 }
 
+// SettingField — labelled number input with unit and hint text (used for Offline Timeout)
 function SettingField({ label, unit, value, onChange, hint }) {
   return (
     <label style={{ display: "grid", gap: 5 }}>
@@ -340,13 +400,14 @@ function SettingField({ label, unit, value, onChange, hint }) {
         type="number"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        style={{ ...controlStyle, width: "100%", textAlign: "center", fontSize: 20, fontWeight: 950, padding: "10px 8px" }}
+        style={{ ...controlStyle, width: "100%", textAlign: "center", fontSize: 17, fontWeight: 950, padding: "8px" }}
       />
       <span style={{ color: C.textMuted, fontSize: 10, lineHeight: 1.4 }}>{hint}</span>
     </label>
   );
 }
 
+// RangeBar — visual threshold preview bar showing the safe band for a vital sign
 function RangeBar({ label, valueText, color }) {
   return (
     <div>
@@ -361,28 +422,31 @@ function RangeBar({ label, valueText, color }) {
   );
 }
 
+// StatusBox — compact stat tile used in System Status card (total / online / offline / warnings)
 function StatusBox({ label, value, color, desc }) {
   return (
-    <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 8, padding: "11px 13px", background: "rgba(255,255,255,0.02)" }}>
+    <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 8, padding: "8px 10px", background: "rgba(255,255,255,0.02)" }}>
       <div style={{ color: C.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
-      <div style={{ color, fontSize: 26, fontWeight: 950, marginTop: 4 }}>{value}</div>
-      <div style={{ color: C.textMuted, fontSize: 10, marginTop: 2 }}>{desc}</div>
+      <div style={{ color, fontSize: 20, fontWeight: 950, marginTop: 3 }}>{value}</div>
+      <div style={{ color: C.textMuted, fontSize: 10, marginTop: 1 }}>{desc}</div>
     </div>
   );
 }
 
+// InfoRow — highlighted info block explaining a setting's behavior
 function InfoRow({ label, text }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 10, padding: "9px 11px", background: "rgba(255,255,255,0.025)", borderRadius: 7, border: `1px solid ${C.borderSoft}` }}>
+    <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 10, padding: "7px 9px", background: "rgba(255,255,255,0.025)", borderRadius: 7, border: `1px solid ${C.borderSoft}` }}>
       <span style={{ color: C.primary, fontSize: 11, fontWeight: 900, whiteSpace: "nowrap", paddingTop: 1 }}>{label}</span>
       <span style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.5 }}>{text}</span>
     </div>
   );
 }
 
+// AlertRow — notification type row explaining what triggers each alert severity level
 function AlertRow({ label, description, color }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 8, border: `1px solid ${color}2A`, background: `${color}08` }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", borderRadius: 7, border: `1px solid ${color}2A`, background: `${color}08` }}>
       <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0, boxShadow: `0 0 8px ${color}` }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ color: C.text, fontSize: 13, fontWeight: 900 }}>{label}</div>
@@ -392,6 +456,7 @@ function AlertRow({ label, description, color }) {
   );
 }
 
+// Pill — miner count badge shown in the Settings page header (Online / Offline / Warnings)
 function Pill({ value, label, color }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color, border: `1px solid ${color}44`, background: `${color}12`, borderRadius: 999, padding: "6px 12px", fontSize: 12, fontWeight: 900 }}>
@@ -401,6 +466,7 @@ function Pill({ value, label, color }) {
   );
 }
 
+// SettingSummaryRow — label + value row displayed inside the Save confirmation modal
 function SettingSummaryRow({ label, value, color }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "8px 10px", background: "rgba(255,255,255,0.025)", borderRadius: 7, border: `1px solid ${C.borderSoft}` }}>

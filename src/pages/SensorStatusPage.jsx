@@ -3,6 +3,7 @@ import Modal from "../components/Modal";
 import { C, cardStyle, ghostButtonStyle, moduleLabel, pageStyle, primaryButtonStyle } from "../theme";
 import { formatLastSeen, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 
+// SensorStatusPage — sensor health diagnostics: per-miner readings, signal integrity, and activity event log
 export default function SensorStatusPage({ miners, activityLogs = [], onClearActivityLogs }) {
   const [clearLogsOpen, setClearLogsOpen] = useState(false);
   const [clearLogsError, setClearLogsError] = useState("");
@@ -119,12 +120,13 @@ export default function SensorStatusPage({ miners, activityLogs = [], onClearAct
               <div style={moduleLabel}>Signal integrity</div>
               <Integrity label="Heart-rate sensors online" value={`${miners.filter((miner) => miner.active && miner.hr > 0).length}/${miners.length}`} color={C.red} />
               <Integrity label="SpO2 sensors online" value={`${miners.filter((miner) => miner.active && miner.spo2 > 0).length}/${miners.length}`} color={C.primary} />
+              <Integrity label="Body temp sensors online" value={`${miners.filter((miner) => miner.active && miner.temp > 0).length}/${miners.length}`} color={C.teal} />
               <Integrity label="Chest contact valid" value={`${miners.filter((miner) => miner.active && miner.finger !== false).length}/${miners.length}`} color={C.green} />
               <Integrity label="Offline signals" value={miners.filter((miner) => miner.stale).length} color={miners.some((miner) => miner.stale) ? C.offline : C.green} />
             </section>
-            <section style={{ ...cardStyle, padding: 15, minHeight: 0 }}>
-              <div style={moduleLabel}>Sensor notes</div>
-              <div className="hide-scrollbar" style={{ display: "grid", gap: 8, marginTop: 12, overflow: "auto", maxHeight: "100%" }}>
+            <section style={{ ...cardStyle, padding: 15, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+              <div style={{ ...moduleLabel, flexShrink: 0 }}>Sensor notes</div>
+              <div className="hide-scrollbar" style={{ display: "grid", gap: 8, marginTop: 12, overflow: "auto", flex: 1, minHeight: 0, alignContent: "start" }}>
                 {sortedMiners.map((miner) => (
                   <Note key={miner.id} miner={miner} />
                 ))}
@@ -137,6 +139,7 @@ export default function SensorStatusPage({ miners, activityLogs = [], onClearAct
   );
 }
 
+// mapStoredEvent — converts a raw Firebase activity log entry to a display-ready event object with color
 function mapStoredEvent(event) {
   const color = event.severity === "critical" ? C.red : event.severity === "warning" ? C.amber : event.status === "online" ? C.green : event.status === "offline" ? C.offline : C.primary;
   return {
@@ -151,6 +154,7 @@ function mapStoredEvent(event) {
   };
 }
 
+// HeaderStat — large-number stat card shown in the page header (Active miners, Warnings)
 function HeaderStat({ label, value, color }) {
   return (
     <div style={{ ...cardStyle, padding: "10px 14px", minWidth: 132 }}>
@@ -160,6 +164,7 @@ function HeaderStat({ label, value, color }) {
   );
 }
 
+// SensorNode — per-miner card showing HR, SpO2, and body temp sensor states with contact and last-seen
 function SensorNode({ miner }) {
   const statusColor = miner.active ? C.green : C.offline;
   return (
@@ -171,9 +176,10 @@ function SensorNode({ miner }) {
         </div>
         <span style={{ color: miner.active ? C.green : C.offline, fontSize: 10, fontWeight: 900 }}>{miner.active ? "ONLINE" : "OFFLINE"}</span>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 12 }}>
         <SensorMetric label="Heart-rate sensor" value={miner.active ? `${formatReading(miner.hr, 0)} bpm` : "--"} color={miner.active && miner.hr > 0 ? C.red : C.offline} state={miner.active && miner.hr > 0 ? "Reading" : "No signal"} />
         <SensorMetric label="SpO2 sensor" value={miner.active ? `${formatReading(miner.spo2, 0)}%` : "--"} color={miner.active && miner.spo2 > 0 ? C.primary : C.offline} state={miner.active && miner.spo2 > 0 ? "Reading" : "No signal"} />
+        <SensorMetric label="Body temp sensor" value={miner.active ? `${formatReading(miner.temp, 1)}°C` : "--"} color={miner.active && miner.temp > 0 ? C.teal : C.offline} state={miner.active && miner.temp > 0 ? "Reading" : "No signal"} />
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, color: C.textMuted, fontSize: 11 }}>
         <span>Contact: <b style={{ color: miner.finger === false ? C.amber : miner.active ? C.green : C.offline }}>{miner.finger === false ? "Missing" : miner.active ? "Valid" : "Offline"}</b></span>
@@ -183,6 +189,7 @@ function SensorNode({ miner }) {
   );
 }
 
+// SensorMetric — individual sensor tile inside SensorNode (HR sensor / SpO2 sensor / body temp sensor)
 function SensorMetric({ label, value, color, state }) {
   return (
     <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 7, padding: 9, background: "rgba(255,255,255,0.02)" }}>
@@ -193,6 +200,7 @@ function SensorMetric({ label, value, color, state }) {
   );
 }
 
+// EventRow — single row in the Miner Activity Records log table
 function EventRow({ event }) {
   return (
     <div className="data-row" style={{ display: "grid", gridTemplateColumns: "90px minmax(0, 1fr) 130px", gap: 12, padding: "11px 6px", borderTop: `1px solid ${C.borderSoft}`, alignItems: "center" }}>
@@ -206,6 +214,7 @@ function EventRow({ event }) {
   );
 }
 
+// Indicator — glowing dot + label for the "Active Sensor Nodes" live status line
 function Indicator({ color, label }) {
   return (
     <div style={{ display: "inline-flex", alignItems: "center", gap: 7, color: C.textMuted, fontSize: 11 }}>
@@ -215,6 +224,7 @@ function Indicator({ color, label }) {
   );
 }
 
+// Integrity — label + count row in the Signal Integrity card (e.g. "SpO2 sensors online  3/4")
 function Integrity({ label, value, color }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "10px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
@@ -224,6 +234,7 @@ function Integrity({ label, value, color }) {
   );
 }
 
+// Note — sensor note card in the aside showing a brief status description per miner
 function Note({ miner }) {
   const color = miner.active ? C.green : C.offline;
   const text = miner.active ? "Both sensor channels are being evaluated in the live window." : "Sensor checks will resume automatically when new data arrives.";

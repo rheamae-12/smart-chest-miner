@@ -5,7 +5,7 @@ import Sidebar from "./components/Sidebar";
 import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { useAuth } from "./context/useAuth";
-import { useSimulatedMinerSystem } from "./hooks/useSimulatedMinerSystem";
+import { useMinerSystem } from "./hooks/useMinerSystem";
 import { useAlertNotifications } from "./hooks/useAlertNotifications";
 import { buildAlerts } from "./utils/alertChecker";
 import { C, ghostButtonStyle, primaryButtonStyle } from "./theme";
@@ -23,7 +23,7 @@ const WifiConfigPage = lazy(() => import("./pages/WifiConfigPage"));
 export default function App() {
   const { user, logout, authReady } = useAuth();
   const navigate = useNavigate();
-  const system = useSimulatedMinerSystem(Boolean(user));
+  const system = useMinerSystem(Boolean(user));
   const [logoutOpen, setLogoutOpen] = useState(false);
   useAlertNotifications(user ? buildAlerts(system.miners, system.thresholds) : []);
   const [dismissedAlertIds, setDismissedAlertIds] = useState(() => readStoredStringArray(DISMISSED_ALERTS_STORAGE_KEY));

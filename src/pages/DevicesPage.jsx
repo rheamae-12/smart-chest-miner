@@ -7,6 +7,7 @@ import { formatLastSeen, formatReading, lastSeenValue } from "../utils/formatter
 
 const EMPTY_FORM = { id: "", name: "", location: "" };
 
+// DevicesPage — device registry: register, edit, and remove miners; shows live vitals per row
 export default function DevicesPage({ miners, setMiners }) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
@@ -188,7 +189,7 @@ export default function DevicesPage({ miners, setMiners }) {
         <section style={{ ...cardStyle, padding: 16, display: "flex", gap: 12, alignItems: "end", justifyContent: "space-between" }}>
           <div>
             <div style={moduleLabel}>Device registry</div>
-            <div style={{ color: C.text, fontSize: 24, fontWeight: 950, marginTop: 4 }}>Miner Device Management</div>
+            <div style={{ color: C.text, fontSize: 26, fontWeight: 950, marginTop: 4 }}>Miner Device Management</div>
             <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4 }}>Register devices, review latest vitals, and manage miner location assignments.</div>
           </div>
           <div style={{ display: "flex", gap: 9, alignItems: "end", flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -257,9 +258,21 @@ export default function DevicesPage({ miners, setMiners }) {
                     <StatePill label={miner.manual_alert ? "Manual alert" : "Alert clear"} color={miner.manual_alert ? C.red : C.green} />
                   </div>
                   <LastSeenCell miner={miner} />
-                  <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <Button compact onClick={() => openEdit(miner)}>Edit</Button>
-                    <Button compact danger onClick={() => requestRemove(miner)}>Delete</Button>
+                  <span style={{ display: "flex", gap: 6 }}>
+                    <IconButton title="Edit device" onClick={() => openEdit(miner)}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                    </IconButton>
+                    <IconButton title="Remove device" danger onClick={() => requestRemove(miner)}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                        <path d="M10 11v6M14 11v6" />
+                        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                      </svg>
+                    </IconButton>
                   </span>
                 </div>
               ))}
@@ -272,10 +285,12 @@ export default function DevicesPage({ miners, setMiners }) {
   );
 }
 
+// persist — fire-and-forget activity log write; failure is non-fatal and silently ignored
 async function persist(action) {
   try { await action(); } catch { /* activity log failure is non-fatal */ }
 }
 
+// ConfirmBody — modal body for register/edit/remove confirmations; shows icon + detail + warning if remove
 function ConfirmBody({ modal }) {
   const isRemove = modal.type === "remove";
   const accentColor = isRemove ? C.red : C.primary;
@@ -300,6 +315,7 @@ function ConfirmBody({ modal }) {
   );
 }
 
+// DeviceForm — register/edit form fields for Device ID, Miner Name, and Location
 function DeviceForm({ form, setForm, lockId }) {
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -310,6 +326,7 @@ function DeviceForm({ form, setForm, lockId }) {
   );
 }
 
+// Field — labelled text input used inside DeviceForm
 function Field({ label, value, onChange, placeholder, disabled }) {
   return (
     <label>
@@ -319,6 +336,7 @@ function Field({ label, value, onChange, placeholder, disabled }) {
   );
 }
 
+// Button — unified button supporting primary/ghost/danger variants with disabled state
 function Button({ children, primary, danger, compact, disabled, onClick }) {
   return (
     <button
@@ -341,6 +359,33 @@ function Button({ children, primary, danger, compact, disabled, onClick }) {
   );
 }
 
+// IconButton — 30×30 square icon button used for Edit (pencil) and Remove (trash) actions
+function IconButton({ children, danger, title, onClick }) {
+  const color = danger ? C.red : C.textDim;
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        width: 30,
+        height: 30,
+        borderRadius: 7,
+        border: `1px solid ${danger ? `${C.red}44` : C.border}`,
+        background: danger ? `${C.red}0A` : "rgba(255,255,255,0.04)",
+        color,
+        cursor: "pointer",
+        display: "grid",
+        placeItems: "center",
+        flexShrink: 0,
+        transition: "background 0.15s, border-color 0.15s",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// RegistryMetric — fleet health stat row (label + large number) in the Fleet Health sidebar card
 function RegistryMetric({ label, value, color }) {
   return (
     <div style={{ padding: "9px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
@@ -350,10 +395,12 @@ function RegistryMetric({ label, value, color }) {
   );
 }
 
+// StatePill — small colored pill for chest contact and manual alert states in the table
 function StatePill({ label, color }) {
   return <span style={{ color, border: `1px solid ${color}55`, background: `${color}14`, borderRadius: 999, padding: "3px 7px", fontSize: 10, fontWeight: 900, width: "fit-content" }}>{label}</span>;
 }
 
+// LastSeenCell — "Online/Offline + time ago" column cell derived from miner.lastSeen and stale flag
 function LastSeenCell({ miner }) {
   const label = miner.active && !miner.stale ? "Online" : "Offline";
   const color = miner.active && !miner.stale ? C.green : C.offline;
@@ -367,7 +414,7 @@ function LastSeenCell({ miner }) {
 
 const tableHeader = {
   display: "grid",
-  gridTemplateColumns: "1.1fr 1fr 1fr 1.15fr 1fr 110px",
+  gridTemplateColumns: "1.1fr 1fr 1fr 1.15fr 1fr 72px",
   gap: 12,
   minWidth: 900,
   padding: "10px 14px",
@@ -380,10 +427,10 @@ const tableHeader = {
 
 const tableRow = {
   display: "grid",
-  gridTemplateColumns: "1.1fr 1fr 1fr 1.15fr 1fr 110px",
+  gridTemplateColumns: "1.1fr 1fr 1fr 1.15fr 1fr 72px",
   gap: 12,
   minWidth: 900,
-  padding: "13px 14px",
+  padding: "12px 14px",
   borderBottom: `1px solid ${C.borderSoft}`,
   alignItems: "center",
   fontSize: 12,

@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { C, cardStyle, controlStyle, moduleLabel, pageStyle } from "../theme";
 import { average, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 
+// AnalyticsPage — trend charts and miner comparison for HR, SpO2, and body temperature analytics
 export default function AnalyticsPage({ miners, analyticsData, activityLogs = [] }) {
   const [filter, setFilter] = useState({ miner: "all", range: "24H", bucket: "1" });
   const sortedMiners = useMemo(() => [...miners].sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)), [miners]);
@@ -17,7 +18,7 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
         <section style={{ ...cardStyle, padding: 16, display: "flex", alignItems: "end", justifyContent: "space-between", gap: 16 }}>
           <div>
             <div style={moduleLabel}>Sensor analytics</div>
-            <div style={{ color: C.text, fontSize: 25, fontWeight: 950, marginTop: 4 }}>Reading Trends</div>
+            <div style={{ color: C.text, fontSize: 26, fontWeight: 950, marginTop: 4 }}>Reading Trends</div>
             <div style={{ color: C.textMuted, fontSize: 12, marginTop: 5 }}>Filter HR and SpO2 readings by miner and readings-per-minute interval.</div>
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -41,9 +42,10 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
           </div>
         </section>
 
-        <section style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+        <section style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <Metric label="Avg Heart Rate" value={formatReading(average(rows.map((row) => row.hr)), 0)} unit="bpm" color={C.red} />
           <Metric label="Avg SpO2" value={formatReading(average(rows.map((row) => row.spo2)), 0)} unit="%" color={C.primary} />
+          <Metric label="Avg Body Temp" value={formatReading(average(rows.map((row) => row.temp)), 1)} unit="°C" color={C.teal} />
           <Metric label="Tracked Miners" value={visibleMiners.length} unit={`/${miners.length}`} color={C.green} />
           <Metric label="Total Readings" value={rows.length} unit="records" color={C.amber} />
         </section>
@@ -54,7 +56,7 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", marginBottom: 12 }}>
                 <div>
                   <div style={moduleLabel}>Reading history</div>
-                  <div style={{ color: C.text, fontSize: 18, fontWeight: 950, marginTop: 4 }}>Heart Rate and SpO2</div>
+                  <div style={{ color: C.text, fontSize: 18, fontWeight: 950, marginTop: 4 }}>Heart Rate, SpO2 and Body Temp</div>
                   <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4 }}>
                     {filter.miner === "all" ? "Aggregated across selected miners" : `Separate readings for ${visibleMiners[0]?.name || "selected miner"}`}
                   </div>
@@ -64,7 +66,7 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
               <div style={{ minHeight: 0, borderRadius: 8, border: `1px solid ${C.borderSoft}`, background: "#151515", padding: 8 }}>
                 {chartData.length ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData} margin={{ top: 12, right: 18, left: -18, bottom: 0 }}>
+                    <ComposedChart data={chartData} margin={{ top: 12, right: 44, left: -18, bottom: 0 }}>
                       <defs>
                         <linearGradient id="analyticsHr" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor={C.red} stopOpacity={0.22} />
@@ -73,11 +75,13 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
                       </defs>
                       <CartesianGrid stroke={C.borderSoft} vertical={false} />
                       <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={26} />
-                      <YAxis tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
+                      <YAxis yAxisId="vital" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
+                      <YAxis yAxisId="temp" orientation="right" domain={[34, 42]} tick={{ fill: C.teal, fontSize: 10 }} axisLine={false} tickLine={false} width={38} unit="°C" />
                       <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
-                      <Area type="monotone" dataKey="hr" name="Heart Rate" stroke={C.red} fill="url(#analyticsHr)" strokeWidth={2.2} dot={false} isAnimationActive={false} />
-                      <Area type="monotone" dataKey="spo2" name="SpO2" stroke={C.primary} fill="transparent" strokeWidth={2} dot={false} isAnimationActive={false} />
-                    </AreaChart>
+                      <Area yAxisId="vital" type="monotone" dataKey="hr" name="Heart Rate" stroke={C.red} fill="url(#analyticsHr)" strokeWidth={2.2} dot={false} isAnimationActive={false} />
+                      <Area yAxisId="vital" type="monotone" dataKey="spo2" name="SpO2" stroke={C.primary} fill="transparent" strokeWidth={2} dot={false} isAnimationActive={false} />
+                      <Line yAxisId="temp" type="monotone" dataKey="temp" name="Body Temp" stroke={C.teal} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+                    </ComposedChart>
                   </ResponsiveContainer>
                 ) : (
                   <EmptyState />
@@ -85,7 +89,7 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, color: C.textMuted, fontSize: 10, marginTop: 8 }}>
                 <span>TIME AXIS: {chartData[chartData.length - 1]?.time || "NO TIMESTAMP"}</span>
-                <span><b style={{ color: C.red }}>HR</b> BPM | <b style={{ color: C.primary }}>SpO2</b> %</span>
+                <span><b style={{ color: C.red }}>HR</b> BPM | <b style={{ color: C.primary }}>SpO2</b> % | <b style={{ color: C.teal }}>Temp</b> °C</span>
               </div>
             </div>
 
@@ -129,6 +133,7 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
   );
 }
 
+// buildRows — flattens per-miner analyticsData into a flat array filtered by time range
 function buildRows(miners, analyticsData, range) {
   const start = getRangeStart(range);
   return miners
@@ -140,6 +145,7 @@ function buildRows(miners, analyticsData, range) {
     .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
 }
 
+// bucketRows — aggregates flat rows into time buckets of N minutes, averaging HR/SpO2/temp per bucket
 function bucketRows(rows, minutes) {
   if (!rows.length) return [];
   const bucketMs = Math.max(1, minutes) * 60 * 1000;
@@ -147,9 +153,10 @@ function bucketRows(rows, minutes) {
   rows.forEach((row) => {
     const timestamp = Number(row.timestamp || 0);
     const key = timestamp ? Math.floor(timestamp / bucketMs) * bucketMs : row.time;
-    const current = buckets.get(key) || { timestamp: Number(key) || 0, hrs: [], spo2s: [] };
+    const current = buckets.get(key) || { timestamp: Number(key) || 0, hrs: [], spo2s: [], temps: [] };
     if (Number(row.hr) > 0) current.hrs.push(Number(row.hr));
     if (Number(row.spo2) > 0) current.spo2s.push(Number(row.spo2));
+    if (Number(row.temp) > 0) current.temps.push(Number(row.temp));
     buckets.set(key, current);
   });
   return Array.from(buckets.values())
@@ -159,9 +166,11 @@ function bucketRows(rows, minutes) {
       time: bucket.timestamp ? formatSystemTimestamp(bucket.timestamp) : "",
       hr: average(bucket.hrs),
       spo2: average(bucket.spo2s),
+      temp: average(bucket.temps),
     }));
 }
 
+// getRangeStart — returns a Unix ms timestamp for the start of the selected range (or 0 for all-time)
 function getRangeStart(range) {
   const now = Date.now();
   if (range === "30M") return now - 30 * 60 * 1000;
@@ -171,6 +180,7 @@ function getRangeStart(range) {
   return 0;
 }
 
+// buildActivityLogEntries — maps raw Firebase activity logs to display-ready objects, filtered by miner
 function buildActivityLogEntries(activityLogs, minerFilter) {
   return activityLogs
     .filter((log) => minerFilter === "all" || log.deviceId === minerFilter)
@@ -186,6 +196,7 @@ function buildActivityLogEntries(activityLogs, minerFilter) {
     }));
 }
 
+// Select — labelled select dropdown used for Miner / Range / Bucket filter controls
 function Select({ label, value, onChange, children }) {
   return (
     <label style={{ display: "grid", gap: 5 }}>
@@ -197,6 +208,7 @@ function Select({ label, value, onChange, children }) {
   );
 }
 
+// Metric — summary stat card showing an averaged reading over the selected filter range
 function Metric({ label, value, unit, color }) {
   return (
     <div style={{ ...cardStyle, padding: 14, borderLeft: `3px solid ${color}` }}>
@@ -206,15 +218,18 @@ function Metric({ label, value, unit, color }) {
   );
 }
 
+// Legend — inline chart legend showing the color mapping for HR, SpO2, and Temp lines
 function Legend() {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "center", color: C.textMuted, fontSize: 11 }}>
       <span><b style={{ color: C.red }}>--</b> HR bpm</span>
       <span><b style={{ color: C.primary }}>--</b> SpO2 %</span>
+      <span><b style={{ color: C.teal }}>--</b> Temp °C</span>
     </div>
   );
 }
 
+// MinerReading — per-miner card showing latest HR, SpO2, and Temp readings in the comparison strip
 function MinerReading({ miner }) {
   const color = miner.active ? C.green : C.offline;
   return (
@@ -224,14 +239,16 @@ function MinerReading({ miner }) {
         <span style={{ color, fontSize: 10, fontWeight: 900 }}>{miner.active ? "ONLINE" : "OFFLINE"}</span>
       </div>
       <div style={{ color: C.textMuted, fontSize: 10, marginTop: 3 }}>{miner.id}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginTop: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginTop: 10 }}>
         <MiniValue label="HR" value={miner.active ? formatReading(miner.hr, 0) : "--"} color={C.red} />
         <MiniValue label="SpO2" value={miner.active ? formatReading(miner.spo2, 0) : "--"} color={C.primary} />
+        <MiniValue label="Temp" value={miner.active ? `${formatReading(miner.temp, 1)}°C` : "--"} color={C.teal} />
       </div>
     </div>
   );
 }
 
+// MiniValue — tiny label+value pair inside a MinerReading card
 function MiniValue({ label, value, color }) {
   return (
     <div>
@@ -241,6 +258,7 @@ function MiniValue({ label, value, color }) {
   );
 }
 
+// ActivityLog — single event row in the Miner Events aside panel
 function ActivityLog({ log }) {
   return (
     <div style={{ borderLeft: `3px solid ${log.color}`, borderRadius: 6, background: "rgba(255,255,255,0.02)", padding: "10px 10px 10px 12px" }}>
@@ -254,6 +272,7 @@ function ActivityLog({ log }) {
   );
 }
 
+// EmptyState — shown inside the chart area when the selected filter returns no data points
 function EmptyState() {
   return <div style={{ height: "100%", display: "grid", placeItems: "center", color: C.textMuted, fontSize: 13 }}>No valid HR or SpO2 analytics for this filter yet.</div>;
 }

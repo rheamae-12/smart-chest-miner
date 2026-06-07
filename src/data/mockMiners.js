@@ -8,6 +8,7 @@ export const MINERS_INIT = [
     lastSeen: null,
     hr: 0,
     spo2: 0,
+    temp: 0,
     finger: false,
     manual_alert: false,
   },

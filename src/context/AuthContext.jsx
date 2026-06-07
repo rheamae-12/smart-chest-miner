@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createFirebaseAccount, loginWithEmail, logoutFirebase, observeFirebaseAuth } from "../firebase/auth";
+import { changeFirebasePassword, createFirebaseAccount, loginWithEmail, logoutFirebase, observeFirebaseAuth } from "../firebase/auth";
 import { firebaseConfigured } from "../firebase/config";
 import { getUserProfile, saveUserProfile, updateUserProfile } from "../firebase/firestore";
 import { AuthContext } from "./authContextValue";
@@ -259,6 +259,23 @@ export function AuthProvider({ children }) {
     writeLocalUsers(nextUsers);
   };
 
+  // changePassword — verifies current password then updates; works for firebase and local accounts
+  const changePassword = async (currentPassword, newPassword) => {
+    if (!user) throw new Error("Not signed in.");
+    if (user.source === "firebase") {
+      await changeFirebasePassword(currentPassword, newPassword);
+      return;
+    }
+    if (user.source === "local") {
+      const users = readLocalUsers();
+      const match = users.find((u) => u.email === user.email && u.password === currentPassword);
+      if (!match) throw new Error("Current password is incorrect.");
+      writeLocalUsers(users.map((u) => (u.email === user.email ? { ...u, password: newPassword } : u)));
+      return;
+    }
+    throw new Error("Demo accounts cannot change password.");
+  };
+
   const logout = async () => {
     await logoutFirebase();
     setUser(null);
@@ -266,7 +283,7 @@ export function AuthProvider({ children }) {
     sessionStorage.removeItem(SESSION_KEY);
   };
 
-  const value = { user, authReady, login, signUp, updateUser, logout, authError, authMessage };
+  const value = { user, authReady, login, signUp, updateUser, changePassword, logout, authError, authMessage };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

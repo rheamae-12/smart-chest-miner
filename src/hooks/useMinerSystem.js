@@ -14,6 +14,7 @@ const MAX_ACTIVITY_LOGS = 160;
 
 const DEFAULT_STALE_SECONDS = 75;
 
+// readStoredSystem — reads miners/thresholds/staleSeconds from localStorage; returns null on parse error
 function readStoredSystem() {
   try {
     const stored = JSON.parse(localStorage.getItem(SYSTEM_STORAGE_KEY));
@@ -29,14 +30,16 @@ function readStoredSystem() {
   }
 }
 
+// initialLiveData — creates the per-device live chart series map seeded from MINERS_INIT
 function initialLiveData() {
   const data = {};
   MINERS_INIT.forEach((miner) => {
-    data[miner.id] = { hr: [], spo2: [] };
+    data[miner.id] = { hr: [], spo2: [], temp: [] };
   });
   return data;
 }
 
+// initialAnalyticsData — creates the per-device analytics array map seeded from MINERS_INIT
 function initialAnalyticsData() {
   const data = {};
   MINERS_INIT.forEach((miner) => {
@@ -45,6 +48,7 @@ function initialAnalyticsData() {
   return data;
 }
 
+// normalizeTimestamp — converts a raw timestamp value to a valid Unix ms number; returns 0 if invalid
 function normalizeTimestamp(value) {
   const timestamp = Number(value);
   if (!Number.isFinite(timestamp) || timestamp < MIN_VALID_EPOCH_MS) {
@@ -54,10 +58,12 @@ function normalizeTimestamp(value) {
   return timestamp;
 }
 
+// isFreshTimestamp — true if timestamp is within timeoutMs of now (used to determine active/stale state)
 function isFreshTimestamp(timestamp, timeoutMs = ONLINE_TIMEOUT_MS) {
   return timestamp > 0 && Date.now() - timestamp <= timeoutMs;
 }
 
+// toBoolean — coerces Firebase values (true/false/"true"/"1"/"yes"/"online") to a boolean
 function toBoolean(value, fallback = false) {
   if (value === undefined || value === null) return fallback;
   if (typeof value === "boolean") return value;
@@ -69,11 +75,14 @@ function toBoolean(value, fallback = false) {
   return fallback;
 }
 
+// toReading — converts a raw sensor value to a finite number; returns 0 if non-numeric or NaN
 function toReading(value) {
   const reading = Number(value);
   return Number.isFinite(reading) ? reading : 0;
 }
 
+// mapRealtimeDevices — maps the raw Firebase /devices snapshot to normalized miner objects
+// Filters archived devices, resolves active/stale/offline status, and normalizes all sensor readings
 function mapRealtimeDevices(value, timeoutMs = ONLINE_TIMEOUT_MS) {
   return Object.entries(value || {})
     .filter(([, device]) => !toBoolean(device?.archived ?? device?.deleted, false))
@@ -101,6 +110,7 @@ function mapRealtimeDevices(value, timeoutMs = ONLINE_TIMEOUT_MS) {
         stale: !fresh && (hasSensorPayload || firebaseActive),
         hr: toReading(live.heartRate ?? live.hr ?? device?.heartRate),
         spo2: toReading(live.spo2 ?? device?.spo2),
+        temp: toReading(live.temp ?? live.temperature ?? live.bodyTemp ?? device?.temp),
         finger,
         manual_alert: manualAlert,
         sim_mode: toBoolean(live.sim_mode ?? live.simMode, false),
@@ -109,6 +119,8 @@ function mapRealtimeDevices(value, timeoutMs = ONLINE_TIMEOUT_MS) {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
+// mapRealtimeAnalytics — maps raw Firebase /analytics snapshot to per-device sorted reading arrays
+// Filters invalid rows (no finger contact, zero HR/SpO2) and caps to MAX_ANALYTICS_POINTS per device
 function mapRealtimeAnalytics(value) {
   const data = {};
   Object.entries(value || {}).forEach(([deviceId, rows]) => {
@@ -129,6 +141,7 @@ function mapRealtimeAnalytics(value) {
           time: timeLabel(date),
           hr: toReading(row.hr ?? row.heartRate),
           spo2: toReading(row.spo2),
+          temp: toReading(row.temp ?? row.temperature ?? row.bodyTemp),
           finger: toBoolean(row.finger, true),
           manual_alert: toBoolean(row.manual_alert, false),
           status: row.status || "online",
@@ -139,6 +152,7 @@ function mapRealtimeAnalytics(value) {
   return data;
 }
 
+// latestAnalyticsMiner — builds a minimal miner object from the last analytics row for a device
 function latestAnalyticsMiner(rows, timeoutMs) {
   const latest = rows?.[rows.length - 1];
   if (!latest) return null;
@@ -153,6 +167,7 @@ function latestAnalyticsMiner(rows, timeoutMs) {
     lastSeen: new Date(latest.timestamp),
     hr: latest.hr,
     spo2: latest.spo2,
+    temp: latest.temp ?? 0,
     finger: latest.finger ?? true,
     manual_alert: latest.manual_alert ?? false,
     stale: !active,
@@ -160,6 +175,7 @@ function latestAnalyticsMiner(rows, timeoutMs) {
   };
 }
 
+// latestAnalyticsMiners — builds miner objects from analytics for all devices (fallback when /devices is empty)
 function latestAnalyticsMiners(mappedAnalytics, timeoutMs) {
   return Object.entries(mappedAnalytics)
     .map(([deviceId, rows]) => {
@@ -169,16 +185,18 @@ function latestAnalyticsMiners(mappedAnalytics, timeoutMs) {
     .filter(Boolean);
 }
 
+// clearLiveDataForDevice — resets hr/spo2/temp arrays for a device; skips if already empty
 function clearLiveDataForDevice(prev, deviceId) {
   const current = prev[deviceId] || { hr: [], spo2: [] };
-  if (current.hr.length === 0 && current.spo2.length === 0) return prev;
+  if (current.hr.length === 0 && current.spo2.length === 0 && (current.temp || []).length === 0) return prev;
 
   return {
     ...prev,
-    [deviceId]: { hr: [], spo2: [] },
+    [deviceId]: { hr: [], spo2: [], temp: [] },
   };
 }
 
+// applyLocalDeviceOverrides — applies name/location edits from DevicesPage and filters archived devices
 function applyLocalDeviceOverrides(miners, metadataOverrides, archivedDeviceIds) {
   return miners
     .filter((miner) => !archivedDeviceIds.has(miner.id))
@@ -188,6 +206,7 @@ function applyLocalDeviceOverrides(miners, metadataOverrides, archivedDeviceIds)
     });
 }
 
+// mapActivityLogs — maps raw Firebase /activityLogs to normalized display objects, sorted newest-first
 function mapActivityLogs(value) {
   return Object.entries(value || {})
     .map(([id, row]) => ({
@@ -205,6 +224,7 @@ function mapActivityLogs(value) {
     .slice(0, MAX_ACTIVITY_LOGS);
 }
 
+// buildStatusLog — builds an activity log entry when a miner transitions between online/offline
 function buildStatusLog(miner, previousStatus) {
   const status = miner.active ? "online" : "offline";
   return {
@@ -213,7 +233,7 @@ function buildStatusLog(miner, previousStatus) {
     type: "status",
     status,
     severity: status === "online" ? "info" : "warning",
-    title: `Device ${status}`,
+    title: status === "online" ? "Device online" : "Session ended",
     detail:
       status === "online"
         ? `${miner.name} started sending live HR and SpO2 readings.`
@@ -222,10 +242,12 @@ function buildStatusLog(miner, previousStatus) {
   };
 }
 
+// buildVitalLogs — generates activity log entries for out-of-range HR, SpO2, body temp, and manual alerts
 function buildVitalLogs(miner, thresholds) {
   if (!miner.active || miner.finger === false) return [];
   const hrStatus = getVitalStatus(miner.hr, "hr", thresholds);
   const spo2Status = getVitalStatus(miner.spo2, "spo2", thresholds);
+  const tempStatus = getVitalStatus(miner.temp, "temp", thresholds);
   const rows = [];
 
   if (hrStatus === "HIGH" || hrStatus === "LOW") {
@@ -254,6 +276,32 @@ function buildVitalLogs(miner, thresholds) {
     });
   }
 
+  if (tempStatus === "HIGH") {
+    rows.push({
+      deviceId: miner.id,
+      miner: miner.name,
+      type: "vital",
+      status: "high",
+      severity: "critical",
+      title: "Body temperature high",
+      detail: `${miner.name} recorded body temp ${miner.temp}°C at ${formatSystemTimestamp(miner.lastSeen)}.`,
+      timestamp: miner.lastSeen?.getTime?.() || Date.now(),
+    });
+  }
+
+  if (tempStatus === "LOW") {
+    rows.push({
+      deviceId: miner.id,
+      miner: miner.name,
+      type: "vital",
+      status: "low",
+      severity: "warning",
+      title: "Body temperature low",
+      detail: `${miner.name} recorded body temp ${miner.temp}°C at ${formatSystemTimestamp(miner.lastSeen)}.`,
+      timestamp: miner.lastSeen?.getTime?.() || Date.now(),
+    });
+  }
+
   if (miner.manual_alert) {
     rows.push({
       deviceId: miner.id,
@@ -270,7 +318,9 @@ function buildVitalLogs(miner, thresholds) {
   return rows;
 }
 
-export function useSimulatedMinerSystem(enabled) {
+// useMinerSystem — main data hook: subscribes to Firebase /devices, /analytics, and /activityLogs;
+// manages live chart data, stale detection interval, threshold state, and localStorage persistence
+export function useMinerSystem(enabled) {
   const stored = readStoredSystem();
   const [miners, rawSetMiners] = useState(() => (firebaseConfigured ? [] : stored?.miners || MINERS_INIT));
   const [liveData, setLiveData] = useState(initialLiveData);
@@ -402,13 +452,14 @@ export function useSimulatedMinerSystem(enabled) {
               return;
             }
             const label = timeLabel(miner.lastSeen);
-            const cur = next[miner.id] || { hr: [], spo2: [] };
+            const cur = next[miner.id] || { hr: [], spo2: [], temp: [] };
             const timestamp = miner.lastSeen.getTime();
             const lastHr = cur.hr[cur.hr.length - 1];
             if (lastHr?.timestamp === timestamp) return;
             next[miner.id] = {
               hr: [...cur.hr.slice(-(MAX_LIVE_POINTS - 1)), { time: label, hr: miner.hr, timestamp }],
               spo2: [...cur.spo2.slice(-(MAX_LIVE_POINTS - 1)), { time: label, spo2: miner.spo2, timestamp }],
+              temp: [...(cur.temp || []).slice(-(MAX_LIVE_POINTS - 1)), { time: label, temp: miner.temp, timestamp }],
             };
           });
           return next;

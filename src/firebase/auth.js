@@ -1,4 +1,4 @@
-import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut, updateProfile } from "firebase/auth";
+import { EmailAuthProvider, createUserWithEmailAndPassword, onAuthStateChanged, reauthenticateWithCredential, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "firebase/auth";
 import { auth } from "./config";
 
 export function observeFirebaseAuth(onUser) {
@@ -24,4 +24,12 @@ export async function createFirebaseAccount({ name, email, password }) {
 export async function logoutFirebase() {
   if (!auth) return;
   await signOut(auth);
+}
+
+// changeFirebasePassword — reauthenticates with current password then sets a new one
+export async function changeFirebasePassword(currentPassword, newPassword) {
+  if (!auth?.currentUser) throw new Error("No active Firebase session.");
+  const credential = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
+  await reauthenticateWithCredential(auth.currentUser, credential);
+  await updatePassword(auth.currentUser, newPassword);
 }

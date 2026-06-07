@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom";
 import logo from "../assets/smart-chest-miner-logo.png";
 import { C } from "../theme";
 
+// Route entries for the navigation list
 const nav = [
   { to: "/dashboard", label: "Live Monitor", icon: "monitor" },
   { to: "/analytics", label: "Analytics", icon: "analytics" },
@@ -13,6 +14,7 @@ const nav = [
   { to: "/settings", label: "System Config", icon: "settings" },
 ];
 
+// Sidebar — collapsible left navigation with logo, nav links, system health bar, and collapse toggle
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -36,7 +38,7 @@ export default function Sidebar() {
         {!collapsed && (
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 900, color: C.text, lineHeight: 1 }}>Smart Chest</div>
-            <div style={{ fontSize: 9, color: C.textMuted, marginTop: 4, letterSpacing: "0.08em", textTransform: "uppercase" }}>Vitals Active</div>
+            <div style={{ fontSize: 10, color: C.textMuted, marginTop: 4, letterSpacing: "0.08em", textTransform: "uppercase" }}>Vitals Active</div>
           </div>
         )}
       </div>
@@ -114,6 +116,7 @@ export default function Sidebar() {
   );
 }
 
+// LogoMark — app logo box; shrinks slightly when sidebar is collapsed
 function LogoMark({ compact }) {
   return (
     <div
@@ -135,6 +138,7 @@ function LogoMark({ compact }) {
   );
 }
 
+// NavIcon — returns the correct SVG icon for a given nav item key
 function NavIcon({ name }) {
   const common = { width: 17, height: 17, fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" };
 

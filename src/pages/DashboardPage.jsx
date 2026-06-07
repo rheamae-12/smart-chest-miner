@@ -7,6 +7,7 @@ import { C, cardStyle, moduleLabel, pageStyle } from "../theme";
 import { buildAlerts, getVitalStatus } from "../utils/alertChecker";
 import { average, formatLastSeen, formatReading, lastSeenValue } from "../utils/formatters";
 
+// DashboardPage — real-time vitals view: alert banner, stat cards, live chart, and miner list sidebar
 export default function DashboardPage({ miners, liveData, thresholds, dismissedAlertIds = [], onDismissAlerts }) {
   const sortedMiners = useMemo(() => [...miners].sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)), [miners]);
   const defaultMinerId = sortedMiners.find((item) => item.active)?.id || sortedMiners[0]?.id || "";
@@ -32,10 +33,11 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
       <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(420px, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
         <AlertBanner miners={miners} thresholds={thresholds} dismissedAlertIds={dismissedAlertIds} onDismissAlerts={onDismissAlerts} />
 
-        <section style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+        <section style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <StatCard label="Active Miners" value={activeMiners.length} unit={`/${miners.length}`} color={activeMiners.length ? C.green : C.offline} sub={`${contactCount} with chest contact`} />
           <StatCard label="Avg Heart Rate" value={formatReading(average(activeMiners.map((item) => item.hr)), 0)} unit="bpm" color={C.red} sub={`${thresholds.hrMin}-${thresholds.hrMax} normal range`} />
           <StatCard label="Avg SpO2" value={formatReading(average(activeMiners.map((item) => item.spo2)), 0)} unit="%" color={C.primary} sub={`minimum ${thresholds.spo2Min}%`} />
+          <StatCard label="Avg Body Temp" value={formatReading(average(activeMiners.map((item) => item.temp)), 1)} unit="°C" color={C.teal} sub={`${thresholds.tempMin}–${thresholds.tempMax}°C normal`} />
           <StatCard label="Warnings" value={alerts.length ? alerts.length : "Clear"} color={alerts.length ? C.amber : C.green} sub="live conditions" />
         </section>
 
@@ -45,7 +47,7 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 14, marginBottom: 12 }}>
                 <div>
                   <div style={moduleLabel}>Live HR + SpO2 readings</div>
-                  <div style={{ color: C.text, fontSize: 22, fontWeight: 950, marginTop: 4 }}>Live Sensor Monitoring</div>
+                  <div style={{ color: C.text, fontSize: 26, fontWeight: 950, marginTop: 4 }}>Live Sensor Monitoring</div>
                   <div style={{ color: C.textMuted, fontSize: 12, marginTop: 5 }}>
                     {miner ? `${miner.name} (${miner.id}) - ${miner.location}` : "Waiting for registered miner devices"}
                   </div>
@@ -85,9 +87,10 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
               <VitalCard label="Heart Rate" value={activeVital ? formatReading(miner.hr, 0) : "--"} unit="bpm" color={C.red} status={activeVital ? getVitalStatus(miner.hr, "hr", thresholds) : "OFFLINE"} />
               <VitalCard label="SpO2" value={activeVital ? formatReading(miner.spo2, 0) : "--"} unit="%" color={C.primary} status={activeVital ? getVitalStatus(miner.spo2, "spo2", thresholds) : "OFFLINE"} />
+              <VitalCard label="Body Temp" value={activeVital ? formatReading(miner.temp, 1) : "--"} unit="°C" color={C.teal} status={activeVital ? getVitalStatus(miner.temp, "temp", thresholds) : "OFFLINE"} />
               <VitalCard label="Chest Contact" value={miner?.active ? (miner?.finger === false ? "No" : "Yes") : "--"} color={!miner?.active ? C.offline : miner?.finger === false ? C.amber : C.green} status={!miner?.active ? "OFFLINE" : miner?.finger === false ? "WARNING" : "NORMAL"} />
               <VitalCard label="Manual Alert" value={miner?.active ? (miner?.manual_alert ? "Active" : "Clear") : "--"} color={!miner?.active ? C.offline : miner?.manual_alert ? C.red : C.green} status={!miner?.active ? "OFFLINE" : miner?.manual_alert ? "CRITICAL" : "NORMAL"} />
             </div>
@@ -127,9 +130,10 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
                       </div>
                       <StatusBadge active={item.active} />
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginTop: 9 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginTop: 9 }}>
                       <SmallReading label="HR" value={item.active ? formatReading(item.hr, 0) : "--"} color={C.red} />
                       <SmallReading label="SpO2" value={item.active ? formatReading(item.spo2, 0) : "--"} color={C.primary} />
+                      <SmallReading label="Temp" value={item.active ? formatReading(item.temp, 1) : "--"} color={C.teal} />
                     </div>
                   </button>
                 ))}
@@ -149,21 +153,25 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
   );
 }
 
+// mergeLiveSeries — zips hr/spo2/temp arrays into unified time-indexed chart rows (max 30 points)
 function mergeLiveSeries(series) {
-  const max = Math.max(series.hr?.length || 0, series.spo2?.length || 0);
+  const max = Math.max(series.hr?.length || 0, series.spo2?.length || 0, series.temp?.length || 0);
   const rows = [];
   for (let index = 0; index < max; index += 1) {
     const hrPoint = series.hr?.[index];
     const spo2Point = series.spo2?.[index];
+    const tempPoint = series.temp?.[index];
     rows.push({
-      time: hrPoint?.time || spo2Point?.time || "",
+      time: hrPoint?.time || spo2Point?.time || tempPoint?.time || "",
       hr: Number.isFinite(Number(hrPoint?.hr)) ? Number(hrPoint.hr) : null,
       spo2: Number.isFinite(Number(spo2Point?.spo2)) ? Number(spo2Point.spo2) : null,
+      temp: Number.isFinite(Number(tempPoint?.temp)) ? Number(tempPoint.temp) : null,
     });
   }
   return rows.slice(-30);
 }
 
+// EmptyState — placeholder shown inside the chart area when no valid readings are available
 function EmptyState({ title, text }) {
   return (
     <div style={{ height: "100%", display: "grid", placeItems: "center", border: `1px dashed ${C.border}`, borderRadius: 8 }}>
@@ -175,6 +183,7 @@ function EmptyState({ title, text }) {
   );
 }
 
+// VitalCard — single vital reading card with status badge (NORMAL / WARNING / CRITICAL / OFFLINE)
 function VitalCard({ label, value, unit, color, status }) {
   const statusColor = status === "NORMAL" ? C.green : status === "OFFLINE" ? C.offline : status === "CRITICAL" || status === "HIGH" ? C.red : C.amber;
   return (
@@ -193,6 +202,7 @@ function VitalCard({ label, value, unit, color, status }) {
   );
 }
 
+// MiniMetric — compact key/value tile inside the selected-miner sidebar card
 function MiniMetric({ label, value, color }) {
   return (
     <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 7, padding: 9, background: "rgba(255,255,255,0.02)" }}>
@@ -202,6 +212,7 @@ function MiniMetric({ label, value, color }) {
   );
 }
 
+// SmallReading — inline label+value chip used in the miner list sidebar buttons
 function SmallReading({ label, value, color }) {
   return (
     <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 6, padding: "6px 7px" }}>
@@ -211,6 +222,7 @@ function SmallReading({ label, value, color }) {
   );
 }
 
+// Indicator — colored row with a glowing dot used in the Warning Indicators section
 function Indicator({ color, label }) {
   return (
     <div style={{
