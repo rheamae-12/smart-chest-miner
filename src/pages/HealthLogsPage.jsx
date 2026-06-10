@@ -129,7 +129,7 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
                 </button>
               </div>
               <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
-                <div style={tableHeader}>
+                <div className="table-header-sticky" style={tableHeader}>
                   <span>Miner</span>
                   <span>Start</span>
                   <span>End</span>

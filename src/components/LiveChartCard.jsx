@@ -50,8 +50,8 @@ export default function LiveChartCard({ title, data, color, dataKey, unit, miner
                 </linearGradient>
               </defs>
               <CartesianGrid stroke={C.borderSoft} vertical={false} />
-              <XAxis dataKey="time" tick={{ fontSize: 9, fill: C.textMuted }} minTickGap={18} axisLine={false} tickLine={false} />
-              <YAxis domain={yDomain} tick={{ fontSize: 9, fill: C.textMuted }} axisLine={false} tickLine={false} width={38} />
+              <XAxis dataKey="time" tick={{ fontSize: 10, fill: C.textMuted }} minTickGap={18} axisLine={false} tickLine={false} />
+              <YAxis domain={yDomain} tick={{ fontSize: 10, fill: C.textMuted }} axisLine={false} tickLine={false} width={38} />
               {warningLine && <ReferenceLine y={warningLine} stroke={C.amber} strokeDasharray="4 4" ifOverflow="extendDomain" />}
               {lowLine && <ReferenceLine y={lowLine} stroke={C.amber} strokeDasharray="4 4" ifOverflow="extendDomain" />}
               <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />

@@ -231,7 +231,7 @@ export default function DevicesPage({ miners, setMiners }) {
               <div style={{ color: C.textMuted, fontSize: 11 }}>{filtered.length} shown</div>
             </div>
             <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
-              <div style={tableHeader}>
+              <div className="table-header-sticky" style={tableHeader}>
                 <span>Device</span>
                 <span>Miner</span>
                 <span>Vitals</span>

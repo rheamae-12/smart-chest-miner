@@ -14,6 +14,22 @@ const SESSION_KEY = "smart-chest-miner-session";
 const LOGIN_GUARD_KEY = "smart-chest-miner-login-guard";
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MS = 60000;
+const HASH_VERSION = 2;
+
+async function hashPassword(password) {
+  const data = new TextEncoder().encode(String(password));
+  const buffer = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function passwordMatches(input, stored, storedVersion) {
+  if (storedVersion === HASH_VERSION) {
+    return (await hashPassword(input)) === stored;
+  }
+  return stored === input;
+}
 
 function readLocalUsers() {
   try {
@@ -171,8 +187,12 @@ export function AuthProvider({ children }) {
         return false;
       }
     } else {
-      const localUser = readLocalUsers().find((item) => item.email === normalizedEmail && item.password === password);
-      if (localUser) {
+      const localUser = readLocalUsers().find((item) => item.email === normalizedEmail);
+      if (localUser && await passwordMatches(password, localUser.password, localUser.v)) {
+        if (localUser.v !== HASH_VERSION) {
+          const hashed = await hashPassword(password);
+          writeLocalUsers(readLocalUsers().map((u) => u.email === normalizedEmail ? { ...u, password: hashed, v: HASH_VERSION } : u));
+        }
         const nextUser = { name: localUser.name, email: localUser.email, source: "local" };
         clearLoginGuard();
         setUser(nextUser);
@@ -232,7 +252,8 @@ export function AuthProvider({ children }) {
     const newUser = {
       name: cleanName,
       email: normalizedEmail,
-      password,
+      password: await hashPassword(password),
+      v: HASH_VERSION,
     };
     writeLocalUsers([...readLocalUsers(), newUser]);
     const nextUser = { name: newUser.name, email: newUser.email, source: "local" };
@@ -268,9 +289,12 @@ export function AuthProvider({ children }) {
     }
     if (user.source === "local") {
       const users = readLocalUsers();
-      const match = users.find((u) => u.email === user.email && u.password === currentPassword);
-      if (!match) throw new Error("Current password is incorrect.");
-      writeLocalUsers(users.map((u) => (u.email === user.email ? { ...u, password: newPassword } : u)));
+      const match = users.find((u) => u.email === user.email);
+      if (!match || !(await passwordMatches(currentPassword, match.password, match.v))) {
+        throw new Error("Current password is incorrect.");
+      }
+      const hashed = await hashPassword(newPassword);
+      writeLocalUsers(users.map((u) => (u.email === user.email ? { ...u, password: hashed, v: HASH_VERSION } : u)));
       return;
     }
     throw new Error("Demo accounts cannot change password.");
@@ -279,6 +303,8 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     await logoutFirebase();
     setUser(null);
+    setAuthError("");
+    setAuthMessage("");
     localStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(SESSION_KEY);
   };

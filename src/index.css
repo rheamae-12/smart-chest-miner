@@ -72,6 +72,7 @@ select:focus,
 textarea:focus {
   border-color: rgba(255, 106, 0, 0.72) !important;
   box-shadow: 0 0 0 3px rgba(255, 106, 0, 0.12) !important;
+  background: #232629 !important;
 }
 
 select {
@@ -295,18 +296,17 @@ input:disabled {
 }
 
 @keyframes softIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(18px) scale(0.972); }
+  to   { opacity: 1; transform: translateY(0)   scale(1);     }
 }
 
 .soft-in {
-  animation: softIn 0.24s ease both;
+  animation: modalIn 0.26s cubic-bezier(0.34, 1.4, 0.64, 1) both;
 }
 
 .panel {
@@ -315,11 +315,13 @@ input:disabled {
 
 button:hover:not(:disabled) {
   transform: translateY(-1px);
-  filter: brightness(1.05);
+  filter: brightness(1.08);
 }
 
 button:active:not(:disabled) {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.97);
+  filter: brightness(0.96);
+  transition-duration: 0.06s;
 }
 
 a,
@@ -582,10 +584,44 @@ input:-webkit-autofill:focus {
 }
 
 /* Staggered page-in reveal for card sections */
-.stagger-1 { animation: pageIn 0.26s ease 0.04s both; }
-.stagger-2 { animation: pageIn 0.26s ease 0.10s both; }
-.stagger-3 { animation: pageIn 0.26s ease 0.16s both; }
-.stagger-4 { animation: pageIn 0.26s ease 0.22s both; }
+.stagger-1 { animation: pageIn 0.28s ease 0.04s both; }
+.stagger-2 { animation: pageIn 0.28s ease 0.10s both; }
+.stagger-3 { animation: pageIn 0.28s ease 0.16s both; }
+.stagger-4 { animation: pageIn 0.28s ease 0.22s both; }
+.stagger-5 { animation: pageIn 0.28s ease 0.28s both; }
+
+/* Shimmer sweep on cards */
+.card-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.card-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 0%, rgba(255,255,255,0.045) 45%, transparent 60%);
+  transform: translateX(-130%);
+  animation: cardSweep 7s ease-in-out infinite;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+/* Card hover lift */
+.card-shimmer:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(0,0,0,0.22), 0 22px 52px rgba(0,0,0,0.32) !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+}
+
+/* Pulse ring around vital status dot */
+@keyframes pulseRingVital {
+  0% { box-shadow: 0 0 0 0 currentColor; opacity: 0.7; }
+  70% { box-shadow: 0 0 0 6px transparent; opacity: 0; }
+  100% { box-shadow: 0 0 0 0 transparent; opacity: 0; }
+}
+.vital-ring {
+  animation: pulseRingVital 2s ease-out infinite;
+}
 
 /* Smooth table / list row hover */
 .data-row {
@@ -603,6 +639,124 @@ input:-webkit-autofill:focus {
 /* Active / online pulse dot */
 .dot-live {
   animation: pulse 2.2s ease-in-out infinite;
+}
+
+/* ECG waveform draw animation */
+@keyframes ecgTrace {
+  0%   { stroke-dashoffset: 220; opacity: 0; }
+  8%   { opacity: 1; }
+  80%  { opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+.ecg-wave {
+  stroke-dasharray: 220;
+  stroke-dashoffset: 220;
+  animation: ecgTrace 2.4s ease-in-out infinite;
+}
+
+/* Sidebar nav link hover (inactive items only) */
+.sidebar-nav-item {
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease !important;
+}
+.sidebar-nav-inactive:hover {
+  background: rgba(255, 255, 255, 0.052) !important;
+  color: #e2e8f0 !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+.sidebar-nav-inactive:hover .sidebar-icon-wrap {
+  background: rgba(255, 106, 0, 0.12) !important;
+  color: rgba(255, 106, 0, 0.7) !important;
+}
+
+/* Sticky table headers */
+.table-header-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(20, 22, 25, 0.96);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* Placeholder text */
+::placeholder {
+  color: #4b5563;
+  opacity: 1;
+}
+
+/* Scrollable area fade at bottom */
+.scroll-fade {
+  mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+}
+
+/* Number highlight glow for big stat values */
+.num-glow {
+  text-shadow: 0 0 18px currentColor;
+}
+
+/* Smooth sidebar collapse */
+.sidebar-label {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.sidebar-label.hidden {
+  opacity: 0;
+  transform: translateX(-6px);
+  pointer-events: none;
+  width: 0;
+}
+
+/* Loading spinner */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(255, 106, 0, 0.18);
+  border-top-color: #FF6A00;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+.spinner-sm {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
+/* Notification badge pop-in */
+@keyframes badgePop {
+  0%   { transform: scale(0.4); opacity: 0; }
+  70%  { transform: scale(1.18); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.badge-pop {
+  animation: badgePop 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Card section divider line */
+.section-rule {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), transparent);
+  margin: 2px 0;
+}
+
+/* Smooth chip hover */
+.chip-hover {
+  transition: background 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+}
+.chip-hover:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.12);
+}
+
+/* Online status glow refinement */
+.status-badge.is-online {
+  animation: onlineHalo 3s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

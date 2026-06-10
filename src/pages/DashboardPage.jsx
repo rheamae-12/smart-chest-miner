@@ -33,7 +33,7 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
       <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(420px, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
         <AlertBanner miners={miners} thresholds={thresholds} dismissedAlertIds={dismissedAlertIds} onDismissAlerts={onDismissAlerts} />
 
-        <section style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
+        <section className="stagger-1" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <StatCard label="Active Miners" value={activeMiners.length} unit={`/${miners.length}`} color={activeMiners.length ? C.green : C.offline} sub={`${contactCount} with chest contact`} />
           <StatCard label="Avg Heart Rate" value={formatReading(average(activeMiners.map((item) => item.hr)), 0)} unit="bpm" color={C.red} sub={`${thresholds.hrMin}-${thresholds.hrMax} normal range`} />
           <StatCard label="Avg SpO2" value={formatReading(average(activeMiners.map((item) => item.spo2)), 0)} unit="%" color={C.primary} sub={`minimum ${thresholds.spo2Min}%`} />
@@ -41,7 +41,7 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
           <StatCard label="Warnings" value={alerts.length ? alerts.length : "Clear"} color={alerts.length ? C.amber : C.green} sub="live conditions" />
         </section>
 
-        <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 288px", gap: 12, minHeight: 0, overflow: "hidden" }}>
+        <section className="stagger-2" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 288px", gap: 12, minHeight: 0, overflow: "hidden" }}>
           <main style={{ display: "grid", gridTemplateRows: "minmax(320px, 1fr) auto", gap: 12, minHeight: 0 }}>
             <div style={{ ...cardStyle, padding: 16, minHeight: 320, display: "grid", gridTemplateRows: "auto 1fr" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 14, marginBottom: 12 }}>
@@ -52,9 +52,12 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
                     {miner ? `${miner.name} (${miner.id}) - ${miner.location}` : "Waiting for registered miner devices"}
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <StatusBadge active={Boolean(miner?.active)} />
-                  <span style={{ color: C.textMuted, fontSize: 11 }}>Last seen {formatLastSeen(miner?.lastSeen)}</span>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <StatusBadge active={Boolean(miner?.active)} />
+                    <span style={{ color: C.textMuted, fontSize: 11 }}>Last seen {formatLastSeen(miner?.lastSeen)}</span>
+                  </div>
+                  <EcgWaveform color={miner?.active ? C.red : C.offline} />
                 </div>
               </div>
 
@@ -97,13 +100,18 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
           </main>
 
           <aside style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 12, minHeight: 0, overflow: "hidden" }}>
-            <section style={{ ...cardStyle, padding: 14 }}>
-              <div style={moduleLabel}>Selected miner</div>
-              <div style={{ color: C.text, fontSize: 18, fontWeight: 950, marginTop: 8 }}>{miner?.name || "No miner"}</div>
-              <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4 }}>{miner?.id || "--"} / {miner?.location || "Unassigned"}</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 14 }}>
-                <MiniMetric label="Status" value={miner?.active ? "Online" : "Offline"} color={miner?.active ? C.green : C.offline} />
-                <MiniMetric label="Signal" value={miner?.active ? "Fresh" : "Offline"} color={miner?.active ? C.green : C.offline} />
+            <section style={{ ...cardStyle, padding: "11px 14px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <SpO2Gauge value={activeVital ? formatReading(miner.spo2, 0) : "--"} color={C.primary} size={60} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: C.text, fontSize: 13, fontWeight: 950, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{miner?.name || "No miner"}</div>
+                  <div style={{ color: C.textMuted, fontSize: 10, marginTop: 2 }}>{miner?.id || "--"} · {miner?.location || "Unassigned"}</div>
+                  <div style={{ display: "flex", gap: 10, marginTop: 7 }}>
+                    <InlineStat label="Status" value={miner?.active ? "Online" : "Offline"} color={miner?.active ? C.green : C.offline} />
+                    <InlineStat label="HR" value={activeVital ? `${formatReading(miner.hr, 0)} bpm` : "--"} color={C.red} />
+                    <InlineStat label="Temp" value={activeVital ? `${formatReading(miner.temp, 1)}°C` : "--"} color={C.teal} />
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -112,31 +120,45 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
                 <div style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 900 }}>Miner stream</div>
                 <span style={{ color: C.textMuted, fontSize: 11 }}>{sortedMiners.length} devices</span>
               </div>
-              <div className="hide-scrollbar" style={{ display: "grid", gap: 8, overflow: "auto", minHeight: 0, alignContent: "start" }}>
-                {sortedMiners.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      userSelectedRef.current = true;
-                      setSelected(item.id);
-                    }}
-                    className={selectedId === item.id ? "card-selected" : ""}
-                    style={{ ...cardStyle, padding: 11, textAlign: "left", cursor: "pointer", borderColor: selectedId === item.id ? C.primary : C.border, background: selectedId === item.id ? "rgba(255,106,0,0.08)" : cardStyle.background }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ color: C.text, fontSize: 12, fontWeight: 900 }}>{item.name}</div>
-                        <div style={{ color: C.textMuted, fontSize: 10, marginTop: 3 }}>{item.id}</div>
+              <div className="hide-scrollbar" style={{ display: "grid", gap: 5, overflow: "auto", minHeight: 0, alignContent: "start" }}>
+                {sortedMiners.map((item) => {
+                  const isSelected = selectedId === item.id;
+                  const statusColor = item.active ? C.green : C.offline;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        userSelectedRef.current = true;
+                        setSelected(item.id);
+                      }}
+                      className={isSelected ? "card-selected" : ""}
+                      style={{
+                        ...cardStyle,
+                        padding: "10px 12px",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        borderColor: isSelected ? C.primary : C.border,
+                        borderLeft: `3px solid ${statusColor}`,
+                        background: isSelected ? "rgba(255,106,0,0.08)" : cardStyle.background,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ color: C.text, fontSize: 12, fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.name}</div>
+                        <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
+                          <span style={{ color: C.textMuted, fontSize: 10 }}>{item.id}</span>
+                          <span style={{ color: C.red, fontSize: 10, fontWeight: 900 }}>{item.active ? `${formatReading(item.hr, 0)} bpm` : "--"}</span>
+                          <span style={{ color: C.primary, fontSize: 10, fontWeight: 900 }}>{item.active ? `${formatReading(item.spo2, 0)}%` : "--"}</span>
+                        </div>
                       </div>
-                      <StatusBadge active={item.active} />
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginTop: 9 }}>
-                      <SmallReading label="HR" value={item.active ? formatReading(item.hr, 0) : "--"} color={C.red} />
-                      <SmallReading label="SpO2" value={item.active ? formatReading(item.spo2, 0) : "--"} color={C.primary} />
-                      <SmallReading label="Temp" value={item.active ? formatReading(item.temp, 1) : "--"} color={C.teal} />
-                    </div>
-                  </button>
-                ))}
+                      <span style={{ color: statusColor, fontSize: 9, fontWeight: 900, letterSpacing: "0.06em", flexShrink: 0 }}>
+                        {item.active ? "ONLINE" : "OFFLINE"}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </section>
 
@@ -186,8 +208,9 @@ function EmptyState({ title, text }) {
 // VitalCard — single vital reading card with status badge (NORMAL / WARNING / CRITICAL / OFFLINE)
 function VitalCard({ label, value, unit, color, status }) {
   const statusColor = status === "NORMAL" ? C.green : status === "OFFLINE" ? C.offline : status === "CRITICAL" || status === "HIGH" ? C.red : C.amber;
+  const isLive = status !== "OFFLINE";
   return (
-    <div style={{ ...cardStyle, padding: 13, borderLeft: `3px solid ${color}` }}>
+    <div className="card-shimmer" style={{ ...cardStyle, padding: 13, borderLeft: `3px solid ${color}` }}>
       <div style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
       <div style={{ color, fontSize: 27, fontWeight: 950, marginTop: 8, lineHeight: 1 }}>
         {value}<span style={{ color: C.textMuted, fontSize: 11, marginLeft: 4 }}>{unit}</span>
@@ -197,27 +220,67 @@ function VitalCard({ label, value, unit, color, status }) {
         color: statusColor, fontSize: 9, fontWeight: 900,
         marginTop: 8, background: `${statusColor}14`, border: `1px solid ${statusColor}30`,
         borderRadius: 999, padding: "3px 8px",
-      }}>{status || "NO DATA"}</div>
+      }}>
+        <span className={isLive ? "vital-ring" : ""} style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor, flexShrink: 0, color: statusColor }} />
+        {status || "NO DATA"}
+      </div>
     </div>
   );
 }
 
-// MiniMetric — compact key/value tile inside the selected-miner sidebar card
-function MiniMetric({ label, value, color }) {
+// InlineStat — compact label+value pair used in the selected miner sidebar header
+function InlineStat({ label, value, color }) {
   return (
-    <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 7, padding: 9, background: "rgba(255,255,255,0.02)" }}>
-      <div style={{ color: C.textMuted, fontSize: 10 }}>{label}</div>
-      <div style={{ color, fontSize: 13, fontWeight: 900, marginTop: 4 }}>{value}</div>
+    <div>
+      <div style={{ color: C.textMuted, fontSize: 9, letterSpacing: "0.06em", textTransform: "uppercase" }}>{label}</div>
+      <div style={{ color, fontSize: 12, fontWeight: 900, marginTop: 2 }}>{value}</div>
     </div>
   );
 }
 
-// SmallReading — inline label+value chip used in the miner list sidebar buttons
-function SmallReading({ label, value, color }) {
+
+// EcgWaveform — animated SVG ECG trace that draws across and loops
+function EcgWaveform({ color = C.red, width = 110, height = 36 }) {
   return (
-    <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 6, padding: "6px 7px" }}>
-      <span style={{ color: C.textMuted, fontSize: 9 }}>{label}</span>
-      <span style={{ color, fontSize: 12, fontWeight: 900, marginLeft: 6 }}>{value}</span>
+    <svg width={width} height={height} style={{ overflow: "visible", flexShrink: 0 }}>
+      <path
+        d={`M0,18 L18,18 L20,15 L22,12 L24,18 L26,11 L28,1 L30,35 L32,18 L34,14 L36,17 L38,18 L${width},18`}
+        fill="none"
+        stroke={color}
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="ecg-wave"
+        style={{ filter: `drop-shadow(0 0 3px ${color}88)` }}
+      />
+    </svg>
+  );
+}
+
+// SpO2Gauge — circular arc gauge showing SpO2 percentage with animated progress ring
+function SpO2Gauge({ value, color, size = 80 }) {
+  const R = size * 0.375;
+  const circ = 2 * Math.PI * R;
+  const arc = circ * 0.75;
+  const cx = size / 2;
+  const cy = size / 2;
+  const safe = Math.max(0, Math.min(100, Number(value) || 0));
+  const filled = arc * (safe / 100);
+  const isLive = value !== "--" && safe > 0;
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={cx} cy={cy} r={R} fill="none" stroke={`${color}20`} strokeWidth="5" strokeDasharray={`${arc} ${circ}`} strokeLinecap="round" transform={`rotate(135, ${cx}, ${cy})`} />
+        <circle cx={cx} cy={cy} r={R} fill="none" stroke={color} strokeWidth="5"
+          strokeDasharray={isLive ? `${filled} ${circ - filled}` : `0 ${circ}`}
+          strokeLinecap="round" transform={`rotate(135, ${cx}, ${cy})`}
+          style={{ transition: "stroke-dasharray 0.7s ease", filter: isLive ? `drop-shadow(0 0 5px ${color}99)` : "none" }}
+        />
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+        <span style={{ color, fontSize: size * 0.21, fontWeight: 950, lineHeight: 1 }}>{value}</span>
+        <span style={{ color: C.textMuted, fontSize: size * 0.115, fontWeight: 800, marginTop: 2, letterSpacing: "0.06em" }}>SpO2%</span>
+      </div>
     </div>
   );
 }

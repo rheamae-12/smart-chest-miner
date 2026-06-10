@@ -657,3 +657,79 @@ function BellIcon({ color = "currentColor" }) {
     </svg>
   );
 }
+
+// CameraIcon — camera SVG shown on avatar hover overlay
+function CameraIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
+  );
+}
+
+// PasswordField — labelled password input with show/hide toggle
+function PasswordField({ label, value, autoComplete, onChange }) {
+  const [show, setShow] = useState(false);
+  return (
+    <label>
+      <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 6, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 900 }}>{label}</div>
+      <div style={{ position: "relative" }}>
+        <input
+          type={show ? "text" : "password"}
+          value={value}
+          autoComplete={autoComplete}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ ...controlStyle, width: "100%", paddingRight: 36, boxSizing: "border-box" }}
+        />
+        <button
+          type="button"
+          onClick={() => setShow((v) => !v)}
+          style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: C.textMuted, padding: 0, display: "flex", alignItems: "center" }}
+        >
+          {show
+            ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" /><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><line x1="1" y1="1" x2="23" y2="23" /></svg>
+            : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+          }
+        </button>
+      </div>
+    </label>
+  );
+}
+
+// passwordRequirements — returns checklist of password rules with met boolean
+function passwordRequirements(password) {
+  return [
+    { label: "8+ characters", met: password.length >= 8 },
+    { label: "Uppercase letter", met: /[A-Z]/.test(password) },
+    { label: "Lowercase letter", met: /[a-z]/.test(password) },
+    { label: "Number or symbol", met: /[\d!@#$%^&*()_+\-=[\]{};':|,.<>/?]/.test(password) },
+  ];
+}
+
+// passwordStrength — returns score (1–4), color, and label for the strength bar
+function passwordStrength(password) {
+  const score = passwordRequirements(password).filter((r) => r.met).length;
+  if (score <= 1) return { score: 1, color: C.red, label: "Weak" };
+  if (score === 2) return { score: 2, color: C.amber, label: "Fair" };
+  if (score === 3) return { score: 3, color: C.primary, label: "Good" };
+  return { score: 4, color: C.green, label: "Strong" };
+}
+
+// readAvatarSrc — reads a user's uploaded avatar from localStorage
+function readAvatarSrc(user) {
+  if (!user?.uid && !user?.email) return "";
+  try {
+    return localStorage.getItem(`smart-chest-miner-avatar-${user.uid || user.email}`) || "";
+  } catch {
+    return "";
+  }
+}
+
+// writeAvatarSrc — persists a user's avatar base64 string to localStorage
+function writeAvatarSrc(user, src) {
+  if (!user?.uid && !user?.email) return;
+  try {
+    localStorage.setItem(`smart-chest-miner-avatar-${user.uid || user.email}`, src);
+  } catch { /* storage quota exceeded — silently skip */ }
+}

@@ -14,6 +14,15 @@ const MAX_ACTIVITY_LOGS = 160;
 
 const DEFAULT_STALE_SECONDS = 75;
 
+// addEvent — adds a key to the event Set, pruning the oldest 100 entries when the cap is exceeded
+function addEvent(set, key) {
+  if (set.size >= 500) {
+    const iter = set.values();
+    for (let i = 0; i < 100; i++) set.delete(iter.next().value);
+  }
+  set.add(key);
+}
+
 // readStoredSystem — reads miners/thresholds/staleSeconds from localStorage; returns null on parse error
 function readStoredSystem() {
   try {
@@ -430,7 +439,7 @@ export function useMinerSystem(enabled) {
             const statusEvent = buildStatusLog(miner, previousStatus);
             const key = `${statusEvent.type}:${statusEvent.deviceId}:${statusEvent.status}:${Math.floor(statusEvent.timestamp / 60000)}`;
             if (!emittedEventRef.current.has(key)) {
-              emittedEventRef.current.add(key);
+              addEvent(emittedEventRef.current, key);
               writeActivityLog(statusEvent).catch(() => {});
             }
           }
@@ -438,7 +447,7 @@ export function useMinerSystem(enabled) {
           buildVitalLogs(miner, thresholdsRef.current).forEach((event) => {
             const key = `${event.type}:${event.deviceId}:${event.status}:${Math.floor(event.timestamp / 60000)}`;
             if (!emittedEventRef.current.has(key)) {
-              emittedEventRef.current.add(key);
+              addEvent(emittedEventRef.current, key);
               writeActivityLog(event).catch(() => {});
             }
           });
@@ -448,7 +457,7 @@ export function useMinerSystem(enabled) {
           const next = { ...prev };
           realtimeMiners.forEach((miner) => {
             if (!miner.active || miner.stale || !miner.finger || (!miner.hr && !miner.spo2)) {
-              next[miner.id] = { hr: [], spo2: [] };
+              next[miner.id] = { hr: [], spo2: [], temp: [] };
               return;
             }
             const label = timeLabel(miner.lastSeen);
@@ -545,7 +554,7 @@ export function useMinerSystem(enabled) {
         const event = buildStatusLog({ ...miner, active: false, status: "offline", stale: true }, "online");
         const key = `${event.type}:${event.deviceId}:${event.status}:${Math.floor(Date.now() / 60000)}`;
         if (!emittedEventRef.current.has(key)) {
-          emittedEventRef.current.add(key);
+          addEvent(emittedEventRef.current, key);
           writeActivityLog(event).catch(() => {});
         }
       });

@@ -21,9 +21,11 @@ export default function WifiConfigPage({ miners }) {
   const [form, setForm] = useState({ ...EMPTY_FORM, deviceId: miners[0]?.id || "" });
   const [confirm, setConfirm] = useState(null);
   const [message, setMessage] = useState("");
+  const [pageAlert, setPageAlert] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState(null);
   const [deleteRecord, setDeleteRecord] = useState(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(
     () =>
@@ -49,13 +51,20 @@ export default function WifiConfigPage({ miners }) {
   );
   const sortedMiners = useMemo(() => [...miners].sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)), [miners]);
 
-  const selectedDeviceId = miners.some((miner) => miner.id === form.deviceId) ? form.deviceId : miners[0]?.id || "";
+  // Fix: preserve orphaned device ID when editing a record whose device was removed
+  const selectedDeviceId = miners.some((miner) => miner.id === form.deviceId)
+    ? form.deviceId
+    : editingRecord && form.deviceId
+      ? form.deviceId
+      : miners[0]?.id || "";
+
   const selectedMiner = miners.find((miner) => miner.id === selectedDeviceId);
 
   const openModal = () => {
     setMessage("");
     setConfirm(null);
     setEditingRecord(null);
+    setShowPassword(false);
     setForm({ ...EMPTY_FORM, deviceId: sortedMiners[0]?.id || miners[0]?.id || "" });
     setModalOpen(true);
   };
@@ -65,6 +74,7 @@ export default function WifiConfigPage({ miners }) {
     setConfirm(null);
     setMessage("");
     setEditingRecord(null);
+    setShowPassword(false);
   };
 
   const openEdit = (row) => {
@@ -72,6 +82,7 @@ export default function WifiConfigPage({ miners }) {
     setMessage("");
     setConfirm(null);
     setEditingRecord(row.config);
+    setShowPassword(false);
     setForm({
       deviceId: row.config.deviceId,
       ssid: row.config.ssid || "",
@@ -118,7 +129,8 @@ export default function WifiConfigPage({ miners }) {
         title: editingRecord ? "WiFi configuration updated" : "WiFi configuration queued",
         detail: `${selectedMiner?.name || selectedDeviceId} was assigned to SSID ${config.ssid}.`,
       });
-      setMessage(editingRecord ? "WiFi configuration updated and queued for the device." : "WiFi configuration saved and queued for the device.");
+      // Show success at page level so it's visible after the modal closes
+      setPageAlert(editingRecord ? "WiFi configuration updated and queued for the device." : "WiFi configuration saved and queued for the device.");
       setConfirm(null);
       setForm({ ...EMPTY_FORM, deviceId: selectedDeviceId });
       setEditingRecord(null);
@@ -145,7 +157,8 @@ export default function WifiConfigPage({ miners }) {
         detail: `SSID ${deleteRecord.ssid} was removed from WiFi history.`,
       });
       setDeleteRecord(null);
-      setMessage("WiFi connection row deleted.");
+      // Show success at page level so it's visible after the modal closes
+      setPageAlert("WiFi connection row deleted.");
     } catch (error) {
       setMessage(error.message || "WiFi connection could not be deleted.");
     }
@@ -171,6 +184,10 @@ export default function WifiConfigPage({ miners }) {
                 {sortedMiners.map((miner) => (
                   <option key={miner.id} value={miner.id}>{miner.name} ({miner.id})</option>
                 ))}
+                {/* Show orphaned device option when editing a config whose device no longer exists */}
+                {editingRecord && !miners.some((m) => m.id === form.deviceId) && form.deviceId && (
+                  <option value={form.deviceId}>{form.deviceId} (unregistered)</option>
+                )}
               </select>
             </Field>
             <Field label="WiFi SSID">
@@ -184,7 +201,26 @@ export default function WifiConfigPage({ miners }) {
               </select>
             </Field>
             <Field label="Password">
-              <input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} disabled={form.security === "OPEN"} placeholder={form.security === "OPEN" ? "Not required" : "Network password"} style={{ ...controlStyle, width: "100%" }} />
+              <div style={{ position: "relative" }}>
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={form.password}
+                  onChange={(event) => setForm({ ...form, password: event.target.value })}
+                  disabled={form.security === "OPEN"}
+                  placeholder={form.security === "OPEN" ? "Not required" : "Network password"}
+                  style={{ ...controlStyle, width: "100%", paddingRight: 38, boxSizing: "border-box" }}
+                />
+                {form.security !== "OPEN" && (
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: C.textMuted, padding: 0, display: "flex", alignItems: "center" }}
+                    title={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                  </button>
+                )}
+              </div>
             </Field>
             <label style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", border: `1px solid ${C.borderSoft}`, borderRadius: 7, padding: "10px 11px" }}>
               <span style={{ color: C.textDim, fontSize: 12, fontWeight: 800 }}>Apply on next device boot</span>
@@ -217,7 +253,22 @@ export default function WifiConfigPage({ miners }) {
           </div>
         </Modal>
       )}
-      <div style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateRows: pageAlert ? "auto auto minmax(0, 1fr)" : "auto minmax(0, 1fr)",
+          gap: 12,
+          height: "100%",
+          minHeight: 0,
+          transition: "grid-template-rows 0.2s ease",
+        }}
+      >
+        {pageAlert && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 14px", background: `${C.green}14`, border: `1px solid ${C.green}44`, borderRadius: 10, color: C.green, fontSize: 13, fontWeight: 800 }}>
+            <span>{pageAlert}</span>
+            <button onClick={() => setPageAlert("")} style={{ background: "none", border: "none", cursor: "pointer", color: C.green, fontSize: 16, lineHeight: 1, padding: 0 }}>×</button>
+          </div>
+        )}
         <header style={{ ...cardStyle, padding: 16, display: "flex", justifyContent: "space-between", gap: 14, alignItems: "end" }}>
           <div>
             <div style={moduleLabel}>Wireless provisioning</div>
@@ -244,7 +295,7 @@ export default function WifiConfigPage({ miners }) {
               </div>
             </div>
             <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
-              <div style={tableHeader}>
+              <div className="table-header-sticky" style={tableHeader}>
                 <span>Device</span>
                 <span>Status</span>
                 <span>SSID</span>
@@ -340,6 +391,26 @@ function IconButton({ children, danger, disabled, onClick, title }) {
   );
 }
 
+// EyeIcon / EyeOffIcon — show/hide password toggle icons
+function EyeIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  );
+}
+
 // buildRows — merges history records + legacy device configs + unconfigured miners into a sortable table list
 function buildRows(miners, history, configs, search) {
   const minerById = new Map(miners.map((miner) => [miner.id, miner]));
@@ -407,4 +478,3 @@ const tableRow = {
   borderBottom: `1px solid ${C.borderSoft}`,
   fontSize: 12,
 };
-

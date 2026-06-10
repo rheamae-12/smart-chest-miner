@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import logo from "../assets/smart-chest-miner-logo.png";
 import { C } from "../theme";
 
@@ -10,6 +10,7 @@ const nav = [
   { to: "/devices", label: "Device Registry", icon: "device" },
   { to: "/health-logs", label: "Health Logs", icon: "history" },
   { to: "/sensor-status", label: "Sensor Status", icon: "network" },
+  { to: "/alert-history", label: "Alert History", icon: "alert-history" },
   { to: "/wifi-config", label: "WiFi Config", icon: "wifi" },
   { to: "/settings", label: "System Config", icon: "settings" },
 ];
@@ -49,6 +50,7 @@ export default function Sidebar() {
             key={item.to}
             to={item.to}
             title={collapsed ? item.label : undefined}
+            className={({ isActive }) => `sidebar-nav-item${isActive ? "" : " sidebar-nav-inactive"}`}
             style={({ isActive }) => ({
               display: "flex",
               alignItems: "center",
@@ -56,7 +58,7 @@ export default function Sidebar() {
               minHeight: 38,
               padding: collapsed ? "0 8px" : "0 11px",
               borderRadius: 10,
-              marginBottom: 5,
+              marginBottom: 4,
               textDecoration: "none",
               background: isActive ? "linear-gradient(90deg, rgba(255,106,0,0.18), rgba(255,106,0,0.06))" : "transparent",
               color: isActive ? C.text : C.textMuted,
@@ -64,32 +66,19 @@ export default function Sidebar() {
               boxShadow: isActive ? "inset 3px 0 0 #FF6A00, 0 10px 20px rgba(255,106,0,0.08)" : "none",
             })}
           >
-            <span
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 9,
-                display: "grid",
-                placeItems: "center",
-                background: "rgba(255,255,255,0.04)",
-                color: C.primary,
-                flexShrink: 0,
-              }}
-            >
-              <NavIcon name={item.icon} />
-            </span>
-            {!collapsed && <span style={{ fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>{item.label}</span>}
+            <NavItemContent item={item} collapsed={collapsed} />
           </NavLink>
         ))}
       </nav>
 
       {!collapsed && (
         <div style={{ margin: "0 12px 12px", padding: 12, borderRadius: 10, border: `1px solid rgba(255,106,0,0.24)`, background: "linear-gradient(180deg, rgba(255,106,0,0.10), rgba(255,255,255,0.025))" }}>
-          <div style={{ fontSize: 11, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.08em" }}>Safety Mode</div>
-          <div style={{ fontSize: 13, color: C.text, fontWeight: 800, marginTop: 5 }}>System Health</div>
+          <div style={{ fontSize: 10, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Safety Mode</div>
+          <div style={{ fontSize: 13, color: C.text, fontWeight: 800, marginTop: 4 }}>System Health</div>
           <div style={{ height: 4, borderRadius: 999, background: C.border, marginTop: 10, overflow: "hidden" }}>
-            <div style={{ width: "82%", height: "100%", background: C.primaryGradient }} />
+            <div style={{ width: "82%", height: "100%", background: C.primaryGradient, borderRadius: 999, boxShadow: "0 0 10px rgba(255,106,0,0.4)", animation: "pulse 3s ease-in-out infinite" }} />
           </div>
+          <div style={{ fontSize: 10, color: C.primary, fontWeight: 800, marginTop: 6, letterSpacing: "0.06em" }}>82% — NOMINAL</div>
         </div>
       )}
 
@@ -103,16 +92,54 @@ export default function Sidebar() {
             borderRadius: 7,
             border: `1px solid ${C.border}`,
             background: "rgba(255,255,255,0.03)",
-            color: C.textDim,
+            color: C.textMuted,
             cursor: "pointer",
-            fontSize: 12,
-            fontWeight: 800,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
           }}
         >
-          {collapsed ? ">" : "< Collapse"}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+            style={{ transform: collapsed ? "rotate(180deg)" : "none", transition: "transform 0.2s ease", flexShrink: 0 }}
+          >
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+          {!collapsed && <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em" }}>Collapse</span>}
         </button>
       </div>
     </aside>
+  );
+}
+
+// NavItemContent — renders icon + label for a sidebar nav entry, color-coded by active state
+function NavItemContent({ item, collapsed }) {
+  const { pathname } = useLocation();
+  const isActive = pathname === item.to || pathname.startsWith(item.to + "/");
+  return (
+    <>
+      <span
+        className="sidebar-icon-wrap"
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 9,
+          display: "grid",
+          placeItems: "center",
+          background: isActive ? "rgba(255,106,0,0.16)" : "rgba(255,255,255,0.04)",
+          color: isActive ? C.primary : C.textMuted,
+          flexShrink: 0,
+          transition: "background 0.15s ease, color 0.15s ease",
+        }}
+      >
+        <NavIcon name={item.icon} />
+      </span>
+      {!collapsed && (
+        <span style={{ fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>
+          {item.label}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -192,6 +219,15 @@ function NavIcon({ name }) {
         <path d="M12 7v4" />
         <path d="m6.5 17 4-5" />
         <path d="m17.5 17-4-5" />
+      </svg>
+    );
+  }
+  if (name === "alert-history") {
+    return (
+      <svg viewBox="0 0 24 24" style={common} aria-hidden="true">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+        <line x1="12" y1="9" x2="12" y2="13" />
+        <line x1="12" y1="17" x2="12.01" y2="17" />
       </svg>
     );
   }

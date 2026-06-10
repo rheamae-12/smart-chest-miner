@@ -10,7 +10,7 @@ export function useAnalytics(deviceId) {
     return subscribeToAnalytics(deviceId, setRows, setError);
   }, [deviceId]);
 
-  const writeSnapshot = (avgHR, avgSpo2) => writeAnalyticsSnapshot(deviceId, avgHR, avgSpo2);
+  const writeSnapshot = (avgHR, avgSpo2, avgTemp) => writeAnalyticsSnapshot(deviceId, avgHR, avgSpo2, avgTemp);
 
   return { rows, error, writeSnapshot };
 }

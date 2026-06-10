@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import Modal from "./components/Modal";
 import Sidebar from "./components/Sidebar";
 import Navbar from "./components/Navbar";
@@ -19,10 +19,12 @@ const LoginPage = lazy(() => import("./pages/LoginPage"));
 const SensorStatusPage = lazy(() => import("./pages/SensorStatusPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const WifiConfigPage = lazy(() => import("./pages/WifiConfigPage"));
+const AlertHistoryPage = lazy(() => import("./pages/AlertHistoryPage"));
 
 export default function App() {
   const { user, logout, authReady } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const system = useMinerSystem(Boolean(user));
   const [logoutOpen, setLogoutOpen] = useState(false);
   useAlertNotifications(user ? buildAlerts(system.miners, system.thresholds) : []);
@@ -43,7 +45,12 @@ export default function App() {
   }, [dismissedAlertIds]);
 
   if (!authReady) {
-    return <div style={{ minHeight: "100vh", background: C.bg0 }} />;
+    return (
+      <div style={{ minHeight: "100vh", background: C.bg0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14 }}>
+        <div className="spinner" />
+        <span style={{ color: C.textMuted, fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase" }}>Connecting…</span>
+      </div>
+    );
   }
 
   if (!user) {
@@ -111,6 +118,7 @@ export default function App() {
               </div>
             )}
             <Suspense fallback={<RouteFallback />}>
+              <div key={location.pathname} style={{ height: "100%", display: "contents" }}>
               <Routes>
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 <Route
@@ -149,8 +157,13 @@ export default function App() {
                     />
                   }
                 />
+                <Route
+                  path="/alert-history"
+                  element={<AlertHistoryPage miners={system.miners} activityLogs={system.activityLogs} />}
+                />
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />
               </Routes>
+              </div>
             </Suspense>
           </main>
         </div>
@@ -161,8 +174,9 @@ export default function App() {
 
 function RouteFallback() {
   return (
-    <div style={{ minHeight: "100%", display: "grid", placeItems: "center", background: C.bg0, color: C.textMuted, fontSize: 12, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-      Loading system module...
+    <div style={{ minHeight: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, background: C.bg0 }}>
+      <div className="spinner" />
+      <span style={{ color: C.textMuted, fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase" }}>Loading module…</span>
     </div>
   );
 }

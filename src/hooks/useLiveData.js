@@ -3,7 +3,7 @@ import { subscribeToDeviceLive } from "../firebase/database";
 import { timeLabel } from "../utils/formatters";
 
 export function useLiveData(deviceId) {
-  const [buffer, setBuffer] = useState({ hr: [], spo2: [] });
+  const [buffer, setBuffer] = useState({ hr: [], spo2: [], temp: [] });
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -17,6 +17,7 @@ export function useLiveData(deviceId) {
         setBuffer((prev) => ({
           hr: [...prev.hr.slice(-29), { time: label, hr: live.heartRate ?? live.hr ?? 0 }],
           spo2: [...prev.spo2.slice(-29), { time: label, spo2: live.spo2 ?? 0 }],
+          temp: [...(prev.temp || []).slice(-29), { time: label, temp: live.temp ?? live.temperature ?? live.bodyTemp ?? 0 }],
         }));
       },
       (message) => setError(message),

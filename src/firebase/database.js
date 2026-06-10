@@ -117,8 +117,13 @@ export function subscribeToWifiConnectionHistory(onData, onError) {
 function firebaseRestUrl(path) {
   if (!firebaseDatabaseUrl || !firebaseDatabaseSecret) return "";
   if (firebaseDatabaseSecret.includes("YOUR_")) return "";
+  const safePath = String(path)
+    .split("/")
+    .map((seg) => seg.replace(/\.\./g, "").trim())
+    .filter(Boolean)
+    .join("/");
   const base = firebaseDatabaseUrl.replace(/\/$/, "");
-  return `${base}/${path}.json?auth=${encodeURIComponent(firebaseDatabaseSecret)}`;
+  return `${base}/${safePath}.json?auth=${encodeURIComponent(firebaseDatabaseSecret)}`;
 }
 
 function pollFirebasePath(path, onData, onError, intervalMs = 2000) {
@@ -405,13 +410,14 @@ export async function removeWifiConnection(record, removeDeviceQueue = false) {
   return updateMultiPath(updates);
 }
 
-export async function writeAnalyticsSnapshot(deviceId, avgHR, avgSpo2) {
+export async function writeAnalyticsSnapshot(deviceId, avgHR, avgSpo2, avgTemp) {
   if (!db || !deviceId) return false;
   const timestamp = Date.now();
   await set(ref(db, `analytics/${deviceId}/${timestamp}`), {
     heartRate: avgHR,
     hr: avgHR,
     spo2: avgSpo2,
+    temp: avgTemp ?? 0,
     timestamp,
   });
   return true;

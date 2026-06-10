@@ -15,6 +15,7 @@ function playAlertBeep(critical) {
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
     oscillator.start(ctx.currentTime);
     oscillator.stop(ctx.currentTime + 0.5);
+    oscillator.onended = () => ctx.close();
   } catch {
     // Audio context may be unavailable in some environments.
   }

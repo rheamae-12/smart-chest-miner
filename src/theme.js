@@ -53,15 +53,18 @@ export const pageLabels = {
   "/health-logs": "Health Logs",
   "/sensor-status": "Sensor Status",
   "/wifi-config": "WiFi Configuration",
+  "/alert-history": "Alert History",
   "/settings": "System Config",
 };
 
 // Base card style — used by every panel/section card in the app
 export const cardStyle = {
-  background: "linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.018))",
+  background: "linear-gradient(180deg, rgba(255,255,255,0.048), rgba(255,255,255,0.022))",
   border: `1px solid ${C.border}`,
-  borderRadius: 10,
-  boxShadow: "0 18px 42px rgba(0, 0, 0, 0.22)",
+  borderRadius: 12,
+  boxShadow: "0 4px 6px rgba(0,0,0,0.18), 0 18px 42px rgba(0, 0, 0, 0.28)",
+  backdropFilter: "blur(12px)",
+  WebkitBackdropFilter: "blur(12px)",
   transition: "border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease",
 };
 
