@@ -1,5 +1,16 @@
 import { onValue, push, ref, remove, serverTimestamp, set, update } from "firebase/database";
-import { db, firebaseDatabaseSecret, firebaseDatabaseUrl } from "./config";
+import { auth, db, firebaseDatabaseUrl } from "./config";
+
+// restAuthParam — returns "&auth=<idToken>" for the signed-in user so the REST
+// fallback obeys the same security rules as the SDK. Never uses an admin secret.
+async function restAuthParam() {
+  try {
+    const token = await auth?.currentUser?.getIdToken?.();
+    return token ? `&auth=${encodeURIComponent(token)}` : "";
+  } catch {
+    return "";
+  }
+}
 
 function noopSubscribe(onError) {
   onError?.("Firebase is not configured. Add VITE_FIREBASE_* values to .env.");
@@ -114,29 +125,30 @@ export function subscribeToWifiConnectionHistory(onData, onError) {
   );
 }
 
+// firebaseRestUrl — builds the base `.json` REST URL for a path (no auth token).
+// Auth is appended per-request via restAuthParam() so tokens stay fresh.
 function firebaseRestUrl(path) {
-  if (!firebaseDatabaseUrl || !firebaseDatabaseSecret) return "";
-  if (firebaseDatabaseSecret.includes("YOUR_")) return "";
+  if (!firebaseDatabaseUrl) return "";
   const safePath = String(path)
     .split("/")
     .map((seg) => seg.replace(/\.\./g, "").trim())
     .filter(Boolean)
     .join("/");
   const base = firebaseDatabaseUrl.replace(/\/$/, "");
-  return `${base}/${safePath}.json?auth=${encodeURIComponent(firebaseDatabaseSecret)}`;
+  return `${base}/${safePath}.json`;
 }
 
 function pollFirebasePath(path, onData, onError, intervalMs = 2000) {
   const url = firebaseRestUrl(path);
   if (!url) {
-    onError?.("Firebase REST fallback is missing VITE_FIREBASE_DATABASE_URL or VITE_FIREBASE_DATABASE_SECRET.");
+    onError?.("Firebase REST fallback is missing VITE_FIREBASE_DATABASE_URL.");
     return () => {};
   }
 
   let stopped = false;
   const load = async () => {
     try {
-      const response = await fetch(url);
+      const response = await fetch(`${url}?print=pretty${await restAuthParam()}`);
       if (!response.ok) {
         throw new Error(`REST ${path} failed: HTTP ${response.status}`);
       }
@@ -171,7 +183,7 @@ async function writeFirebasePath(path, method, payload) {
   const url = firebaseRestUrl(path);
   if (!url) return false;
 
-  const response = await fetch(url, {
+  const response = await fetch(`${url}?${(await restAuthParam()).replace(/^&/, "")}`, {
     method,
     headers: { "Content-Type": "application/json" },
     body: payload === undefined ? undefined : JSON.stringify(payload),
@@ -210,7 +222,8 @@ export async function trimAnalyticsHistory(deviceId, keepCount = 120) {
   const url = firebaseRestUrl(`analytics/${deviceId}`);
   if (!url) return false;
 
-  const response = await fetch(url);
+  const authParam = await restAuthParam();
+  const response = await fetch(`${url}?shallow=true${authParam}`);
   if (!response.ok) return false;
 
   const rows = (await response.json()) || {};
@@ -221,7 +234,7 @@ export async function trimAnalyticsHistory(deviceId, keepCount = 120) {
   if (keysToDelete.length === 0) return true;
 
   const updates = Object.fromEntries(keysToDelete.map((key) => [key, null]));
-  const patchResponse = await fetch(url, {
+  const patchResponse = await fetch(`${url}?${authParam.replace(/^&/, "")}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),

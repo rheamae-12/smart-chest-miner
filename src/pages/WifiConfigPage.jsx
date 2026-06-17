@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Modal from "../components/Modal";
+import PageHeader from "../components/PageHeader";
 import StatusBadge from "../components/StatusBadge";
+import { useAuth } from "../context/useAuth";
 import { removeWifiConnection, saveWifiConfiguration, subscribeToWifiConfigurations, subscribeToWifiConnectionHistory, writeActivityLog } from "../firebase/database";
 import { C, cardStyle, controlStyle, ghostButtonStyle, moduleLabel, pageStyle, primaryButtonStyle } from "../theme";
 import { formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
@@ -15,6 +17,7 @@ const EMPTY_FORM = {
 
 // WifiConfigPage — WiFi provisioning table: assign, edit, and delete per-device network configurations
 export default function WifiConfigPage({ miners }) {
+  const { canManage } = useAuth();
   const [configs, setConfigs] = useState({});
   const [history, setHistory] = useState({});
   const [search, setSearch] = useState("");
@@ -269,29 +272,27 @@ export default function WifiConfigPage({ miners }) {
             <button onClick={() => setPageAlert("")} style={{ background: "none", border: "none", cursor: "pointer", color: C.green, fontSize: 16, lineHeight: 1, padding: 0 }}>×</button>
           </div>
         )}
-        <header style={{ ...cardStyle, padding: 16, display: "flex", justifyContent: "space-between", gap: 14, alignItems: "end" }}>
-          <div>
-            <div style={moduleLabel}>Wireless provisioning</div>
-            <div style={{ color: C.text, fontSize: 26, fontWeight: 950, marginTop: 4 }}>WiFi Configuration</div>
-            <div style={{ color: C.textMuted, fontSize: 12, marginTop: 5 }}>Queue network settings per miner so devices can connect without hardcoded firmware credentials.</div>
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <StatusPill label={`${rows.filter((row) => row.config).length} connection rows`} color={C.primary} />
-            <StatusPill label={`${miners.filter((miner) => miner.active).length} online`} color={C.green} />
-            <button onClick={openModal} style={{ ...primaryButtonStyle, padding: "9px 13px", fontSize: 12 }}>Assign Connection</button>
-          </div>
-        </header>
+        <PageHeader
+          label="Wireless provisioning"
+          title="WiFi Configuration"
+          titleSize={26}
+          subtitle="Queue network settings per miner so devices can connect without hardcoded firmware credentials."
+          right={
+            <>
+              <StatusPill label={`${rows.filter((row) => row.config).length} connection rows`} color={C.primary} />
+              <StatusPill label={`${miners.filter((miner) => miner.active).length} online`} color={C.green} />
+              {canManage && <button onClick={openModal} style={{ ...primaryButtonStyle, padding: "9px 13px", fontSize: 12 }}>Assign Connection</button>}
+            </>
+          }
+        />
 
         <main style={{ display: "grid", minHeight: 0 }}>
           <section style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
-            <div style={{ padding: "13px 15px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
-              <div>
-                <div style={moduleLabel}>Connection table</div>
-                <div style={{ color: C.text, fontSize: 16, fontWeight: 950, marginTop: 4 }}>Device WiFi Queue</div>
-              </div>
+            <div style={{ padding: "13px 15px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ color: C.text, fontSize: 15, fontWeight: 950 }}>Device WiFi Queue</div>
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search device, miner, SSID..." style={{ ...controlStyle, width: 260 }} />
-                <Indicator label="Pending means queued until the device applies it" color={C.amber} />
+                <Indicator label="Pending = queued until the device applies it" color={C.amber} />
               </div>
             </div>
             <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
@@ -314,20 +315,25 @@ export default function WifiConfigPage({ miners }) {
                   <span style={{ color: C.textDim }}>{config?.security || "--"}</span>
                   <span style={{ color: C.textMuted }}>{config?.updatedAt ? formatSystemTimestamp(config.updatedAt) : "NEVER"}</span>
                   <span style={{ display: "flex", gap: 6 }}>
-                    <IconButton title="Edit connection" disabled={!config} onClick={() => openEdit({ miner, config })}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                      </svg>
-                    </IconButton>
-                    <IconButton title="Delete connection" danger disabled={!config} onClick={() => setDeleteRecord(config)}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                        <path d="M10 11v6M14 11v6" />
-                        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                      </svg>
-                    </IconButton>
+                    {!canManage && <span style={{ color: C.textMuted, fontSize: 11 }}>View only</span>}
+                    {canManage && (
+                      <>
+                        <IconButton title="Edit connection" disabled={!config} onClick={() => openEdit({ miner, config })}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                          </svg>
+                        </IconButton>
+                        <IconButton title="Delete connection" danger disabled={!config} onClick={() => setDeleteRecord(config)}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                            <path d="M10 11v6M14 11v6" />
+                            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                          </svg>
+                        </IconButton>
+                      </>
+                    )}
                   </span>
                 </div>
               ))}

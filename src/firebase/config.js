@@ -11,7 +11,6 @@ export const firebaseConfig = {
   appId: cleanEnv(import.meta.env.VITE_FIREBASE_APP_ID),
 };
 export const firebaseDatabaseUrl = cleanEnv(import.meta.env.VITE_FIREBASE_DATABASE_URL);
-export const firebaseDatabaseSecret = cleanEnv(import.meta.env.VITE_FIREBASE_DATABASE_SECRET);
 
 function cleanEnv(value) {
   return String(value || "").trim().replace(/^["']|["']$/g, "");

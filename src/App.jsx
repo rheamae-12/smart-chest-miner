@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Modal from "./components/Modal";
 import Sidebar from "./components/Sidebar";
 import Navbar from "./components/Navbar";
@@ -11,6 +12,7 @@ import { buildAlerts } from "./utils/alertChecker";
 import { C, ghostButtonStyle, primaryButtonStyle } from "./theme";
 
 const DISMISSED_ALERTS_STORAGE_KEY = "smart-chest-miner-dismissed-alerts";
+const CommandCenterPage = lazy(() => import("./pages/CommandCenterPage"));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const AnalyticsPage = lazy(() => import("./pages/AnalyticsPage"));
 const DevicesPage = lazy(() => import("./pages/DevicesPage"));
@@ -22,16 +24,18 @@ const WifiConfigPage = lazy(() => import("./pages/WifiConfigPage"));
 const AlertHistoryPage = lazy(() => import("./pages/AlertHistoryPage"));
 
 export default function App() {
-  const { user, logout, authReady } = useAuth();
+  const { user, logout, authReady, canManage } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const system = useMinerSystem(Boolean(user));
   const [logoutOpen, setLogoutOpen] = useState(false);
-  useAlertNotifications(user ? buildAlerts(system.miners, system.thresholds) : []);
+  const liveAlerts = user ? buildAlerts(system.miners, system.thresholds) : [];
+  useAlertNotifications(liveAlerts);
   const [dismissedAlertIds, setDismissedAlertIds] = useState(() => readStoredStringArray(DISMISSED_ALERTS_STORAGE_KEY));
   const dismissAlerts = (ids) => {
     setDismissedAlertIds((current) => [...new Set([...current, ...ids])]);
   };
+
   const confirmLogout = () => setLogoutOpen(true);
   const handleLogout = async () => {
     setLogoutOpen(false);
@@ -118,9 +122,14 @@ export default function App() {
               </div>
             )}
             <Suspense fallback={<RouteFallback />}>
-              <div key={location.pathname} style={{ height: "100%", display: "contents" }}>
+              <ErrorBoundary key={location.pathname}>
+              <div style={{ height: "100%", display: "contents" }}>
               <Routes>
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/" element={<Navigate to="/command" replace />} />
+                <Route
+                  path="/command"
+                  element={<CommandCenterPage miners={system.miners} liveData={system.liveData} activityLogs={system.activityLogs} thresholds={system.thresholds} dismissedAlertIds={dismissedAlertIds} onDismissAlerts={dismissAlerts} />}
+                />
                 <Route
                   path="/dashboard"
                   element={<DashboardPage miners={system.miners} liveData={system.liveData} thresholds={system.thresholds} dismissedAlertIds={dismissedAlertIds} onDismissAlerts={dismissAlerts} />}
@@ -135,11 +144,11 @@ export default function App() {
                 />
                 <Route
                   path="/health-logs"
-                  element={<HealthLogsPage miners={system.miners} analyticsData={system.analyticsData} activityLogs={system.activityLogs} thresholds={system.thresholds} onClearHealthLogs={system.clearHealthLogs} />}
+                  element={<HealthLogsPage miners={system.miners} analyticsData={system.analyticsData} activityLogs={system.activityLogs} thresholds={system.thresholds} onClearHealthLogs={canManage ? system.clearHealthLogs : undefined} />}
                 />
                 <Route
                   path="/sensor-status"
-                  element={<SensorStatusPage miners={system.miners} activityLogs={system.activityLogs} onClearActivityLogs={system.clearActivityLogs} />}
+                  element={<SensorStatusPage miners={system.miners} activityLogs={system.activityLogs} onClearActivityLogs={canManage ? system.clearActivityLogs : undefined} />}
                 />
                 <Route
                   path="/wifi-config"
@@ -159,11 +168,12 @@ export default function App() {
                 />
                 <Route
                   path="/alert-history"
-                  element={<AlertHistoryPage miners={system.miners} activityLogs={system.activityLogs} />}
+                  element={<AlertHistoryPage activityLogs={system.activityLogs} onClearActivityLogs={canManage ? system.clearActivityLogs : undefined} />}
                 />
-                <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                <Route path="*" element={<Navigate to="/command" replace />} />
               </Routes>
               </div>
+              </ErrorBoundary>
             </Suspense>
           </main>
         </div>

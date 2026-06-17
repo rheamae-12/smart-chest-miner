@@ -1,21 +1,46 @@
 import { useMemo, useState } from "react";
-import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import Modal from "../components/Modal";
-import { C, cardStyle, controlStyle, ghostButtonStyle, moduleLabel, pageStyle, primaryButtonStyle } from "../theme";
+import PageHeader from "../components/PageHeader";
+import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
 import { DEFAULT_THRESHOLDS } from "../utils/alertChecker";
-import { average, formatLastSeen, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
+import { average, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 
 const SESSION_GAP_MS = 3 * 60 * 1000;
 
 export default function HealthLogsPage({ miners, analyticsData, activityLogs = [], thresholds = DEFAULT_THRESHOLDS, onClearHealthLogs }) {
-  const [selected, setSelected] = useState("all");
+  const [selected, setSelected] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [clearOpen, setClearOpen] = useState(false);
   const [clearError, setClearError] = useState("");
   const [clearing, setClearing] = useState(false);
   const sortedMiners = useMemo(() => [...miners].sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)), [miners]);
-  const visibleMiners = selected === "all" ? sortedMiners : sortedMiners.filter((miner) => miner.id === selected);
-  const sessions = useMemo(() => buildSessions(visibleMiners, analyticsData, activityLogs, thresholds), [activityLogs, analyticsData, thresholds, visibleMiners]);
-  const chartData = useMemo(() => buildChartData(visibleMiners, analyticsData), [analyticsData, visibleMiners]);
+  // One miner is always selected (defaults to the first) — no "all" aggregate view.
+  const selectedId = sortedMiners.some((miner) => miner.id === selected) ? selected : (sortedMiners[0]?.id || "");
+  const visibleMiners = useMemo(() => sortedMiners.filter((miner) => miner.id === selectedId), [sortedMiners, selectedId]);
+
+  // Date + time range filter — narrow the stored readings to a From / To window.
+  const dateRange = useMemo(() => ({
+    start: dateFrom ? new Date(dateFrom).getTime() : null,
+    end: dateTo ? new Date(dateTo).getTime() : null,
+  }), [dateFrom, dateTo]);
+  const scopedAnalytics = useMemo(() => {
+    if (!dateRange.start && !dateRange.end) return analyticsData;
+    const out = {};
+    Object.entries(analyticsData || {}).forEach(([id, rows]) => {
+      out[id] = (rows || []).filter((row) => {
+        const t = Number(row.timestamp || 0);
+        if (dateRange.start && t < dateRange.start) return false;
+        if (dateRange.end && t > dateRange.end) return false;
+        return true;
+      });
+    });
+    return out;
+  }, [analyticsData, dateRange]);
+
+  const sessions = useMemo(() => buildSessions(visibleMiners, scopedAnalytics, activityLogs, thresholds), [activityLogs, scopedAnalytics, thresholds, visibleMiners]);
+  const chartData = useMemo(() => buildChartData(visibleMiners, scopedAnalytics), [scopedAnalytics, visibleMiners]);
   const manualAlerts = sessions.reduce((sum, session) => sum + session.manualPressCount, 0);
   const unhealthy = visibleMiners.filter((miner) => !miner.active || miner.stale || miner.finger === false || miner.manual_alert).length;
 
@@ -55,22 +80,35 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
         </Modal>
       )}
       <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
-        <section style={{ ...cardStyle, padding: 16, display: "flex", justifyContent: "space-between", gap: 14, alignItems: "end" }}>
-          <div>
-            <div style={moduleLabel}>Miner health records</div>
-            <div style={{ color: C.text, fontSize: 26, fontWeight: 950, marginTop: 4 }}>Health Logs</div>
-            <div style={{ color: C.textMuted, fontSize: 12, marginTop: 5 }}>Session history, start and end time, readings, status, and manual alert events.</div>
-          </div>
-          <label style={{ display: "grid", gap: 5 }}>
-            <span style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 900 }}>Miner</span>
-            <select value={selected} onChange={(event) => setSelected(event.target.value)} style={{ ...controlStyle, width: 190 }}>
-              <option value="all">All miners</option>
-              {sortedMiners.map((miner) => (
-                <option key={miner.id} value={miner.id}>{miner.name} ({miner.id})</option>
-              ))}
-            </select>
-          </label>
-        </section>
+        <PageHeader
+          label="Miner health records"
+          title="Health Logs"
+          titleSize={26}
+          subtitle="Session history, start and end time, readings, status, and manual alert events."
+          right={
+            <>
+              <FilterLabel text="Miner">
+                <select value={selectedId} onChange={(event) => setSelected(event.target.value)} style={{ ...controlStyle, width: 184 }}>
+                  {sortedMiners.length === 0 && <option value="">No miners</option>}
+                  {sortedMiners.map((miner) => (
+                    <option key={miner.id} value={miner.id}>{miner.name} ({miner.id})</option>
+                  ))}
+                </select>
+              </FilterLabel>
+              <FilterLabel text="From (date &amp; time)">
+                <input type="datetime-local" value={dateFrom} max={dateTo || undefined} onChange={(event) => setDateFrom(event.target.value)} style={{ ...controlStyle, width: 196, padding: "8px 10px" }} />
+              </FilterLabel>
+              <FilterLabel text="To (date &amp; time)">
+                <input type="datetime-local" value={dateTo} min={dateFrom || undefined} onChange={(event) => setDateTo(event.target.value)} style={{ ...controlStyle, width: 196, padding: "8px 10px" }} />
+              </FilterLabel>
+              {(dateFrom || dateTo) && (
+                <button onClick={() => { setDateFrom(""); setDateTo(""); }} style={{ ...ghostButtonStyle, padding: "9px 13px", fontSize: 11, alignSelf: "end" }}>
+                  Clear dates
+                </button>
+              )}
+            </>
+          }
+        />
 
         <section style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <Summary label="Sessions" value={sessions.length} color={C.primary} />
@@ -80,38 +118,11 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
           <Summary label="Avg Body Temp" value={formatReading(average(chartData.map((row) => row.temp).filter(Boolean)), 1)} unit="°C" color={C.teal} />
         </section>
 
-        <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 300px", gap: 12, minHeight: 0 }}>
-          <main style={{ display: "grid", gridTemplateRows: "220px minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
-            <div style={{ ...cardStyle, padding: 16, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr" }}>
-              <PanelHeader title="Reading History" meta="Heart rate and SpO2 trend" />
-              <div style={{ minHeight: 0, border: `1px solid ${C.borderSoft}`, borderRadius: 8, background: "#151515", padding: 8 }}>
-                {chartData.length ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={chartData} margin={{ top: 8, right: 44, left: -18, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="healthHr" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor={C.red} stopOpacity={0.2} />
-                          <stop offset="100%" stopColor={C.red} stopOpacity={0.02} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid stroke={C.borderSoft} vertical={false} />
-                      <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={24} />
-                      <YAxis yAxisId="vital" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
-                      <YAxis yAxisId="temp" orientation="right" domain={[34, 42]} tick={{ fill: C.teal, fontSize: 10 }} axisLine={false} tickLine={false} width={38} unit="°C" />
-                      <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
-                      <Area yAxisId="vital" type="monotone" dataKey="hr" name="Heart Rate" stroke={C.red} fill="url(#healthHr)" strokeWidth={2} dot={false} isAnimationActive={false} />
-                      <Area yAxisId="vital" type="monotone" dataKey="spo2" name="SpO2" stroke={C.primary} fill="transparent" strokeWidth={1.8} dot={false} isAnimationActive={false} />
-                      <Line yAxisId="temp" type="monotone" dataKey="temp" name="Body Temp" stroke={C.teal} strokeWidth={1.8} dot={false} isAnimationActive={false} connectNulls />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div style={{ height: "100%", display: "grid", placeItems: "center", color: C.textMuted, fontSize: 13 }}>No historical readings yet.</div>
-                )}
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, color: C.textMuted, fontSize: 10, marginTop: 8 }}>
-                <span>TIME AXIS: {chartData[chartData.length - 1]?.time || "NO TIMESTAMP"}</span>
-                <span><b style={{ color: C.red }}>HR</b> BPM | <b style={{ color: C.primary }}>SpO2</b> % | <b style={{ color: C.teal }}>Temp</b> °C</span>
-              </div>
+        <section style={{ display: "grid", gridTemplateRows: "220px minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
+            <div className="cc-vitals" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, minHeight: 0 }}>
+              <SensorChart data={chartData} dataKey="hr" name="Heart Rate" unit="bpm" color={C.red} digits={0} />
+              <SensorChart data={chartData} dataKey="spo2" name="SpO2" unit="%" color={C.primary} domain={[80, 100]} digits={0} />
+              <SensorChart data={chartData} dataKey="temp" name="Body Temp" unit="°C" color={C.teal} domain={[34, 42]} digits={1} />
             </div>
 
             <div style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
@@ -162,28 +173,6 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
                 {sessions.length === 0 && <div style={{ padding: 42, color: C.textMuted, textAlign: "center", fontSize: 13 }}>No miner session logs available for this filter.</div>}
               </div>
             </div>
-          </main>
-
-          <aside style={{ display: "grid", gridTemplateRows: "auto auto 1fr", gap: 12, minHeight: 0 }}>
-            <InfoCard title="Miner Health">
-              {visibleMiners.map((miner) => (
-                <HealthRow key={miner.id} miner={miner} />
-              ))}
-            </InfoCard>
-            <InfoCard title="Current Status">
-              <StatusMetric label="Online" value={visibleMiners.filter((miner) => miner.active).length} color={C.green} />
-              <StatusMetric label="Offline" value={visibleMiners.filter((miner) => !miner.active).length} color={C.offline} />
-              <StatusMetric label="Chest contact warnings" value={visibleMiners.filter((miner) => miner.finger === false).length} color={C.amber} />
-              <StatusMetric label="Manual alerts" value={visibleMiners.filter((miner) => miner.manual_alert).length} color={C.red} />
-            </InfoCard>
-            <InfoCard title="Recent Alert Notes">
-              <div className="hide-scrollbar" style={{ overflow: "auto", flex: 1, display: "grid", gap: 8, alignContent: "start", minHeight: 0 }}>
-                {visibleMiners.map((miner) => (
-                  <AlertNote key={miner.id} miner={miner} />
-                ))}
-              </div>
-            </InfoCard>
-          </aside>
         </section>
       </div>
     </div>
@@ -216,7 +205,13 @@ function buildSessions(miners, analyticsData, activityLogs, thresholds) {
       .map((sessionRows, index) => {
         const first = sessionRows[0];
         const last = sessionRows[sessionRows.length - 1];
-        const active = index === groups.length - 1 && miner.active;
+        // Only the newest group of a currently-live miner is "in progress" — and
+        // only if its last reading is genuinely recent. A past date-range filter
+        // can make the newest in-range group old, which must not show IN PROGRESS.
+        const active =
+          index === groups.length - 1 &&
+          miner.active &&
+          Date.now() - Number(last.timestamp || 0) < SESSION_GAP_MS * 2;
         const manualPressCount = countManualPresses(miner, sessionRows, activityLogs, Number(first.timestamp), Number(last.timestamp), active);
         const spike = detectSensorSpike(miner, sessionRows, thresholds);
 
@@ -309,11 +304,64 @@ function Summary({ label, value, unit, color }) {
   );
 }
 
+// FilterLabel — uppercase label above a filter control, used in the page header
+function FilterLabel({ text, children }) {
+  return (
+    <label style={{ display: "grid", gap: 5 }}>
+      <span style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 900 }}>{text}</span>
+      {children}
+    </label>
+  );
+}
+
 function PanelHeader({ title, meta }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
       <div style={{ color: C.text, fontSize: 14, fontWeight: 950 }}>{title}</div>
       <div style={{ color: C.textMuted, fontSize: 10 }}>{meta}</div>
+    </div>
+  );
+}
+
+// SensorChart — single-sensor trend (small multiple). Shows that sensor's average
+// over the selected range plus a filled area chart for just that reading.
+function SensorChart({ data, dataKey, name, unit, color, domain, digits = 0 }) {
+  const valid = (data || []).filter((row) => Number(row[dataKey]) > 0);
+  const avg = valid.length ? average(valid.map((row) => Number(row[dataKey]))) : null;
+  const gradientId = `sensor-${dataKey}`;
+  return (
+    <div style={{ ...cardStyle, padding: 13, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, marginBottom: 9 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}`, flexShrink: 0 }} />
+          <span style={{ color: C.text, fontSize: 13, fontWeight: 950 }}>{name}</span>
+        </div>
+        <span style={{ color, fontSize: 15, fontWeight: 950 }}>
+          {avg !== null ? formatReading(avg, digits) : "--"}
+          <span style={{ color: C.textMuted, fontSize: 10, marginLeft: 3 }}>{unit}</span>
+        </span>
+      </div>
+      <div style={{ minHeight: 0, border: `1px solid ${C.borderSoft}`, borderRadius: 8, background: "#151515", padding: 6 }}>
+        {valid.length ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={data} margin={{ top: 6, right: 8, left: -22, bottom: 0 }}>
+              <defs>
+                <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={color} stopOpacity={0.32} />
+                  <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke={C.borderSoft} vertical={false} />
+              <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 9 }} axisLine={false} tickLine={false} minTickGap={34} interval="preserveStartEnd" height={16} />
+              <YAxis domain={domain || ["auto", "auto"]} tick={{ fill: C.textMuted, fontSize: 9 }} axisLine={false} tickLine={false} width={28} />
+              <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
+              <Area type="monotone" dataKey={dataKey} name={name} stroke={color} fill={`url(#${gradientId})`} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <div style={{ height: "100%", display: "grid", placeItems: "center", color: C.textMuted, fontSize: 12 }}>No data yet</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -331,44 +379,6 @@ function SpikeText({ spike }) {
       <span style={{ color: C.textMuted, fontSize: 10 }}>{spike.label}</span>
     </div>
   );
-}
-
-function InfoCard({ title, children }) {
-  return (
-    <section style={{ ...cardStyle, padding: 15, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <div style={{ color: C.text, fontSize: 14, fontWeight: 950, marginBottom: 12, flexShrink: 0 }}>{title}</div>
-      {children}
-    </section>
-  );
-}
-
-function HealthRow({ miner }) {
-  const color = miner.active && miner.finger !== false && !miner.manual_alert ? C.green : miner.manual_alert ? C.red : C.amber;
-  const status = miner.active && miner.finger !== false && !miner.manual_alert ? "Healthy" : miner.manual_alert ? "Manual alert" : miner.active ? "Needs check" : "Offline";
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "8px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
-      <div>
-        <div style={{ color: C.text, fontSize: 12, fontWeight: 900 }}>{miner.name}</div>
-        <div style={{ color: C.textMuted, fontSize: 10 }}>{miner.id}</div>
-      </div>
-      <strong style={{ color, fontSize: 11 }}>{status}</strong>
-    </div>
-  );
-}
-
-function StatusMetric({ label, value, color }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "8px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
-      <span style={{ color: C.textMuted, fontSize: 12 }}>{label}</span>
-      <strong style={{ color }}>{value}</strong>
-    </div>
-  );
-}
-
-function AlertNote({ miner }) {
-  const text = miner.manual_alert ? "Manual alert button was pressed." : miner.finger === false ? "Chest contact warning was recorded." : miner.active ? "Miner is currently within monitoring window." : `Offline. Last seen ${formatLastSeen(miner.lastSeen)}.`;
-  const color = miner.manual_alert ? C.red : miner.finger === false ? C.amber : miner.active ? C.green : C.offline;
-  return <div style={{ color: C.textMuted, fontSize: 12, lineHeight: 1.45, borderLeft: `3px solid ${color}`, padding: "7px 0 7px 10px", background: "rgba(255,255,255,0.02)", borderRadius: 6 }}>{miner.name}: {text}</div>;
 }
 
 const tableHeader = {

@@ -1,0 +1,36 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "devices": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["status", "active"]
+    },
+
+    "analytics": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$deviceId": {
+        ".indexOn": [".value", "timestamp"]
+      }
+    },
+
+    "activityLogs": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["timestamp"]
+    },
+
+    "wifiConfigurations": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "wifiConnectionHistory": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
+  }
+}

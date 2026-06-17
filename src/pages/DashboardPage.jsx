@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import AlertBanner from "../components/AlertBanner";
+import Icon from "../components/Icon";
+import PageHeader from "../components/PageHeader";
 import StatCard from "../components/StatCard";
-import StatusBadge from "../components/StatusBadge";
 import { C, cardStyle, moduleLabel, pageStyle } from "../theme";
 import { buildAlerts, getVitalStatus } from "../utils/alertChecker";
+import { analyzeSpo2Trend } from "../utils/anomalyDetection";
 import { average, formatLastSeen, formatReading, lastSeenValue } from "../utils/formatters";
 
 // DashboardPage — real-time vitals view: alert banner, stat cards, live chart, and miner list sidebar
@@ -17,7 +19,8 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
   const miner = miners.find((item) => item.id === selectedId) || sortedMiners[0];
   const activeMiners = miners.filter((item) => item.active);
   const alerts = buildAlerts(miners, thresholds);
-  const chartData = useMemo(() => mergeLiveSeries(liveData[miner?.id] || { hr: [], spo2: [] }), [liveData, miner?.id]);
+  const chartData = useMemo(() => mergeLiveSeries(liveData[miner?.id] || { hr: [], spo2: [], temp: [] }), [liveData, miner?.id]);
+  const spo2Trend = useMemo(() => analyzeSpo2Trend((liveData[miner?.id] || {}).spo2), [liveData, miner?.id]);
   const activeVital = Boolean(miner?.active && miner.finger !== false);
   const contactCount = miners.filter((item) => item.active && item.finger !== false).length;
 
@@ -30,38 +33,117 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
 
   return (
     <div style={pageStyle}>
-      <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(420px, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
+      <div style={{ display: "grid", gridTemplateRows: "auto auto auto minmax(360px, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
+        <PageHeader
+          label="Live monitoring"
+          title="Real-Time Vitals"
+          titleSize={22}
+          subtitle="Continuous HR, SpO2, and body-temperature tracking across the active miners."
+          padding="13px 16px"
+          right={
+            <>
+              <HeaderPill label={`${activeMiners.length}/${miners.length} active`} color={activeMiners.length ? C.green : C.offline} />
+              <HeaderPill label={`${contactCount} chest contact`} color={contactCount ? C.green : C.amber} />
+            </>
+          }
+        />
         <AlertBanner miners={miners} thresholds={thresholds} dismissedAlertIds={dismissedAlertIds} onDismissAlerts={onDismissAlerts} />
 
-        <section className="stagger-1" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
+        <section className="stagger-1" style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 10 }}>
           <StatCard label="Active Miners" value={activeMiners.length} unit={`/${miners.length}`} color={activeMiners.length ? C.green : C.offline} sub={`${contactCount} with chest contact`} />
           <StatCard label="Avg Heart Rate" value={formatReading(average(activeMiners.map((item) => item.hr)), 0)} unit="bpm" color={C.red} sub={`${thresholds.hrMin}-${thresholds.hrMax} normal range`} />
           <StatCard label="Avg SpO2" value={formatReading(average(activeMiners.map((item) => item.spo2)), 0)} unit="%" color={C.primary} sub={`minimum ${thresholds.spo2Min}%`} />
           <StatCard label="Avg Body Temp" value={formatReading(average(activeMiners.map((item) => item.temp)), 1)} unit="°C" color={C.teal} sub={`${thresholds.tempMin}–${thresholds.tempMax}°C normal`} />
+          {(() => {
+            const battMiners = activeMiners.filter((item) => item.battery > 0);
+            const avgBatt = battMiners.length ? Math.round(average(battMiners.map((item) => item.battery))) : null;
+            const lowCount = miners.filter((item) => item.battery > 0 && item.battery <= (thresholds.batteryMin ?? 20)).length;
+            const battColor = avgBatt === null ? C.offline : avgBatt <= (thresholds.batteryMin ?? 20) ? C.red : avgBatt <= 40 ? C.amber : C.green;
+            return <StatCard label="Avg Battery" value={avgBatt !== null ? avgBatt : "--"} unit="%" color={battColor} sub={lowCount > 0 ? `${lowCount} device${lowCount !== 1 ? "s" : ""} low` : "all levels OK"} />;
+          })()}
           <StatCard label="Warnings" value={alerts.length ? alerts.length : "Clear"} color={alerts.length ? C.amber : C.green} sub="live conditions" />
         </section>
 
-        <section className="stagger-2" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 288px", gap: 12, minHeight: 0, overflow: "hidden" }}>
-          <main style={{ display: "grid", gridTemplateRows: "minmax(320px, 1fr) auto", gap: 12, minHeight: 0 }}>
-            <div style={{ ...cardStyle, padding: 16, minHeight: 320, display: "grid", gridTemplateRows: "auto 1fr" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 14, marginBottom: 12 }}>
-                <div>
-                  <div style={moduleLabel}>Live HR + SpO2 readings</div>
-                  <div style={{ color: C.text, fontSize: 26, fontWeight: 950, marginTop: 4 }}>Live Sensor Monitoring</div>
-                  <div style={{ color: C.textMuted, fontSize: 12, marginTop: 5 }}>
-                    {miner ? `${miner.name} (${miner.id}) - ${miner.location}` : "Waiting for registered miner devices"}
-                  </div>
+        <section className="stagger-2 cc-grid" style={{ display: "grid", gridTemplateColumns: "280px minmax(0, 1fr)", gap: 12, minHeight: 0, overflow: "hidden" }}>
+          {/* ── Fleet rail (master, left) ── */}
+          <aside style={{ ...cardStyle, display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", minHeight: 0, overflow: "hidden" }}>
+            <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ color: C.text, fontSize: 13, fontWeight: 950 }}>Miners</div>
+              <span style={{ color: C.textMuted, fontSize: 11 }}>{sortedMiners.length} devices</span>
+            </div>
+            <div className="hide-scrollbar" style={{ display: "grid", gap: 6, overflow: "auto", minHeight: 0, alignContent: "start", padding: 8 }}>
+              {sortedMiners.map((item) => {
+                const isSelected = selectedId === item.id;
+                const statusColor = item.active ? C.green : C.offline;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      userSelectedRef.current = true;
+                      setSelected(item.id);
+                    }}
+                    className={isSelected ? "card-selected" : ""}
+                    style={{
+                      ...cardStyle,
+                      padding: "10px 12px",
+                      textAlign: "left",
+                      cursor: "pointer",
+                      borderColor: isSelected ? C.primary : C.border,
+                      borderLeft: `3px solid ${statusColor}`,
+                      background: isSelected ? "rgba(255,106,0,0.08)" : cardStyle.background,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: C.text, fontSize: 12, fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.name}</div>
+                      <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
+                        <span style={{ color: C.textMuted, fontSize: 10 }}>{item.id}</span>
+                        <span style={{ color: C.red, fontSize: 10, fontWeight: 900 }}>{item.active ? `${formatReading(item.hr, 0)} bpm` : "--"}</span>
+                        <span style={{ color: C.primary, fontSize: 10, fontWeight: 900 }}>{item.active ? `${formatReading(item.spo2, 0)}%` : "--"}</span>
+                        {item.battery > 0 && <span style={{ color: dashBattColor(item.battery), fontSize: 10, fontWeight: 900 }}>{item.battery}%</span>}
+                      </div>
+                    </div>
+                    <span style={{ color: statusColor, fontSize: 9, fontWeight: 900, letterSpacing: "0.06em", flexShrink: 0 }}>
+                      {item.active ? "ONLINE" : "OFFLINE"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+
+          {/* ── Selected miner detail (right) — identity + chart merged in one card ── */}
+          <main style={{ display: "grid", gridTemplateRows: "minmax(280px, 1fr) auto", gap: 12, minHeight: 0 }}>
+            <div style={{ ...cardStyle, padding: 16, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 12 }}>
+              {/* Identity header */}
+              <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", paddingBottom: 12, borderBottom: `1px solid ${C.borderSoft}` }}>
+                <div style={{ width: 3, alignSelf: "stretch", minHeight: 44, borderRadius: 3, background: C.primaryGradient, boxShadow: "0 0 14px rgba(255,106,0,0.4)", flexShrink: 0 }} />
+                <SpO2Gauge value={activeVital ? formatReading(miner.spo2, 0) : "--"} color={C.primary} size={58} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={moduleLabel}>Selected miner</div>
+                  <div style={{ color: C.text, fontSize: 21, fontWeight: 950, marginTop: 2, lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{miner?.name || "No miner selected"}</div>
+                  <div style={{ color: C.textMuted, fontSize: 11, marginTop: 3 }}>{miner ? `${miner.id} · ${miner.location}` : "Waiting for registered miner devices"}</div>
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+                <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <StatusBadge active={Boolean(miner?.active)} />
-                    <span style={{ color: C.textMuted, fontSize: 11 }}>Last seen {formatLastSeen(miner?.lastSeen)}</span>
+                    <MinerStatusPill miner={miner} />
+                    <span style={{ color: C.textMuted, fontSize: 11, whiteSpace: "nowrap" }}>Last seen {formatLastSeen(miner?.lastSeen)}</span>
                   </div>
                   <EcgWaveform color={miner?.active ? C.red : C.offline} />
                 </div>
               </div>
 
-              <div style={{ minHeight: 240, border: `1px solid ${C.borderSoft}`, borderRadius: 8, background: "#151515", padding: 8, display: "grid", gridTemplateRows: "1fr auto" }}>
+              {/* Chart sub-header */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ color: C.text, fontSize: 14, fontWeight: 950 }}>Live Vitals Trend</div>
+                <span style={{ fontSize: 11, color: C.textMuted }}>
+                  <b style={{ color: C.red }}>HR</b> bpm · <b style={{ color: C.primary }}>SpO2</b> % · <b style={{ color: C.teal }}>Temp</b> °C · <b style={{ color: C.amber }}>limits</b>
+                </span>
+              </div>
+
+              <div style={{ minHeight: 180, border: `1px solid ${C.borderSoft}`, borderRadius: 8, background: "#151515", padding: 8, display: "grid" }}>
                 {activeVital && chartData.length ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={chartData} margin={{ top: 12, right: 16, left: -20, bottom: 0 }}>
@@ -69,12 +151,14 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
                       <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={22} />
                       <YAxis yAxisId="hr" domain={[40, 140]} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
                       <YAxis yAxisId="spo2" orientation="right" domain={[85, 100]} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={34} />
+                      <YAxis yAxisId="temp" orientation="right" domain={[34, 42]} hide />
                       <ReferenceLine yAxisId="hr" y={thresholds.hrMax} stroke={C.amber} strokeDasharray="4 4" />
                       <ReferenceLine yAxisId="hr" y={thresholds.hrMin} stroke={C.amber} strokeDasharray="4 4" />
                       <ReferenceLine yAxisId="spo2" y={thresholds.spo2Min} stroke={C.primary} strokeDasharray="4 4" />
                       <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
                       <Line yAxisId="hr" type="monotone" dataKey="hr" name="Heart Rate (bpm)" stroke={C.red} strokeWidth={2.4} dot={false} isAnimationActive={false} connectNulls />
                       <Line yAxisId="spo2" type="monotone" dataKey="spo2" name="SpO2 (%)" stroke={C.primary} strokeWidth={2.2} dot={false} isAnimationActive={false} connectNulls />
+                      <Line yAxisId="temp" type="monotone" dataKey="temp" name="Body Temp (°C)" stroke={C.teal} strokeWidth={1.8} dot={false} isAnimationActive={false} connectNulls />
                     </LineChart>
                   </ResponsiveContainer>
                 ) : (
@@ -83,92 +167,27 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
                     text={miner?.active ? "The graph starts once both heart-rate and SpO2 readings are valid." : "No live HR or SpO2 data is being received from this miner."}
                   />
                 )}
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "8px 3px 0", color: C.textMuted, fontSize: 10 }}>
-                  <span>TIME AXIS: {chartData.length ? chartData[chartData.length - 1].time : "WAITING FOR TIMESTAMP"}</span>
-                  <span><b style={{ color: C.red }}>HR</b> BPM | <b style={{ color: C.primary }}>SpO2</b> % | <b style={{ color: C.amber }}>LIMITS</b></span>
-                </div>
+              </div>
+              <div style={{ color: C.textMuted, fontSize: 10, paddingTop: 8 }}>
+                TIME AXIS: {chartData.length ? chartData[chartData.length - 1].time : "WAITING FOR TIMESTAMP"}
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
-              <VitalCard label="Heart Rate" value={activeVital ? formatReading(miner.hr, 0) : "--"} unit="bpm" color={C.red} status={activeVital ? getVitalStatus(miner.hr, "hr", thresholds) : "OFFLINE"} />
-              <VitalCard label="SpO2" value={activeVital ? formatReading(miner.spo2, 0) : "--"} unit="%" color={C.primary} status={activeVital ? getVitalStatus(miner.spo2, "spo2", thresholds) : "OFFLINE"} />
-              <VitalCard label="Body Temp" value={activeVital ? formatReading(miner.temp, 1) : "--"} unit="°C" color={C.teal} status={activeVital ? getVitalStatus(miner.temp, "temp", thresholds) : "OFFLINE"} />
-              <VitalCard label="Chest Contact" value={miner?.active ? (miner?.finger === false ? "No" : "Yes") : "--"} color={!miner?.active ? C.offline : miner?.finger === false ? C.amber : C.green} status={!miner?.active ? "OFFLINE" : miner?.finger === false ? "WARNING" : "NORMAL"} />
-              <VitalCard label="Manual Alert" value={miner?.active ? (miner?.manual_alert ? "Active" : "Clear") : "--"} color={!miner?.active ? C.offline : miner?.manual_alert ? C.red : C.green} status={!miner?.active ? "OFFLINE" : miner?.manual_alert ? "CRITICAL" : "NORMAL"} />
+            {/* Vitals (+ the unique SpO2 trend notice) under the miner they belong to */}
+            <div style={{ display: "grid", gap: 10 }}>
+              {activeVital && spo2Trend.declining && (
+                <Indicator color={C.amber} label={`SpO₂ trending down — ${spo2Trend.netDrop}% over last ${spo2Trend.samples} readings`} />
+              )}
+              <div className="cc-vitals" style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 10 }}>
+              <VitalCard label="Heart Rate" icon="heart" value={activeVital ? formatReading(miner.hr, 0) : "--"} unit="bpm" color={C.red} status={activeVital ? getVitalStatus(miner.hr, "hr", thresholds) : "OFFLINE"} />
+              <VitalCard label="SpO2" icon="droplet" value={activeVital ? formatReading(miner.spo2, 0) : "--"} unit="%" color={C.primary} status={activeVital ? getVitalStatus(miner.spo2, "spo2", thresholds) : "OFFLINE"} />
+              <VitalCard label="Body Temp" icon="thermometer" value={activeVital ? formatReading(miner.temp, 1) : "--"} unit="°C" color={C.teal} status={activeVital ? getVitalStatus(miner.temp, "temp", thresholds) : "OFFLINE"} />
+              <VitalCard label="Battery" icon="battery" value={miner?.battery > 0 ? `${miner.battery}` : "--"} unit="%" color={!miner?.battery ? C.offline : miner.battery <= (thresholds.batteryMin ?? 20) ? C.red : miner.battery <= 40 ? C.amber : C.green} status={!miner?.battery ? "OFFLINE" : getVitalStatus(miner.battery, "battery", thresholds) === "LOW" ? "LOW" : "NORMAL"} />
+              <VitalCard label="Chest Contact" icon="contact" value={miner?.active ? (miner?.finger === false ? "No" : "Yes") : "--"} color={!miner?.active ? C.offline : miner?.finger === false ? C.amber : C.green} status={!miner?.active ? "OFFLINE" : miner?.finger === false ? "WARNING" : "NORMAL"} />
+              <VitalCard label="Manual Alert" icon="siren" value={miner?.active ? (miner?.manual_alert ? "Active" : "Clear") : "--"} color={!miner?.active ? C.offline : miner?.manual_alert ? C.red : C.green} status={!miner?.active ? "OFFLINE" : miner?.manual_alert ? "CRITICAL" : "NORMAL"} />
+              </div>
             </div>
           </main>
-
-          <aside style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 12, minHeight: 0, overflow: "hidden" }}>
-            <section style={{ ...cardStyle, padding: "11px 14px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <SpO2Gauge value={activeVital ? formatReading(miner.spo2, 0) : "--"} color={C.primary} size={60} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: C.text, fontSize: 13, fontWeight: 950, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{miner?.name || "No miner"}</div>
-                  <div style={{ color: C.textMuted, fontSize: 10, marginTop: 2 }}>{miner?.id || "--"} · {miner?.location || "Unassigned"}</div>
-                  <div style={{ display: "flex", gap: 10, marginTop: 7 }}>
-                    <InlineStat label="Status" value={miner?.active ? "Online" : "Offline"} color={miner?.active ? C.green : C.offline} />
-                    <InlineStat label="HR" value={activeVital ? `${formatReading(miner.hr, 0)} bpm` : "--"} color={C.red} />
-                    <InlineStat label="Temp" value={activeVital ? `${formatReading(miner.temp, 1)}°C` : "--"} color={C.teal} />
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section style={{ minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <div style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 900 }}>Miner stream</div>
-                <span style={{ color: C.textMuted, fontSize: 11 }}>{sortedMiners.length} devices</span>
-              </div>
-              <div className="hide-scrollbar" style={{ display: "grid", gap: 5, overflow: "auto", minHeight: 0, alignContent: "start" }}>
-                {sortedMiners.map((item) => {
-                  const isSelected = selectedId === item.id;
-                  const statusColor = item.active ? C.green : C.offline;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        userSelectedRef.current = true;
-                        setSelected(item.id);
-                      }}
-                      className={isSelected ? "card-selected" : ""}
-                      style={{
-                        ...cardStyle,
-                        padding: "10px 12px",
-                        textAlign: "left",
-                        cursor: "pointer",
-                        borderColor: isSelected ? C.primary : C.border,
-                        borderLeft: `3px solid ${statusColor}`,
-                        background: isSelected ? "rgba(255,106,0,0.08)" : cardStyle.background,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ color: C.text, fontSize: 12, fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.name}</div>
-                        <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
-                          <span style={{ color: C.textMuted, fontSize: 10 }}>{item.id}</span>
-                          <span style={{ color: C.red, fontSize: 10, fontWeight: 900 }}>{item.active ? `${formatReading(item.hr, 0)} bpm` : "--"}</span>
-                          <span style={{ color: C.primary, fontSize: 10, fontWeight: 900 }}>{item.active ? `${formatReading(item.spo2, 0)}%` : "--"}</span>
-                        </div>
-                      </div>
-                      <span style={{ color: statusColor, fontSize: 9, fontWeight: 900, letterSpacing: "0.06em", flexShrink: 0 }}>
-                        {item.active ? "ONLINE" : "OFFLINE"}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section style={{ ...cardStyle, padding: 13 }}>
-              <div style={{ color: C.text, fontSize: 12, fontWeight: 950, marginBottom: 2 }}>Warning Indicators</div>
-              <Indicator color={miner?.active ? C.green : C.offline} label={miner?.active ? "Readings online" : "Readings offline"} />
-              <Indicator color={!miner?.active ? C.offline : miner?.finger === false ? C.amber : C.green} label={!miner?.active ? "Chest contact offline" : miner?.finger === false ? "Chest contact missing" : "Chest contact normal"} />
-              <Indicator color={!miner?.active ? C.offline : miner?.manual_alert ? C.red : C.green} label={!miner?.active ? "Manual alert offline" : miner?.manual_alert ? "Manual alert pressed" : "Manual alert clear"} />
-            </section>
-          </aside>
         </section>
       </div>
     </div>
@@ -206,12 +225,15 @@ function EmptyState({ title, text }) {
 }
 
 // VitalCard — single vital reading card with status badge (NORMAL / WARNING / CRITICAL / OFFLINE)
-function VitalCard({ label, value, unit, color, status }) {
+function VitalCard({ label, value, unit, color, status, icon }) {
   const statusColor = status === "NORMAL" ? C.green : status === "OFFLINE" ? C.offline : status === "CRITICAL" || status === "HIGH" ? C.red : C.amber;
   const isLive = status !== "OFFLINE";
   return (
     <div className="card-shimmer" style={{ ...cardStyle, padding: 13, borderLeft: `3px solid ${color}` }}>
-      <div style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {icon && <Icon name={icon} size={13} color={color} />}
+        <div style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
+      </div>
       <div style={{ color, fontSize: 27, fontWeight: 950, marginTop: 8, lineHeight: 1 }}>
         {value}<span style={{ color: C.textMuted, fontSize: 11, marginLeft: 4 }}>{unit}</span>
       </div>
@@ -227,17 +249,6 @@ function VitalCard({ label, value, unit, color, status }) {
     </div>
   );
 }
-
-// InlineStat — compact label+value pair used in the selected miner sidebar header
-function InlineStat({ label, value, color }) {
-  return (
-    <div>
-      <div style={{ color: C.textMuted, fontSize: 9, letterSpacing: "0.06em", textTransform: "uppercase" }}>{label}</div>
-      <div style={{ color, fontSize: 12, fontWeight: 900, marginTop: 2 }}>{value}</div>
-    </div>
-  );
-}
-
 
 // EcgWaveform — animated SVG ECG trace that draws across and loops
 function EcgWaveform({ color = C.red, width = 110, height = 36 }) {
@@ -298,5 +309,35 @@ function Indicator({ color, label }) {
       <span style={{ color: C.textDim, fontSize: 12 }}>{label}</span>
     </div>
   );
+}
+
+// HeaderPill — compact status pill shown in the dashboard page header
+function HeaderPill({ label, color }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color, border: `1px solid ${color}44`, background: `${color}12`, borderRadius: 999, padding: "6px 11px", fontSize: 11, fontWeight: 900, whiteSpace: "nowrap" }}>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}` }} />
+      {label}
+    </span>
+  );
+}
+
+// MinerStatusPill — selected miner's live status: Online / Stale signal / Offline
+function MinerStatusPill({ miner }) {
+  const online = Boolean(miner?.active) && !miner?.stale;
+  const color = online ? C.green : C.offline;
+  const label = online ? "Online" : miner?.stale ? "Stale signal" : "Offline";
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 7, color, border: `1px solid ${color}55`, background: `${color}14`, borderRadius: 999, padding: "5px 12px", fontSize: 11, fontWeight: 900, whiteSpace: "nowrap" }}>
+      <span className={online ? "dot-live" : undefined} style={{ width: 7, height: 7, borderRadius: "50%", background: color, boxShadow: online ? `0 0 10px ${color}` : "none" }} />
+      {label}
+    </span>
+  );
+}
+
+function dashBattColor(pct) {
+  if (!pct || pct <= 0) return C.offline;
+  if (pct <= 20) return C.red;
+  if (pct <= 40) return C.amber;
+  return C.green;
 }
 

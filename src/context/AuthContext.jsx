@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { changeFirebasePassword, createFirebaseAccount, loginWithEmail, logoutFirebase, observeFirebaseAuth } from "../firebase/auth";
+import { changeFirebasePassword, createFirebaseAccount, loginWithEmail, logoutFirebase, observeFirebaseAuth, sendFirebasePasswordReset } from "../firebase/auth";
 import { firebaseConfigured } from "../firebase/config";
 import { getUserProfile, saveUserProfile, updateUserProfile } from "../firebase/firestore";
+import { passwordMeetsPolicy } from "../utils/password";
+import { isViewOnlyRole } from "../utils/roles";
 import { AuthContext } from "./authContextValue";
 
 const demoUser = {
@@ -92,6 +94,8 @@ async function profileForFirebaseUser(firebaseUser, fallbackName) {
   const profile = {
     name: existingProfile?.name || fallbackName || firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
     email: existingProfile?.email || firebaseUser.email,
+    ...(existingProfile?.role ? { role: existingProfile.role } : {}),
+    ...(existingProfile?.photoURL ? { photoURL: existingProfile.photoURL } : {}),
   };
 
   if (!existingProfile && !profileWarning) {
@@ -193,7 +197,13 @@ export function AuthProvider({ children }) {
           const hashed = await hashPassword(password);
           writeLocalUsers(readLocalUsers().map((u) => u.email === normalizedEmail ? { ...u, password: hashed, v: HASH_VERSION } : u));
         }
-        const nextUser = { name: localUser.name, email: localUser.email, source: "local" };
+        const nextUser = {
+          name: localUser.name,
+          email: localUser.email,
+          source: "local",
+          ...(localUser.role ? { role: localUser.role } : {}),
+          ...(localUser.photoURL ? { photoURL: localUser.photoURL } : {}),
+        };
         clearLoginGuard();
         setUser(nextUser);
         saveSession(nextUser, remember);
@@ -216,8 +226,8 @@ export function AuthProvider({ children }) {
       setAuthError("Name, email, and password are required.");
       return false;
     }
-    if (password.length < 6) {
-      setAuthError("Password must be at least 6 characters.");
+    if (!passwordMeetsPolicy(password)) {
+      setAuthError("Password must be 8+ characters with an uppercase letter, a lowercase letter, and a number or symbol.");
       return false;
     }
     if (normalizedEmail === demoUser.email || readLocalUsers().some((item) => item.email === normalizedEmail)) {
@@ -272,6 +282,8 @@ export function AuthProvider({ children }) {
       updateUserProfile(user.uid, {
         name: nextUser.name,
         email: nextUser.email,
+        role: nextUser.role || null,
+        photoURL: nextUser.photoURL || null,
       }).catch((error) => setAuthError(error.message));
       return;
     }
@@ -309,7 +321,19 @@ export function AuthProvider({ children }) {
     sessionStorage.removeItem(SESSION_KEY);
   };
 
-  const value = { user, authReady, login, signUp, updateUser, changePassword, logout, authError, authMessage };
+  // resetPassword — sends a Firebase reset email. Throws if Firebase is not
+  // configured (the caller shows the appropriate fallback message).
+  const resetPassword = async (email) => {
+    await sendFirebasePasswordReset(String(email || "").trim().toLowerCase());
+  };
+
+  // canManage — role-based gate for destructive/control actions. Any account is a
+  // manager unless its role is explicitly read-only (Viewer/Observer/Read-only).
+  // This keeps existing accounts (Supervisor, or no role set) fully capable while
+  // letting you provision restricted, view-only operators. See utils/roles.js.
+  const canManage = Boolean(user) && !isViewOnlyRole(user?.role);
+
+  const value = { user, authReady, canManage, login, signUp, updateUser, changePassword, resetPassword, logout, authError, authMessage };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

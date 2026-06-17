@@ -17,6 +17,18 @@ export function formatSystemTimestamp(value = new Date()) {
   return `${month} ${day}, ${year} - ${time}`;
 }
 
+// compactTimestamp — short "Jun 12, 6:07 AM" label for chart axes/tooltips where
+// the full formatSystemTimestamp string ("JUNE 12, 2026 - 6:07 AM") is too long
+// and would overlap on a dense time axis.
+export function compactTimestamp(value) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const md = date.toLocaleString("en-US", { month: "short", day: "numeric" });
+  const time = date.toLocaleString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  return `${md}, ${time}`;
+}
+
 export function formatLastSeen(value) {
   return formatSystemTimestamp(value);
 }
@@ -35,4 +47,16 @@ export function average(values, digits = 1) {
 
 export function lastSeenValue(miner) {
   return miner.lastSeen?.getTime?.() || Number(miner.lastSeen) || 0;
+}
+
+// dedupeConsecutiveLogs — collapses runs of identical activity-log entries (same
+// device + same title within 60s) that the system can emit repeatedly (e.g. a
+// device flapping offline). Expects the list sorted newest-first; preserves order.
+export function dedupeConsecutiveLogs(logs) {
+  return (logs || []).filter((log, index, all) => {
+    if (index === 0) return true;
+    const prev = all[index - 1];
+    const timeDiff = Math.abs(Number(log.timestamp || 0) - Number(prev.timestamp || 0));
+    return !(log.deviceId === prev.deviceId && log.title === prev.title && timeDiff < 60_000);
+  });
 }

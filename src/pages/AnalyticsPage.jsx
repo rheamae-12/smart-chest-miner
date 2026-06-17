@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { C, cardStyle, controlStyle, moduleLabel, pageStyle } from "../theme";
-import { average, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
+import PageHeader from "../components/PageHeader";
+import { C, cardStyle, controlStyle, pageStyle } from "../theme";
+import { average, compactTimestamp, dedupeConsecutiveLogs, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 
 // AnalyticsPage — trend charts and miner comparison for HR, SpO2, and body temperature analytics
 export default function AnalyticsPage({ miners, analyticsData, activityLogs = [] }) {
@@ -15,32 +16,33 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
   return (
     <div style={pageStyle}>
       <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
-        <section style={{ ...cardStyle, padding: 16, display: "flex", alignItems: "end", justifyContent: "space-between", gap: 16 }}>
-          <div>
-            <div style={moduleLabel}>Sensor analytics</div>
-            <div style={{ color: C.text, fontSize: 26, fontWeight: 950, marginTop: 4 }}>Reading Trends</div>
-            <div style={{ color: C.textMuted, fontSize: 12, marginTop: 5 }}>Filter HR and SpO2 readings by miner and readings-per-minute interval.</div>
-          </div>
-          <div style={{ display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <Select label="Miner" value={filter.miner} onChange={(miner) => setFilter({ ...filter, miner })}>
-              <option value="all">All miners</option>
-              {sortedMiners.map((miner) => (
-                <option key={miner.id} value={miner.id}>{miner.name} ({miner.id})</option>
-              ))}
-            </Select>
-            <Select label="Range" value={filter.range} onChange={(range) => setFilter({ ...filter, range })}>
-              <option value="30M">Last 30 min</option>
-              <option value="1H">Last 1 hour</option>
-              <option value="24H">Last 24 hours</option>
-              <option value="7D">Last 7 days</option>
-            </Select>
-            <Select label="Readings / min" value={filter.bucket} onChange={(bucket) => setFilter({ ...filter, bucket })}>
-              <option value="1">1 minute</option>
-              <option value="5">5 minutes</option>
-              <option value="15">15 minutes</option>
-            </Select>
-          </div>
-        </section>
+        <PageHeader
+          label="Sensor analytics"
+          title="Reading Trends"
+          titleSize={26}
+          subtitle="Filter HR and SpO2 readings by miner and readings-per-minute interval."
+          right={
+            <>
+              <Select label="Miner" value={filter.miner} onChange={(miner) => setFilter({ ...filter, miner })}>
+                <option value="all">All miners</option>
+                {sortedMiners.map((miner) => (
+                  <option key={miner.id} value={miner.id}>{miner.name} ({miner.id})</option>
+                ))}
+              </Select>
+              <Select label="Range" value={filter.range} onChange={(range) => setFilter({ ...filter, range })}>
+                <option value="30M">Last 30 min</option>
+                <option value="1H">Last 1 hour</option>
+                <option value="24H">Last 24 hours</option>
+                <option value="7D">Last 7 days</option>
+              </Select>
+              <Select label="Readings / min" value={filter.bucket} onChange={(bucket) => setFilter({ ...filter, bucket })}>
+                <option value="1">1 minute</option>
+                <option value="5">5 minutes</option>
+                <option value="15">15 minutes</option>
+              </Select>
+            </>
+          }
+        />
 
         <section style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <Metric label="Avg Heart Rate" value={formatReading(average(rows.map((row) => row.hr)), 0)} unit="bpm" color={C.red} />
@@ -52,13 +54,12 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
 
         <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 12, minHeight: 0 }}>
           <main style={{ display: "grid", gridTemplateRows: "minmax(0, 1fr) auto", gap: 12, minHeight: 0 }}>
-            <div style={{ ...cardStyle, padding: 16, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", marginBottom: 12 }}>
-                <div>
-                  <div style={moduleLabel}>Reading history</div>
-                  <div style={{ color: C.text, fontSize: 18, fontWeight: 950, marginTop: 4 }}>Heart Rate, SpO2 and Body Temp</div>
-                  <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4 }}>
-                    {filter.miner === "all" ? "Aggregated across selected miners" : `Separate readings for ${visibleMiners[0]?.name || "selected miner"}`}
+            <div style={{ ...cardStyle, padding: 16, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", paddingBottom: 11, marginBottom: 13, borderBottom: `1px solid ${C.borderSoft}` }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ color: C.text, fontSize: 15, fontWeight: 950 }}>Reading History</div>
+                  <div style={{ color: C.textMuted, fontSize: 11, marginTop: 2 }}>
+                    {filter.miner === "all" ? "HR, SpO2 & body temp aggregated across miners" : `Readings for ${visibleMiners[0]?.name || "selected miner"}`}
                   </div>
                 </div>
                 <Legend />
@@ -94,12 +95,9 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
             </div>
 
             <div style={{ ...cardStyle, padding: 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 8 }}>
-                <div>
-                  <div style={moduleLabel}>Miner comparison</div>
-                  <div style={{ color: C.text, fontSize: 14, fontWeight: 900, marginTop: 3 }}>Latest per-miner readings</div>
-                </div>
-                <span style={{ color: C.textMuted, fontSize: 11 }}>{visibleMiners.length} labeled miner series</span>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", paddingBottom: 10, marginBottom: 12, borderBottom: `1px solid ${C.borderSoft}` }}>
+                <div style={{ color: C.text, fontSize: 14, fontWeight: 950 }}>Latest Per-Miner Readings</div>
+                <span style={{ color: C.textMuted, fontSize: 11 }}>{visibleMiners.length} miner{visibleMiners.length === 1 ? "" : "s"}</span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
                 {visibleMiners.map((miner) => (
@@ -109,17 +107,14 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
             </div>
           </main>
 
-          <aside style={{ ...cardStyle, padding: 15, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr" }}>
-            <div style={{ marginBottom: 10 }}>
-              <div style={moduleLabel}>Device activity logs</div>
-              <div style={{ color: C.text, fontSize: 16, fontWeight: 950, marginTop: 4 }}>Miner Events</div>
-              <div style={{ color: C.textMuted, fontSize: 11, marginTop: 4 }}>
-                {logs.length ? `${logs.length} recorded event${logs.length === 1 ? "" : "s"}` : "No events recorded yet."}
-              </div>
+          <aside style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
+            <div style={{ padding: "13px 15px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <div style={{ color: C.text, fontSize: 14, fontWeight: 950 }}>Device Activity</div>
+              <span style={{ color: C.textMuted, fontSize: 11 }}>{logs.length} event{logs.length === 1 ? "" : "s"}</span>
             </div>
-            <div className="hide-scrollbar" style={{ overflow: "auto", display: "grid", gap: 8, alignContent: "start" }}>
+            <div className="hide-scrollbar" style={{ overflow: "auto", display: "grid", gap: 8, alignContent: "start", padding: 12 }}>
               {logs.length === 0 ? (
-                <div style={{ color: C.textMuted, fontSize: 12, padding: "12px 0" }}>Activity events will appear here as miners come online and send readings.</div>
+                <div style={{ color: C.textMuted, fontSize: 12, padding: "12px 4px" }}>Activity events will appear here as miners come online and send readings.</div>
               ) : (
                 logs.map((log) => (
                   <ActivityLog key={`${log.id}-${log.timestamp}`} log={log} />
@@ -163,7 +158,7 @@ function bucketRows(rows, minutes) {
     .sort((a, b) => a.timestamp - b.timestamp)
     .slice(-42)
     .map((bucket) => ({
-      time: bucket.timestamp ? formatSystemTimestamp(bucket.timestamp) : "",
+      time: bucket.timestamp ? compactTimestamp(bucket.timestamp) : "",
       hr: average(bucket.hrs),
       spo2: average(bucket.spo2s),
       temp: average(bucket.temps),
@@ -180,10 +175,10 @@ function getRangeStart(range) {
   return 0;
 }
 
-// buildActivityLogEntries — maps raw Firebase activity logs to display-ready objects, filtered by miner
+// buildActivityLogEntries — maps raw Firebase activity logs to display-ready objects,
+// filtered by miner and de-duplicated (collapses repeated identical events).
 function buildActivityLogEntries(activityLogs, minerFilter) {
-  return activityLogs
-    .filter((log) => minerFilter === "all" || log.deviceId === minerFilter)
+  return dedupeConsecutiveLogs(activityLogs.filter((log) => minerFilter === "all" || log.deviceId === minerFilter))
     .slice(0, 40)
     .map((log) => ({
       id: log.id,

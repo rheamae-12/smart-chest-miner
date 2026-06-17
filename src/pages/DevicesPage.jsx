@@ -1,14 +1,17 @@
 import { useMemo, useState } from "react";
 import Modal from "../components/Modal";
+import PageHeader from "../components/PageHeader";
 import StatusBadge from "../components/StatusBadge";
+import { useAuth } from "../context/useAuth";
 import { registerDevice, removeDevice, updateDevice, writeActivityLog } from "../firebase/database";
-import { C, cardStyle, controlStyle, ghostButtonStyle, moduleLabel, pageStyle, primaryButtonStyle } from "../theme";
+import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
 import { formatLastSeen, formatReading, lastSeenValue } from "../utils/formatters";
 
 const EMPTY_FORM = { id: "", name: "", location: "" };
 
 // DevicesPage — device registry: register, edit, and remove miners; shows live vitals per row
 export default function DevicesPage({ miners, setMiners }) {
+  const { canManage } = useAuth();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [formModal, setFormModal] = useState(null); // "register" | "edit" | null
@@ -90,7 +93,7 @@ export default function DevicesPage({ miners, setMiners }) {
 
     try {
       if (type === "register") {
-        const newDevice = { ...payload, active: false, status: "offline", lastSeen: null, hr: 0, spo2: 0, finger: false, manual_alert: false };
+        const newDevice = { ...payload, active: false, status: "offline", lastSeen: null, hr: 0, spo2: 0, temp: 0, battery: 0, finger: false, manual_alert: false, sim_mode: false };
         await registerDevice(newDevice);
         setMiners((prev) => {
           const existing = prev.some((m) => m.id === newDevice.id);
@@ -99,7 +102,7 @@ export default function DevicesPage({ miners, setMiners }) {
             : [...prev, newDevice]
           ).sort((a, b) => a.id.localeCompare(b.id));
         });
-        await persist(() => writeActivityLog({ deviceId: newDevice.id, miner: newDevice.name, type: "crud", status: "registered", severity: "info", title: "Device registered", detail: `${newDevice.name} was added to the miner registry.` }), "");
+        await persist(() => writeActivityLog({ deviceId: newDevice.id, miner: newDevice.name, type: "crud", status: "registered", severity: "info", title: "Device registered", detail: `${newDevice.name} was added to the miner registry.` }));
         showNotice(`${payload.name} registered successfully.`);
 
       } else if (type === "edit") {
@@ -186,23 +189,24 @@ export default function DevicesPage({ miners, setMiners }) {
       )}
 
       <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
-        <section style={{ ...cardStyle, padding: 16, display: "flex", gap: 12, alignItems: "end", justifyContent: "space-between" }}>
-          <div>
-            <div style={moduleLabel}>Device registry</div>
-            <div style={{ color: C.text, fontSize: 26, fontWeight: 950, marginTop: 4 }}>Miner Device Management</div>
-            <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4 }}>Register devices, review latest vitals, and manage miner location assignments.</div>
-          </div>
-          <div style={{ display: "flex", gap: 9, alignItems: "end", flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <input placeholder="Search miner, device ID, or location..." value={search} onChange={(event) => setSearch(event.target.value)} style={{ ...controlStyle, width: 280 }} />
-            <select value={status} onChange={(event) => setStatus(event.target.value)} style={{ ...controlStyle, width: 138 }}>
-              <option value="all">All Status</option>
-              <option value="online">Online</option>
-              <option value="offline">Offline</option>
-              <option value="attention">Needs Attention</option>
-            </select>
-            <Button primary onClick={openRegister}>Register Device</Button>
-          </div>
-        </section>
+        <PageHeader
+          label="Device registry"
+          title="Miner Device Management"
+          titleSize={26}
+          subtitle="Register devices, review latest vitals, and manage miner location assignments."
+          right={
+            <>
+              <input placeholder="Search miner, device ID, or location..." value={search} onChange={(event) => setSearch(event.target.value)} style={{ ...controlStyle, width: 280 }} />
+              <select value={status} onChange={(event) => setStatus(event.target.value)} style={{ ...controlStyle, width: 138 }}>
+                <option value="all">All Status</option>
+                <option value="online">Online</option>
+                <option value="offline">Offline</option>
+                <option value="attention">Needs Attention</option>
+              </select>
+              {canManage && <Button primary onClick={openRegister}>Register Device</Button>}
+            </>
+          }
+        />
 
         {notice && (
           <div style={{ padding: "9px 14px", background: `${C.green}0F`, border: `1px solid ${C.green}2A`, borderRadius: 8, color: C.green, fontSize: 12, fontWeight: 700 }}>
@@ -211,17 +215,17 @@ export default function DevicesPage({ miners, setMiners }) {
         )}
 
         <section style={{ display: "grid", gridTemplateColumns: "210px minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
-          <aside style={{ display: "grid", gridTemplateRows: "auto auto 1fr", gap: 12, minHeight: 0 }}>
+          <aside style={{ display: "grid", gridTemplateRows: "auto auto", gap: 12, alignContent: "start", minHeight: 0 }}>
             <div style={{ ...cardStyle, padding: 14 }}>
-              <div style={{ color: C.text, fontSize: 16, fontWeight: 950 }}>Fleet Health</div>
+              <div style={{ color: C.text, fontSize: 14, fontWeight: 950, paddingBottom: 11, marginBottom: 6, borderBottom: `1px solid ${C.borderSoft}` }}>Miners Health</div>
               <RegistryMetric label="Total devices" value={stats.total} color={C.primary} />
               <RegistryMetric label="Online" value={stats.online} color={C.green} />
               <RegistryMetric label="Offline" value={stats.offline} color={C.offline} />
               <RegistryMetric label="Needs attention" value={stats.attention} color={stats.attention ? C.amber : C.green} />
             </div>
             <div style={{ ...cardStyle, padding: 14 }}>
-              <div style={moduleLabel}>Registration guide</div>
-              <p style={{ color: C.textMuted, fontSize: 12, lineHeight: 1.5, margin: "10px 0 0" }}>Use stable IDs like MCM-001. The device becomes online automatically when new sensor data is received.</p>
+              <div style={{ color: C.text, fontSize: 13, fontWeight: 950, marginBottom: 7 }}>Registration Guide</div>
+              <p style={{ color: C.textMuted, fontSize: 12, lineHeight: 1.55, margin: 0 }}>Use stable IDs like MCM-001. A device comes online automatically once it sends new sensor data.</p>
             </div>
           </aside>
 
@@ -252,6 +256,7 @@ export default function DevicesPage({ miners, setMiners }) {
                   <div style={{ display: "grid", gap: 4 }}>
                     <span style={{ color: C.red, fontWeight: 900 }}>HR {miner.active ? formatReading(miner.hr, 0) : "--"} bpm</span>
                     <span style={{ color: C.primary, fontWeight: 900 }}>SpO2 {miner.active ? formatReading(miner.spo2, 0) : "--"}%</span>
+                    <span style={{ color: batteryColor(miner.battery), fontWeight: 900 }}>Batt {miner.battery > 0 ? `${miner.battery}%` : "--"}</span>
                   </div>
                   <div style={{ display: "grid", gap: 4 }}>
                     <StatePill label={miner.finger === false ? "No contact" : miner.active ? "Contact normal" : "No signal"} color={miner.finger === false ? C.amber : miner.active ? C.green : C.offline} />
@@ -259,20 +264,26 @@ export default function DevicesPage({ miners, setMiners }) {
                   </div>
                   <LastSeenCell miner={miner} />
                   <span style={{ display: "flex", gap: 6 }}>
-                    <IconButton title="Edit device" onClick={() => openEdit(miner)}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                      </svg>
-                    </IconButton>
-                    <IconButton title="Remove device" danger onClick={() => requestRemove(miner)}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                        <path d="M10 11v6M14 11v6" />
-                        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                      </svg>
-                    </IconButton>
+                    {canManage ? (
+                      <>
+                        <IconButton title="Edit device" onClick={() => openEdit(miner)}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                          </svg>
+                        </IconButton>
+                        <IconButton title="Remove device" danger onClick={() => requestRemove(miner)}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                            <path d="M10 11v6M14 11v6" />
+                            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                          </svg>
+                        </IconButton>
+                      </>
+                    ) : (
+                      <span style={{ color: C.textMuted, fontSize: 10, fontStyle: "italic" }}>View only</span>
+                    )}
                   </span>
                 </div>
               ))}
@@ -410,6 +421,14 @@ function LastSeenCell({ miner }) {
       <span style={{ color: C.textMuted, fontSize: 10 }}>{formatLastSeen(miner.lastSeen)}</span>
     </div>
   );
+}
+
+// batteryColor — maps a battery % to a status color (green / amber / red / offline)
+function batteryColor(pct) {
+  if (!pct || pct <= 0) return C.offline;
+  if (pct <= 20) return C.red;
+  if (pct <= 40) return C.amber;
+  return C.green;
 }
 
 const tableHeader = {

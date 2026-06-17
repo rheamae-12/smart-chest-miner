@@ -47,6 +47,7 @@ export const C = {
 
 // Sidebar route → navbar page title mapping
 export const pageLabels = {
+  "/command": "Command Center",
   "/dashboard": "Live Monitoring",
   "/analytics": "Analytics",
   "/devices": "Device Registry",

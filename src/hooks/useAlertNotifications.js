@@ -1,6 +1,27 @@
 import { useEffect, useRef } from "react";
 
 const PUSH_ENABLED_KEY = "smart-chest-miner-push-enabled";
+// Seen-alert ids are kept in sessionStorage so a page reload within the same tab
+// does NOT re-notify conditions that were already active before the reload. They
+// clear when the tab closes, so a fresh session still surfaces current conditions.
+const SEEN_ALERTS_SESSION_KEY = "smart-chest-miner-seen-alerts";
+
+function readSeenAlerts() {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(SEEN_ALERTS_SESSION_KEY) || "[]");
+    return new Set(Array.isArray(value) ? value : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeSeenAlerts(set) {
+  try {
+    sessionStorage.setItem(SEEN_ALERTS_SESSION_KEY, JSON.stringify([...set]));
+  } catch {
+    // Storage may be full or unavailable — non-fatal.
+  }
+}
 
 function playAlertBeep(critical) {
   try {
@@ -36,7 +57,11 @@ function fireNotification(title, body, critical) {
 }
 
 export function useAlertNotifications(alerts) {
-  const seenIdsRef = useRef(new Set());
+  const seenIdsRef = useRef(null);
+  if (seenIdsRef.current === null) seenIdsRef.current = readSeenAlerts();
+  // Tracks whether real alert data has arrived, so the initial empty render (before
+  // Firebase loads) is not mistaken for "every condition cleared".
+  const dataSeenRef = useRef(false);
   const permissionRequestedRef = useRef(false);
 
   useEffect(() => {
@@ -48,6 +73,7 @@ export function useAlertNotifications(alerts) {
 
   useEffect(() => {
     if (!alerts.length) return;
+    dataSeenRef.current = true;
 
     const newCritical = alerts.filter((a) => a.severity === "critical" && !seenIdsRef.current.has(a.id));
     const newWarning = alerts.filter((a) => a.severity !== "critical" && !seenIdsRef.current.has(a.id));
@@ -56,31 +82,34 @@ export function useAlertNotifications(alerts) {
     if (newCritical.length > 0) {
       if (pushEnabled) {
         playAlertBeep(true);
-        fireNotification(
-          "Smart Chest Miner — Critical Alert",
-          newCritical.map((a) => a.message).join("\n"),
-          true,
-        );
+        fireNotification("Smart Chest Miner — Critical Alert", newCritical.map((a) => a.message).join("\n"), true);
       }
     } else if (newWarning.length > 0) {
       if (pushEnabled) {
         playAlertBeep(false);
-        fireNotification(
-          "Smart Chest Miner — Warning",
-          newWarning.map((a) => a.message).join("\n"),
-          false,
-        );
+        fireNotification("Smart Chest Miner — Warning", newWarning.map((a) => a.message).join("\n"), false);
       }
     }
 
-    alerts.forEach((a) => seenIdsRef.current.add(a.id));
+    if (newCritical.length || newWarning.length) {
+      alerts.forEach((a) => seenIdsRef.current.add(a.id));
+      writeSeenAlerts(seenIdsRef.current);
+    }
   }, [alerts]);
 
   // Clear seen IDs when an alert disappears so it can re-fire if it comes back.
+  // Skipped until real data has loaded so the initial empty render doesn't wipe the
+  // persisted set (which would re-notify everything once data arrives).
   useEffect(() => {
+    if (!dataSeenRef.current) return;
     const currentIds = new Set(alerts.map((a) => a.id));
+    let changed = false;
     seenIdsRef.current.forEach((id) => {
-      if (!currentIds.has(id)) seenIdsRef.current.delete(id);
+      if (!currentIds.has(id)) {
+        seenIdsRef.current.delete(id);
+        changed = true;
+      }
     });
+    if (changed) writeSeenAlerts(seenIdsRef.current);
   }, [alerts]);
 }

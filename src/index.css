@@ -520,13 +520,24 @@ input:-webkit-autofill:focus {
   [style*="grid-template-columns: minmax(0, 1fr) 300px"],
   [style*="grid-template-columns: minmax(0, 1fr) 320px"],
   [style*="grid-template-columns: minmax(0, 1fr) 288px"],
+  [style*="grid-template-columns: minmax(0, 1fr) 260px"],
   [style*="grid-template-columns: 210px minmax(0, 1fr)"],
   [style*="grid-template-columns: 0.95fr 1.45fr 1.45fr"] {
     grid-template-columns: 1fr !important;
   }
 
-  [style*="grid-template-columns: repeat(4, minmax(0, 1fr))"] {
+  [style*="grid-template-columns: repeat(4, minmax(0, 1fr))"],
+  [style*="grid-template-columns: repeat(5, minmax(0, 1fr))"],
+  [style*="grid-template-columns: repeat(6, minmax(0, 1fr))"] {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Stack the dashboard stat strips on small screens so tiles stay legible. */
+@media (max-width: 600px) {
+  [style*="grid-template-columns: repeat(3, minmax(0, 1fr))"],
+  [style*="grid-template-columns: repeat(2, minmax(0, 1fr))"] {
+    grid-template-columns: 1fr !important;
   }
 }
 
@@ -667,6 +678,88 @@ input:-webkit-autofill:focus {
 .sidebar-nav-inactive:hover .sidebar-icon-wrap {
   background: rgba(255, 106, 0, 0.12) !important;
   color: rgba(255, 106, 0, 0.7) !important;
+}
+.sidebar-nav-inactive:hover {
+  transform: translateX(2px);
+}
+.sidebar-collapse-btn:hover {
+  border-color: rgba(255, 106, 0, 0.4) !important;
+  color: #e2e8f0 !important;
+  background: rgba(255, 106, 0, 0.07) !important;
+}
+
+/* Navbar action buttons */
+.nav-icon-btn,
+.nav-action-btn,
+.nav-avatar-btn {
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+}
+.nav-icon-btn:hover {
+  background: rgba(255, 106, 0, 0.1) !important;
+  border-color: rgba(255, 106, 0, 0.42) !important;
+  color: #FF8C1A !important;
+}
+.nav-action-btn:hover {
+  border-color: rgba(255, 106, 0, 0.42) !important;
+  color: #F8FAFC !important;
+  background: rgba(255, 106, 0, 0.06) !important;
+}
+.nav-action-danger:hover {
+  border-color: rgba(239, 68, 68, 0.45) !important;
+  color: #EF4444 !important;
+  background: rgba(239, 68, 68, 0.08) !important;
+}
+.nav-avatar-btn:hover {
+  border-color: rgba(255, 106, 0, 0.7) !important;
+  box-shadow: 0 0 0 3px rgba(255, 106, 0, 0.12) !important;
+  transform: translateY(-1px);
+}
+
+/* Subtle accent under the navbar — command-console feel */
+.app-navbar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 106, 0, 0.32), transparent);
+  pointer-events: none;
+}
+
+/* Tools dropdown + Command Center interactions */
+.tools-menu-item {
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+.tools-menu-item:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+.cc-fleet-row {
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+.cc-fleet-row:hover {
+  background: rgba(255, 255, 255, 0.045) !important;
+}
+
+/* Command Center responsive: collapse master/detail and dense grids */
+@media (max-width: 1080px) {
+  .cc-grid {
+    grid-template-columns: 1fr !important;
+    grid-auto-rows: minmax(0, auto);
+  }
+  .cc-overview {
+    grid-template-columns: 1fr !important;
+  }
+}
+@media (max-width: 880px) {
+  .cc-vitals {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+@media (max-width: 560px) {
+  .cc-vitals {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
 }
 
 /* Sticky table headers */

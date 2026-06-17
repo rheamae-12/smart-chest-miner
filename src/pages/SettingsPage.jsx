@@ -1,5 +1,7 @@
 import { useState } from "react";
 import Modal from "../components/Modal";
+import PageHeader from "../components/PageHeader";
+import { useAuth } from "../context/useAuth";
 import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
 import { DEFAULT_THRESHOLDS } from "../utils/alertChecker";
 
@@ -7,6 +9,7 @@ const PUSH_ENABLED_KEY = "smart-chest-miner-push-enabled";
 
 // SettingsPage — system configuration: vital alert thresholds, offline timeout, notifications, and miner status
 export default function SettingsPage({ miners, thresholds, setThresholds, staleSeconds, setStaleSeconds }) {
+  const { canManage } = useAuth();
   const [localThresholds, setLocalThresholds] = useState({ ...DEFAULT_THRESHOLDS, ...thresholds });
   const [localStaleSeconds, setLocalStaleSeconds] = useState(staleSeconds ?? 75);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -92,6 +95,7 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
             <SettingSummaryRow label="Heart Rate Range" value={`${localThresholds.hrMin} – ${localThresholds.hrMax} BPM`} color={C.red} />
             <SettingSummaryRow label="SpO2 Minimum" value={`${localThresholds.spo2Min}%`} color={C.primary} />
             <SettingSummaryRow label="Body Temp Range" value={`${localThresholds.tempMin} – ${localThresholds.tempMax}°C`} color={C.teal} />
+            <SettingSummaryRow label="Battery Warning" value={`≤ ${localThresholds.batteryMin ?? 20}%`} color={C.amber} />
             <SettingSummaryRow label="Offline Timeout" value={`${localStaleSeconds} seconds`} color={C.amber} />
           </div>
         </Modal>
@@ -99,18 +103,20 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
 
       <div style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10, height: "100%", minHeight: 0 }}>
 
-        <header style={{ ...cardStyle, padding: "12px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <div>
-            <div style={{ color: C.primary, fontSize: 10, letterSpacing: "0.15em", textTransform: "uppercase", fontWeight: 900 }}>Configuration</div>
-            <div style={{ color: C.text, fontSize: 20, fontWeight: 950, marginTop: 3 }}>System Settings</div>
-            <div style={{ color: C.textMuted, fontSize: 11, marginTop: 2 }}>Adjust alert thresholds and monitoring behavior for all connected miners.</div>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Pill value={online} label="Online" color={C.green} />
-            <Pill value={offline} label="Offline" color={C.offline} />
-            {warnings > 0 && <Pill value={warnings} label="Warnings" color={C.amber} />}
-          </div>
-        </header>
+        <PageHeader
+          label="Configuration"
+          title="System Settings"
+          titleSize={20}
+          subtitle="Adjust alert thresholds and monitoring behavior for all connected miners."
+          padding="14px 18px"
+          right={
+            <>
+              <Pill value={online} label="Online" color={C.green} />
+              <Pill value={offline} label="Offline" color={C.offline} />
+              {warnings > 0 && <Pill value={warnings} label="Warnings" color={C.amber} />}
+            </>
+          }
+        />
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, alignContent: "start", minHeight: 0 }}>
 
@@ -194,25 +200,32 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
                   <span style={{ color: C.teal, fontSize: 11, fontWeight: 900, minWidth: 30, textAlign: "right" }}>°C</span>
                 </div>
 
+                {/* Battery row */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 9, border: `1px solid ${C.amber}30`, background: `${C.amber}08` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 108 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.amber, boxShadow: `0 0 8px ${C.amber}`, flexShrink: 0 }} />
+                    <span style={{ color: C.text, fontSize: 12, fontWeight: 950 }}>Battery</span>
+                  </div>
+                  <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
+                    <StepperField
+                      label="Low at"
+                      value={localThresholds.batteryMin ?? 20}
+                      onChange={(v) => setHr({ batteryMin: Math.max(5, Math.min(50, v)) })}
+                      min={5}
+                      max={50}
+                    />
+                    <span style={{ color: C.textMuted, fontSize: 11, alignSelf: "flex-end", paddingBottom: 6, userSelect: "none" }}>or below</span>
+                  </div>
+                  <span style={{ color: C.amber, fontSize: 11, fontWeight: 900, minWidth: 30, textAlign: "right" }}>%</span>
+                </div>
+
                 {/* Range preview bars */}
                 <div style={{ display: "grid", gap: 4, padding: "2px 0 0" }}>
                   <RangeBar label="HR safe band" valueText={`${localThresholds.hrMin} – ${localThresholds.hrMax} BPM`} color={C.red} />
                   <RangeBar label="SpO2 floor" valueText={`${localThresholds.spo2Min}% and above`} color={C.primary} />
                   <RangeBar label="Body temp safe band" valueText={`${localThresholds.tempMin} – ${localThresholds.tempMax}°C`} color={C.teal} />
+                  <RangeBar label="Battery warning floor" valueText={`${localThresholds.batteryMin ?? 20}% or below`} color={C.amber} />
                 </div>
-              </div>
-            </SettingsCard>
-
-            <SettingsCard
-              number="03"
-              title="System Status"
-              description="Live count of all registered miners and their current state."
-            >
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 7 }}>
-                <StatusBox label="Total Miners" value={miners.length} color={C.primary} desc="Registered" />
-                <StatusBox label="Online Now" value={online} color={C.green} desc="Active" />
-                <StatusBox label="Offline" value={offline} color={C.offline} desc="No signal" />
-                <StatusBox label="Needs Attention" value={warnings} color={warnings ? C.amber : C.green} desc={warnings ? "Check required" : "All clear"} />
               </div>
             </SettingsCard>
           </div>
@@ -239,7 +252,7 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
             </SettingsCard>
 
             <SettingsCard
-              number="04"
+              number="03"
               title="Alert Notifications"
               description="Control how the system notifies you when a miner condition is triggered."
             >
@@ -271,8 +284,16 @@ export default function SettingsPage({ miners, thresholds, setThresholds, staleS
         </div>
 
         <footer style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingTop: 2 }}>
-          <button onClick={requestSave} style={{ ...primaryButtonStyle, padding: "11px 28px", fontSize: 13 }}>Save Changes</button>
-          <button onClick={discard} style={{ ...ghostButtonStyle, padding: "11px 18px", fontSize: 13 }}>Discard Changes</button>
+          <button
+            onClick={requestSave}
+            disabled={!canManage}
+            title={canManage ? undefined : "Your account is view-only"}
+            style={{ ...primaryButtonStyle, padding: "11px 28px", fontSize: 13, opacity: canManage ? 1 : 0.5, cursor: canManage ? "pointer" : "not-allowed" }}
+          >
+            Save Changes
+          </button>
+          <button onClick={discard} disabled={!canManage} style={{ ...ghostButtonStyle, padding: "11px 18px", fontSize: 13, opacity: canManage ? 1 : 0.5, cursor: canManage ? "pointer" : "not-allowed" }}>Discard Changes</button>
+          {!canManage && <span style={{ fontSize: 12, color: C.textMuted, fontStyle: "italic" }}>View-only account — settings are read-only.</span>}
           {saved && (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: C.green, fontWeight: 800 }}>
               <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.green, display: "inline-block" }} />
@@ -418,17 +439,6 @@ function RangeBar({ label, valueText, color }) {
       <div style={{ height: 3, borderRadius: 999, background: C.border, overflow: "hidden" }}>
         <div style={{ width: "68%", height: "100%", marginLeft: "16%", background: color, borderRadius: 999 }} />
       </div>
-    </div>
-  );
-}
-
-// StatusBox — compact stat tile used in System Status card (total / online / offline / warnings)
-function StatusBox({ label, value, color, desc }) {
-  return (
-    <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 8, padding: "8px 10px", background: "rgba(255,255,255,0.02)" }}>
-      <div style={{ color: C.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
-      <div style={{ color, fontSize: 20, fontWeight: 950, marginTop: 3 }}>{value}</div>
-      <div style={{ color: C.textMuted, fontSize: 10, marginTop: 1 }}>{desc}</div>
     </div>
   );
 }

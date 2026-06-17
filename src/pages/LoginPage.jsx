@@ -1,17 +1,19 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
+import { firebaseConfigured } from "../firebase/config";
 import logo from "../assets/smart-chest-miner-logo.png";
 import { C, cardStyle, controlStyle, primaryButtonStyle } from "../theme";
+import { passwordMeetsPolicy, passwordRequirements, passwordStrength } from "../utils/password";
 
 export default function LoginPage() {
   const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", confirm: "" });
   const [localError, setLocalError] = useState("");
   const [localMessage, setLocalMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [remember, setRemember] = useState(true);
-  const { login, signUp, authError } = useAuth();
+  const { login, signUp, resetPassword, authError } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -23,13 +25,23 @@ export default function LoginPage() {
       setLocalError("Enter a valid email address.");
       return;
     }
-    if (form.password.length < (mode === "login" ? 1 : 6)) {
-      setLocalError(mode === "login" ? "Password is required." : "Password must be at least 6 characters.");
+    if (mode === "login" && !form.password) {
+      setLocalError("Password is required.");
       return;
     }
-    if (mode === "signup" && form.name.trim().length < 2) {
-      setLocalError("Full name is required.");
-      return;
+    if (mode === "signup") {
+      if (form.name.trim().length < 2) {
+        setLocalError("Full name is required.");
+        return;
+      }
+      if (!passwordMeetsPolicy(form.password)) {
+        setLocalError("Password must meet all the strength requirements below.");
+        return;
+      }
+      if (form.password !== form.confirm) {
+        setLocalError("Passwords do not match.");
+        return;
+      }
     }
 
     setBusy(true);
@@ -42,14 +54,34 @@ export default function LoginPage() {
     }
   };
 
-  const forgotPassword = () => {
+  const forgotPassword = async () => {
     setLocalError("");
-    setLocalMessage("Password reset is handled by the system administrator for this prototype.");
+    setLocalMessage("");
+    const email = form.email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setLocalError("Enter your account email above first, then tap Forgot password.");
+      return;
+    }
+    if (!firebaseConfigured) {
+      setLocalMessage("Password reset is handled by the system administrator for this prototype build.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await resetPassword(email);
+    } catch {
+      // Swallow — never reveal whether an email is registered (anti-enumeration).
+    } finally {
+      setBusy(false);
+      // Always show the same neutral confirmation regardless of outcome.
+      setLocalMessage("If an account exists for that email, a password reset link has been sent.");
+    }
   };
 
   const switchMode = () => {
     setLocalError("");
     setLocalMessage("");
+    setForm((prev) => ({ ...prev, password: "", confirm: "" }));
     setMode((value) => (value === "login" ? "signup" : "login"));
   };
 
@@ -85,7 +117,12 @@ export default function LoginPage() {
             <div style={{ display: "grid", gap: 14 }}>
               {mode === "signup" && <Field label="Full Name" value={form.name} autoComplete="name" onChange={(name) => setForm({ ...form, name })} placeholder="Juan Dela Cruz" />}
               <Field label="Email" value={form.email} autoComplete="email" onChange={(email) => setForm({ ...form, email })} placeholder="admin@smartchestminer.io" />
-              <Field label="Password" type="password" value={form.password} autoComplete={mode === "login" ? "current-password" : "new-password"} onChange={(password) => setForm({ ...form, password })} placeholder={mode === "login" ? "password" : "at least 6 characters"} onEnter={submit} />
+              <Field label="Password" type="password" value={form.password} autoComplete={mode === "login" ? "current-password" : "new-password"} onChange={(password) => setForm({ ...form, password })} placeholder={mode === "login" ? "password" : "create a strong password"} onEnter={submit} />
+              {mode === "signup" && form.password && <PasswordStrength password={form.password} />}
+              {mode === "signup" && (
+                <Field label="Confirm Password" type="password" value={form.confirm} autoComplete="new-password" onChange={(confirm) => setForm({ ...form, confirm })} placeholder="re-enter password" onEnter={submit} />
+              )}
+              {mode === "signup" && form.confirm.length > 0 && <MatchHint match={form.password === form.confirm} />}
             </div>
 
             {mode === "login" && (
@@ -103,7 +140,11 @@ export default function LoginPage() {
             {(localError || authError) && <Notice tone="danger">{localError || authError}</Notice>}
             {localMessage && <Notice tone="good">{localMessage}</Notice>}
 
-            <button disabled={busy} onClick={submit} style={{ ...primaryButtonStyle, width: "100%", padding: 12, marginTop: 18, fontSize: 14 }}>
+            <button
+              disabled={busy || (mode === "signup" && (!passwordMeetsPolicy(form.password) || form.password !== form.confirm || form.name.trim().length < 2))}
+              onClick={submit}
+              style={{ ...primaryButtonStyle, width: "100%", padding: 12, marginTop: 18, fontSize: 14, opacity: busy ? 0.7 : 1 }}
+            >
               {busy ? "Checking..." : mode === "login" ? "Open Dashboard" : "Create Account"}
             </button>
 
@@ -133,7 +174,12 @@ function Logo({ size }) {
 
 function Field({ label, value, onChange, type = "text", placeholder, autoComplete, onEnter }) {
   const [show, setShow] = useState(false);
+  const [capsOn, setCapsOn] = useState(false);
   const isPassword = type === "password";
+  const handleKey = (event) => {
+    if (typeof event.getModifierState === "function") setCapsOn(event.getModifierState("CapsLock"));
+    if (event.key === "Enter") onEnter?.();
+  };
   return (
     <label style={{ display: "block" }}>
       <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6, letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
@@ -144,7 +190,9 @@ function Field({ label, value, onChange, type = "text", placeholder, autoComplet
           value={value}
           autoComplete={autoComplete}
           onChange={(event) => onChange(event.target.value)}
-          onKeyDown={(event) => event.key === "Enter" && onEnter?.()}
+          onKeyDown={handleKey}
+          onKeyUp={handleKey}
+          onBlur={() => setCapsOn(false)}
           style={{ ...controlStyle, width: "100%", padding: isPassword ? "11px 42px 11px 13px" : "11px 13px", boxSizing: "border-box" }}
         />
         {isPassword && (
@@ -172,7 +220,49 @@ function Field({ label, value, onChange, type = "text", placeholder, autoComplet
           </button>
         )}
       </div>
+      {isPassword && capsOn && (
+        <div style={{ display: "flex", alignItems: "center", gap: 5, color: C.amber, fontSize: 10, fontWeight: 700, marginTop: 6 }}>
+          <span aria-hidden="true">⚠</span> Caps Lock is on
+        </div>
+      )}
     </label>
+  );
+}
+
+// PasswordStrength — live strength meter + requirement checklist shown during sign-up
+function PasswordStrength({ password }) {
+  const { score, color, label } = passwordStrength(password);
+  const reqs = passwordRequirements(password);
+  return (
+    <div style={{ display: "grid", gap: 8, marginTop: -4 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 3, flex: 1 }}>
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} style={{ height: 4, borderRadius: 2, background: i < score ? color : C.borderSoft, transition: "background 0.2s" }} />
+          ))}
+        </div>
+        <span style={{ color, fontSize: 10, fontWeight: 900, minWidth: 50, textAlign: "right" }}>{label}</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px" }}>
+        {reqs.map((req) => (
+          <div key={req.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ color: req.met ? C.green : C.textMuted, fontSize: 12, lineHeight: 1 }}>{req.met ? "✓" : "○"}</span>
+            <span style={{ color: req.met ? C.green : C.textMuted, fontSize: 10 }}>{req.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// MatchHint — confirm-password match indicator
+function MatchHint({ match }) {
+  const color = match ? C.green : C.red;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: -4 }}>
+      <span style={{ color, fontSize: 12 }}>{match ? "✓" : "✗"}</span>
+      <span style={{ color, fontSize: 10 }}>{match ? "Passwords match" : "Passwords do not match"}</span>
+    </div>
   );
 }
 

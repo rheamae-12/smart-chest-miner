@@ -1,4 +1,4 @@
-import { EmailAuthProvider, createUserWithEmailAndPassword, onAuthStateChanged, reauthenticateWithCredential, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "firebase/auth";
+import { EmailAuthProvider, createUserWithEmailAndPassword, onAuthStateChanged, reauthenticateWithCredential, sendPasswordResetEmail, signInWithEmailAndPassword, signOut, updatePassword, updateProfile } from "firebase/auth";
 import { auth } from "./config";
 
 export function observeFirebaseAuth(onUser) {
@@ -24,6 +24,12 @@ export async function createFirebaseAccount({ name, email, password }) {
 export async function logoutFirebase() {
   if (!auth) return;
   await signOut(auth);
+}
+
+// sendFirebasePasswordReset — emails a reset link for a Firebase account.
+export async function sendFirebasePasswordReset(email) {
+  if (!auth) throw new Error("Firebase authentication is not configured.");
+  await sendPasswordResetEmail(auth, email);
 }
 
 // changeFirebasePassword — reauthenticates with current password then sets a new one

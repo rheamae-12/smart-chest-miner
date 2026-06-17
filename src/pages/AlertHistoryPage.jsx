@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Modal from "../components/Modal";
-import { C, cardStyle, controlStyle, ghostButtonStyle, moduleLabel, pageStyle } from "../theme";
+import PageHeader from "../components/PageHeader";
+import { useAuth } from "../context/useAuth";
+import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
+import { dedupeConsecutiveLogs, formatSystemTimestamp } from "../utils/formatters";
 
 const ALERT_STATUS_KEY = "smart-chest-miner-alert-statuses";
 const PAGE_SIZE = 15;
@@ -55,11 +58,10 @@ function deriveAlertType(log) {
   return log.title || "Alert";
 }
 
+// formatTimestamp — unified app timestamp, e.g. "JUNE 12, 2026 - 6:07 AM"
 function formatTimestamp(ms) {
   if (!ms) return "—";
-  const d = new Date(ms);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return formatSystemTimestamp(ms);
 }
 
 function formatDuration(ms) {
@@ -85,8 +87,12 @@ function getStatusSetAt(id, status, statuses) {
   return statuses[`${id}__unresolvedAt`] || null;
 }
 
-export default function AlertHistoryPage({ miners = [], activityLogs = [] }) {
+export default function AlertHistoryPage({ activityLogs = [], onClearActivityLogs }) {
+  const { user } = useAuth();
   const [alertStatuses, setAlertStatuses] = useState(readStoredStatuses);
+  const [clearLogsOpen, setClearLogsOpen] = useState(false);
+  const [clearLogsError, setClearLogsError] = useState("");
+  const [clearingLogs, setClearingLogs] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -98,7 +104,20 @@ export default function AlertHistoryPage({ miners = [], activityLogs = [] }) {
     localStorage.setItem(ALERT_STATUS_KEY, JSON.stringify(alertStatuses));
   }, [alertStatuses]);
 
-  const alertLogs = useMemo(() => activityLogs.filter(isAlertEntry), [activityLogs]);
+  const alertLogs = useMemo(() => dedupeConsecutiveLogs(activityLogs.filter(isAlertEntry)), [activityLogs]);
+
+  const confirmClearLogs = async () => {
+    setClearingLogs(true);
+    setClearLogsError("");
+    try {
+      await onClearActivityLogs?.();
+      setClearLogsOpen(false);
+    } catch (error) {
+      setClearLogsError(error.message || "Unable to clear activity logs.");
+    } finally {
+      setClearingLogs(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     return alertLogs.filter((log) => {
@@ -119,36 +138,78 @@ export default function AlertHistoryPage({ miners = [], activityLogs = [] }) {
   const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const unresolvedCount = alertLogs.filter((log) => (alertStatuses[log.id] || "unresolved") === "unresolved").length;
-  const criticalCount = alertLogs.filter((log) => log.severity === "critical" && (alertStatuses[log.id] || "unresolved") === "unresolved").length;
-  const warningCount = unresolvedCount - criticalCount;
   const resolvedCount = alertLogs.filter((log) => alertStatuses[log.id] === "resolved").length;
   const acknowledgedCount = alertLogs.filter((log) => alertStatuses[log.id] === "acknowledged").length;
 
   const avgResponseMs = useMemo(() => {
     const times = alertLogs
-      .map((log) => (alertStatuses[`${log.id}__ackAt`] ? alertStatuses[`${log.id}__ackAt`] - log.timestamp : null))
-      .filter((ms) => ms !== null && ms > 0);
+      .filter((log) => {
+        const st = alertStatuses[log.id];
+        return st === "acknowledged" || st === "resolved";
+      })
+      .map((log) => {
+        const ackAt = alertStatuses[`${log.id}__ackAt`];
+        if (!ackAt || !log.timestamp || log.timestamp <= 0) return null;
+        const diff = ackAt - log.timestamp;
+        return diff > 0 ? diff : null;
+      })
+      .filter((ms) => ms !== null);
     return times.length ? times.reduce((sum, ms) => sum + ms, 0) / times.length : null;
   }, [alertLogs, alertStatuses]);
 
   const setStatus = (id, status) => {
     const now = Date.now();
+    const who = user?.name || user?.email || user?.displayName || "Unknown";
     setAlertStatuses((prev) => ({
       ...prev,
       [id]: status,
-      ...(status === "acknowledged" ? { [`${id}__ackAt`]: prev[`${id}__ackAt`] || now } : {}),
-      ...(status === "resolved" ? { [`${id}__resolvedAt`]: now } : {}),
-      ...(status === "unresolved" ? { [`${id}__unresolvedAt`]: now } : {}),
+      ...(status === "acknowledged" ? {
+        [`${id}__ackAt`]: prev[`${id}__ackAt`] || now,
+        [`${id}__ackBy`]: prev[`${id}__ackBy`] || who,
+      } : {}),
+      ...(status === "resolved" ? {
+        [`${id}__resolvedAt`]: now,
+        [`${id}__resolvedBy`]: who,
+      } : {}),
+      ...(status === "unresolved" ? {
+        [`${id}__unresolvedAt`]: now,
+        [`${id}__unresolvedBy`]: who,
+      } : {}),
     }));
   };
 
   return (
     <div style={pageStyle}>
+      {clearLogsOpen && (
+        <Modal
+          title="Clear All Logs"
+          onClose={() => { if (!clearingLogs) setClearLogsOpen(false); }}
+          actions={
+            <>
+              <button disabled={clearingLogs} onClick={() => setClearLogsOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 15px", opacity: clearingLogs ? 0.5 : 1 }}>
+                Cancel
+              </button>
+              <button disabled={clearingLogs} onClick={confirmClearLogs} style={{ ...primaryButtonStyle, padding: "9px 15px", opacity: clearingLogs ? 0.75 : 1 }}>
+                {clearingLogs ? "Clearing..." : "Confirm Clear"}
+              </button>
+            </>
+          }
+        >
+          <div style={{ color: C.textMuted, fontSize: 13, lineHeight: 1.55 }}>
+            Clear all alert log entries from Firebase? This removes the stored records and cannot be undone.
+          </div>
+          {clearLogsError && <div style={{ color: C.amber, fontSize: 12, marginTop: 10 }}>{clearLogsError}</div>}
+        </Modal>
+      )}
+
       {snapshotLog && (
         <SnapshotModal
           log={snapshotLog}
           status={alertStatuses[snapshotLog.id] || "unresolved"}
           setAt={getStatusSetAt(snapshotLog.id, alertStatuses[snapshotLog.id] || "unresolved", alertStatuses)}
+          ackBy={alertStatuses[`${snapshotLog.id}__ackBy`] || null}
+          resolvedBy={alertStatuses[`${snapshotLog.id}__resolvedBy`] || null}
+          resolvedAt={alertStatuses[`${snapshotLog.id}__resolvedAt`] || null}
           onSetStatus={(s) => setStatus(snapshotLog.id, s)}
           onClose={() => setSnapshotLog(null)}
         />
@@ -157,18 +218,19 @@ export default function AlertHistoryPage({ miners = [], activityLogs = [] }) {
       <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
 
         {/* Header */}
-        <section style={{ ...cardStyle, padding: 16, display: "flex", justifyContent: "space-between", gap: 14, alignItems: "end", flexWrap: "wrap" }}>
-          <div>
-            <div style={moduleLabel}>IoT Vital Signs Monitoring</div>
-            <div style={{ color: C.text, fontSize: 26, fontWeight: 950, marginTop: 4 }}>Alert History</div>
-            <div style={{ color: C.textMuted, fontSize: 12, marginTop: 5 }}>Full log of all critical and warning events, device offline events, and manual alerts.</div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
-            <HeaderStat label="Unresolved" value={unresolvedCount} color={unresolvedCount > 0 ? C.red : C.green} />
-            <HeaderStat label="Total Alerts" value={alertLogs.length} color={C.primary} />
-            <HeaderStat label="Avg Response" value={avgResponseMs !== null ? formatDuration(avgResponseMs) : "—"} color={C.amber} />
-          </div>
-        </section>
+        <PageHeader
+          label="IoT Vital Signs Monitoring"
+          title="Alert History"
+          titleSize={26}
+          subtitle="Full log of all critical and warning events, device offline events, and manual alerts."
+          right={
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+              <HeaderStat label="Unresolved" value={unresolvedCount} color={unresolvedCount > 0 ? C.red : C.green} />
+              <HeaderStat label="Total Alerts" value={alertLogs.length} color={C.primary} />
+              <HeaderStat label="Avg Response" value={avgResponseMs !== null ? formatDuration(avgResponseMs) : "--"} color={C.amber} />
+            </div>
+          }
+        />
 
         {/* Filters */}
         <section style={{ ...cardStyle, padding: "12px 16px", display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
@@ -229,7 +291,21 @@ export default function AlertHistoryPage({ miners = [], activityLogs = [] }) {
         <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 300px", gap: 12, minHeight: 0 }}>
 
           {/* Table */}
-          <div style={{ ...cardStyle, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr auto" }}>
+          <div style={{ ...cardStyle, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr auto" }}>
+            <div style={{ padding: "14px 16px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+              <div>
+                <div style={{ color: C.text, fontSize: 14, fontWeight: 900 }}>Alert Records</div>
+                <div style={{ color: C.textMuted, fontSize: 11, marginTop: 2 }}>Timestamp, miner, alert type, severity, and response status</div>
+              </div>
+              <button
+                disabled={!alertLogs.length || !onClearActivityLogs}
+                onClick={() => { setClearLogsError(""); setClearLogsOpen(true); }}
+                title={!onClearActivityLogs ? "View-only account" : undefined}
+                style={{ ...ghostButtonStyle, padding: "8px 11px", fontSize: 11, opacity: alertLogs.length && onClearActivityLogs ? 1 : 0.5, cursor: alertLogs.length && onClearActivityLogs ? "pointer" : "not-allowed" }}
+              >
+                Clear All Logs
+              </button>
+            </div>
             <div className="table-header-sticky" style={tableHeader}>
               <span>Timestamp</span>
               <span>Miner Name</span>
@@ -594,7 +670,7 @@ function HeaderStat({ label, value, color }) {
 function InfoCard({ title, children }) {
   return (
     <section style={{ ...cardStyle, padding: 15, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <div style={{ color: C.text, fontSize: 14, fontWeight: 950, marginBottom: 12, flexShrink: 0 }}>{title}</div>
+      <div style={{ color: C.text, fontSize: 14, fontWeight: 950, paddingBottom: 11, marginBottom: 12, borderBottom: `1px solid ${C.borderSoft}`, flexShrink: 0 }}>{title}</div>
       {children}
     </section>
   );
@@ -632,7 +708,7 @@ function RecentAlertNote({ log, status, onClick }) {
   );
 }
 
-function SnapshotModal({ log, status, setAt, onSetStatus, onClose }) {
+function SnapshotModal({ log, status, setAt, ackBy, resolvedBy, resolvedAt, onSetStatus, onClose }) {
   const alertType = deriveAlertType(log);
   const isCritical = log.severity === "critical";
   const statusColors = { unresolved: C.red, acknowledged: C.amber, resolved: C.green };
@@ -663,6 +739,14 @@ function SnapshotModal({ log, status, setAt, onSetStatus, onClose }) {
           <SnapField label="Event Type" value={log.type || "—"} />
           <SnapField label="Current Status" value={status} valueColor={statusColors[status] || C.red} />
           {sinceLabel && <SnapField label="Status Since" value={sinceLabel} />}
+          {ackBy && <SnapField label="Acknowledged by" value={ackBy} valueColor={C.amber} />}
+          {resolvedBy && resolvedAt && (
+            <SnapField
+              label="Resolved by"
+              value={`${resolvedBy} at ${formatTimestamp(resolvedAt)}`}
+              valueColor={C.green}
+            />
+          )}
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

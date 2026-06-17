@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import Modal from "../components/Modal";
-import { C, cardStyle, ghostButtonStyle, moduleLabel, pageStyle, primaryButtonStyle } from "../theme";
+import PageHeader from "../components/PageHeader";
+import { C, cardStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
 import { formatLastSeen, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 
 // SensorStatusPage — sensor health diagnostics: per-miner readings, signal integrity, and activity event log
@@ -58,81 +59,70 @@ export default function SensorStatusPage({ miners, activityLogs = [], onClearAct
           {clearLogsError && <div style={{ color: C.amber, fontSize: 12, marginTop: 10 }}>{clearLogsError}</div>}
         </Modal>
       )}
-      <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
-        <section style={{ ...cardStyle, padding: 16, display: "flex", justifyContent: "space-between", gap: 14, alignItems: "end" }}>
-          <div>
-            <div style={moduleLabel}>Sensor diagnostics</div>
-            <div style={{ color: C.text, fontSize: 26, fontWeight: 950, marginTop: 4 }}>Sensor Status</div>
-            <div style={{ color: C.textMuted, fontSize: 12, marginTop: 5 }}>Health of the SpO2 and heart-rate sensors attached to each Smart Chest Miner device.</div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <HeaderStat label="Active miners" value={`${active}/${miners.length}`} color={C.green} />
-            <HeaderStat label="Warnings" value={sensorWarnings} color={sensorWarnings ? C.amber : C.green} />
-          </div>
+      <div style={{ display: "grid", gridTemplateRows: "auto auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
+        <PageHeader
+          label="Sensor diagnostics"
+          title="Sensor Status"
+          titleSize={26}
+          subtitle="Health of the SpO2 and heart-rate sensors attached to each Smart Chest Miner device."
+          right={
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <HeaderStat label="Active miners" value={`${active}/${miners.length}`} color={C.green} />
+              <HeaderStat label="Warnings" value={sensorWarnings} color={sensorWarnings ? C.amber : C.green} />
+            </div>
+          }
+        />
+
+        {/* Signal integrity — per-sensor-type roll-up as a visual stat strip */}
+        <section className="cc-vitals" style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 10 }}>
+          <IntegrityTile label="HR Sensors" value={miners.filter((m) => m.active && m.hr > 0).length} total={miners.length} color={C.red} />
+          <IntegrityTile label="SpO2 Sensors" value={miners.filter((m) => m.active && m.spo2 > 0).length} total={miners.length} color={C.primary} />
+          <IntegrityTile label="Temp Sensors" value={miners.filter((m) => m.active && m.temp > 0).length} total={miners.length} color={C.teal} />
+          <IntegrityTile label="Chest Contact" value={miners.filter((m) => m.active && m.finger !== false).length} total={miners.length} color={C.green} />
+          <IntegrityTile label="Battery OK" value={miners.filter((m) => m.battery > 20).length} total={miners.length} color={miners.some((m) => m.battery > 0 && m.battery <= 20) ? C.amber : C.green} />
+          <IntegrityTile label="Offline" value={miners.filter((m) => !m.active).length} total={miners.length} color={miners.some((m) => !m.active) ? C.offline : C.green} />
         </section>
 
-        <section>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        {/* Active sensor nodes — per-miner diagnostics, stretched to fill the row */}
+        <section style={{ display: "grid", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ color: C.text, fontSize: 15, fontWeight: 950 }}>Active Sensor Nodes</div>
             <Indicator color={active ? C.green : C.offline} label="Live diagnostics update automatically" />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10 }}>
             {sortedMiners.map((miner) => (
               <SensorNode key={miner.id} miner={miner} />
             ))}
           </div>
         </section>
 
-        <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 300px", gap: 12, minHeight: 0 }}>
-          <div style={{ ...cardStyle, padding: 15, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 8 }}>
-              <div>
-                <div style={moduleLabel}>Network event log</div>
-                <div style={{ color: C.text, fontSize: 16, fontWeight: 950, marginTop: 4 }}>Miner Activity Records</div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <Indicator color={sensorWarnings ? C.amber : C.green} label={`${events.length} recorded events`} />
-                <button
-                  disabled={!events.length || !onClearActivityLogs}
-                  onClick={() => {
-                    setClearLogsError("");
-                    setClearLogsOpen(true);
-                  }}
-                  style={{ ...ghostButtonStyle, padding: "8px 11px", fontSize: 11, opacity: events.length && onClearActivityLogs ? 1 : 0.5, cursor: events.length && onClearActivityLogs ? "pointer" : "not-allowed" }}
-                >
-                  Clear All Logs
-                </button>
-              </div>
-            </div>
-            <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
-              {events.length === 0 ? (
-                <div style={{ color: C.textMuted, fontSize: 13, padding: "18px 0", borderTop: `1px solid ${C.borderSoft}` }}>No miner activity records are stored.</div>
-              ) : (
-                events.map((event) => (
-                  <EventRow key={event.id || `${event.deviceId}-${event.title}-${event.time}`} event={event} />
-                ))
-              )}
+        {/* Network activity log — full width so each row has room */}
+        <section style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "12px 15px", borderBottom: `1px solid ${C.borderSoft}` }}>
+            <div style={{ color: C.text, fontSize: 14, fontWeight: 950 }}>Network Activity Log</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ color: C.textMuted, fontSize: 11 }}>{events.length} event{events.length === 1 ? "" : "s"}</span>
+              <button
+                disabled={!events.length || !onClearActivityLogs}
+                onClick={() => {
+                  setClearLogsError("");
+                  setClearLogsOpen(true);
+                }}
+                style={{ ...ghostButtonStyle, padding: "8px 11px", fontSize: 11, opacity: events.length && onClearActivityLogs ? 1 : 0.5, cursor: events.length && onClearActivityLogs ? "pointer" : "not-allowed" }}
+              >
+                Clear All Logs
+              </button>
             </div>
           </div>
-
-          <aside style={{ display: "grid", gridTemplateRows: "auto 1fr", gap: 12, minHeight: 0 }}>
-            <section style={{ ...cardStyle, padding: 15 }}>
-              <div style={moduleLabel}>Signal integrity</div>
-              <Integrity label="Heart-rate sensors online" value={`${miners.filter((miner) => miner.active && miner.hr > 0).length}/${miners.length}`} color={C.red} />
-              <Integrity label="SpO2 sensors online" value={`${miners.filter((miner) => miner.active && miner.spo2 > 0).length}/${miners.length}`} color={C.primary} />
-              <Integrity label="Body temp sensors online" value={`${miners.filter((miner) => miner.active && miner.temp > 0).length}/${miners.length}`} color={C.teal} />
-              <Integrity label="Chest contact valid" value={`${miners.filter((miner) => miner.active && miner.finger !== false).length}/${miners.length}`} color={C.green} />
-              <Integrity label="Offline signals" value={miners.filter((miner) => miner.stale).length} color={miners.some((miner) => miner.stale) ? C.offline : C.green} />
-            </section>
-            <section style={{ ...cardStyle, padding: 15, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              <div style={{ ...moduleLabel, flexShrink: 0 }}>Sensor notes</div>
-              <div className="hide-scrollbar" style={{ display: "grid", gap: 8, marginTop: 12, overflow: "auto", flex: 1, minHeight: 0, alignContent: "start" }}>
-                {sortedMiners.map((miner) => (
-                  <Note key={miner.id} miner={miner} />
-                ))}
-              </div>
-            </section>
-          </aside>
+          <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0, padding: "0 15px" }}>
+            {events.length === 0 ? (
+              <div style={{ color: C.textMuted, fontSize: 13, padding: "18px 0" }}>No miner activity records are stored.</div>
+            ) : (
+              events.map((event) => (
+                <EventRow key={event.id || `${event.deviceId}-${event.title}-${event.time}`} event={event} />
+              ))
+            )}
+          </div>
         </section>
       </div>
     </div>
@@ -176,10 +166,11 @@ function SensorNode({ miner }) {
         </div>
         <span style={{ color: miner.active ? C.green : C.offline, fontSize: 10, fontWeight: 900 }}>{miner.active ? "ONLINE" : "OFFLINE"}</span>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginTop: 12 }}>
         <SensorMetric label="Heart-rate sensor" value={miner.active ? `${formatReading(miner.hr, 0)} bpm` : "--"} color={miner.active && miner.hr > 0 ? C.red : C.offline} state={miner.active && miner.hr > 0 ? "Reading" : "No signal"} />
         <SensorMetric label="SpO2 sensor" value={miner.active ? `${formatReading(miner.spo2, 0)}%` : "--"} color={miner.active && miner.spo2 > 0 ? C.primary : C.offline} state={miner.active && miner.spo2 > 0 ? "Reading" : "No signal"} />
         <SensorMetric label="Body temp sensor" value={miner.active ? `${formatReading(miner.temp, 1)}°C` : "--"} color={miner.active && miner.temp > 0 ? C.teal : C.offline} state={miner.active && miner.temp > 0 ? "Reading" : "No signal"} />
+        <SensorMetric label="Battery" value={miner.battery > 0 ? `${miner.battery}%` : "--"} color={batteryNodeColor(miner.battery)} state={miner.battery > 0 ? (miner.battery <= 20 ? "Low" : "OK") : "Unknown"} />
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, color: C.textMuted, fontSize: 11 }}>
         <span>Contact: <b style={{ color: miner.finger === false ? C.amber : miner.active ? C.green : C.offline }}>{miner.finger === false ? "Missing" : miner.active ? "Valid" : "Offline"}</b></span>
@@ -198,6 +189,14 @@ function SensorMetric({ label, value, color, state }) {
       <div style={{ color, fontSize: 10, fontWeight: 900, marginTop: 5 }}>{state}</div>
     </div>
   );
+}
+
+// batteryNodeColor — maps battery % to a color for the sensor node card
+function batteryNodeColor(pct) {
+  if (!pct || pct <= 0) return C.offline;
+  if (pct <= 20) return C.red;
+  if (pct <= 40) return C.amber;
+  return C.green;
 }
 
 // EventRow — single row in the Miner Activity Records log table
@@ -224,24 +223,19 @@ function Indicator({ color, label }) {
   );
 }
 
-// Integrity — label + count row in the Signal Integrity card (e.g. "SpO2 sensors online  3/4")
-function Integrity({ label, value, color }) {
+// IntegrityTile — per-sensor-type stat tile with a fill bar (online / total)
+function IntegrityTile({ label, value, total, color }) {
+  const pct = total ? Math.round((value / total) * 100) : 0;
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "10px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
-      <span style={{ color: C.textMuted, fontSize: 12 }}>{label}</span>
-      <strong style={{ color }}>{value}</strong>
-    </div>
-  );
-}
-
-// Note — sensor note card in the aside showing a brief status description per miner
-function Note({ miner }) {
-  const color = miner.active ? C.green : C.offline;
-  const text = miner.active ? "Both sensor channels are being evaluated in the live window." : "Sensor checks will resume automatically when new data arrives.";
-  return (
-    <div style={{ border: `1px solid ${C.borderSoft}`, borderLeft: `3px solid ${color}`, borderRadius: 7, padding: "9px 12px" }}>
-      <div style={{ color: C.text, fontSize: 12, fontWeight: 900 }}>{miner.name}</div>
-      <div style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.4, marginTop: 4 }}>{text}</div>
+    <div style={{ ...cardStyle, padding: "11px 14px", borderLeft: `3px solid ${color}` }}>
+      <div style={{ color: C.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.07em" }}>{label}</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginTop: 6 }}>
+        <span style={{ color, fontSize: 22, fontWeight: 950 }}>{value}</span>
+        <span style={{ color: C.textMuted, fontSize: 12 }}>/{total}</span>
+      </div>
+      <div style={{ height: 4, borderRadius: 999, background: C.border, marginTop: 9, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 999, transition: "width 0.4s ease" }} />
+      </div>
     </div>
   );
 }

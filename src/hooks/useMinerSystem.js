@@ -122,6 +122,7 @@ function mapRealtimeDevices(value, timeoutMs = ONLINE_TIMEOUT_MS) {
         temp: toReading(live.temp ?? live.temperature ?? live.bodyTemp ?? device?.temp),
         finger,
         manual_alert: manualAlert,
+        battery: toReading(live.battery ?? device?.battery),
         sim_mode: toBoolean(live.sim_mode ?? live.simMode, false),
       };
     })
@@ -234,19 +235,46 @@ function mapActivityLogs(value) {
 }
 
 // buildStatusLog — builds an activity log entry when a miner transitions between online/offline
+// isConcerningState — true when a miner is in a state worth alarming about if it
+// drops offline (manual alert, no chest contact, SpO2 critical, or body temp high).
+// Used to tell a normal session-end apart from a possible emergency disconnect.
+function isConcerningState(miner, thresholds) {
+  if (!miner || !miner.active) return false;
+  if (miner.manual_alert) return true;
+  if (miner.finger === false) return true;
+  if (getVitalStatus(miner.spo2, "spo2", thresholds) === "CRITICAL") return true;
+  if (getVitalStatus(miner.temp, "temp", thresholds) === "HIGH") return true;
+  return false;
+}
+
+// buildStatusLog — activity log for an online/offline transition. A routine offline is
+// an informational "Session ended"; an offline that happened while a critical condition
+// was active (miner.offlineConcern) is a critical "Device lost during alert".
 function buildStatusLog(miner, previousStatus) {
-  const status = miner.active ? "online" : "offline";
+  if (miner.active) {
+    return {
+      deviceId: miner.id,
+      miner: miner.name,
+      type: "status",
+      status: "online",
+      severity: "info",
+      title: "Device online",
+      detail: `${miner.name} started sending live HR and SpO2 readings.`,
+      timestamp: miner.lastSeen?.getTime?.() || Date.now(),
+    };
+  }
+
+  const concerning = Boolean(miner.offlineConcern);
   return {
     deviceId: miner.id,
     miner: miner.name,
     type: "status",
-    status,
-    severity: status === "online" ? "info" : "warning",
-    title: status === "online" ? "Device online" : "Session ended",
-    detail:
-      status === "online"
-        ? `${miner.name} started sending live HR and SpO2 readings.`
-        : `${miner.name} stopped sending live data${previousStatus ? ` after being ${previousStatus}` : ""}.`,
+    status: "offline",
+    severity: concerning ? "critical" : "info",
+    title: concerning ? "Device lost during alert" : "Session ended",
+    detail: concerning
+      ? `${miner.name} went offline while a critical condition was active — verify the miner immediately.`
+      : `${miner.name} session ended — stopped sending live data${previousStatus ? ` after being ${previousStatus}` : ""}.`,
     timestamp: miner.lastSeen?.getTime?.() || Date.now(),
   };
 }
@@ -335,7 +363,7 @@ export function useMinerSystem(enabled) {
   const [liveData, setLiveData] = useState(initialLiveData);
   const [analyticsData, setAnalyticsData] = useState(initialAnalyticsData);
   const [activityLogs, setActivityLogs] = useState([]);
-  const [thresholds, setThresholds] = useState(stored?.thresholds || DEFAULT_THRESHOLDS);
+  const [thresholds, setThresholds] = useState({ ...DEFAULT_THRESHOLDS, ...(stored?.thresholds || {}) });
   const [pollingInterval, setPollingInterval] = useState(stored?.pollingInterval || 5);
   const [staleSeconds, setStaleSeconds] = useState(stored?.staleSeconds || DEFAULT_STALE_SECONDS);
   const [usingRealtime, setUsingRealtime] = useState(false);
@@ -349,6 +377,7 @@ export function useMinerSystem(enabled) {
   const staleSecondsRef = useRef(staleSeconds);
   const metadataOverridesRef = useRef({});
   const archivedDeviceIdsRef = useRef(new Set());
+  const lastConcernRef = useRef({}); // { deviceId: bool } — concern state at last active reading
 
   useEffect(() => {
     minersRef.current = miners;
@@ -389,11 +418,15 @@ export function useMinerSystem(enabled) {
     staleSecondsRef.current = staleSeconds;
   }, [staleSeconds]);
 
+  // Persist settings locally. When Firebase is the source of truth we deliberately
+  // do NOT cache the live miners array — it would go stale and rewrite on every
+  // reading tick. Only thresholds/timing are cached there. Offline/demo mode keeps
+  // the mock fleet so it survives a reload.
   useEffect(() => {
     localStorage.setItem(
       SYSTEM_STORAGE_KEY,
       JSON.stringify({
-        miners,
+        miners: firebaseConfigured ? undefined : miners,
         thresholds,
         pollingInterval,
         staleSeconds,
@@ -415,12 +448,19 @@ export function useMinerSystem(enabled) {
           return;
         }
 
+        // Carry the "was this concerning when it dropped?" flag onto offline miners,
+        // using the concern recorded at their last active reading.
+        realtimeMiners.forEach((miner) => {
+          miner.offlineConcern = miner.active ? false : Boolean(lastConcernRef.current[miner.id]);
+        });
+
         setUsingRealtime(true);
         setConnectionError("");
         rawSetMiners(realtimeMiners);
         minersRef.current = realtimeMiners;
 
         realtimeMiners.forEach((miner) => {
+          if (miner.active) lastConcernRef.current[miner.id] = isConcerningState(miner, thresholdsRef.current);
           const expectedStatus = miner.active ? "online" : "offline";
           const raw = value?.[miner.id] || {};
           const rawStatus = String(raw.status || "").toLowerCase();
@@ -535,24 +575,23 @@ export function useMinerSystem(enabled) {
 
       if (staleMiners.length === 0) return;
 
-      rawSetMiners((prev) =>
-        prev.map((miner) => {
-          if (!staleMiners.some((stale) => stale.id === miner.id)) return miner;
-          return {
-            ...miner,
-            active: false,
-            status: "offline",
-            stale: true,
-          };
-        }),
-      );
+      const patched = (m) =>
+        staleMiners.some((s) => s.id === m.id)
+          ? { ...m, active: false, status: "offline", stale: true, offlineConcern: isConcerningState(m, thresholdsRef.current) }
+          : m;
+
+      rawSetMiners((prev) => prev.map(patched));
+      // Update the ref immediately so the next interval tick sees active:false
+      // and won't re-emit the same offline event (edge-trigger guard).
+      minersRef.current = minersRef.current.map(patched);
 
       staleMiners.forEach((miner) => {
         previousStatusRef.current[miner.id] = "offline";
         const timestamp = miner.lastSeen?.getTime?.() || Date.now();
         updateDeviceStatus(miner.id, "offline", timestamp).catch(() => {});
-        const event = buildStatusLog({ ...miner, active: false, status: "offline", stale: true }, "online");
-        const key = `${event.type}:${event.deviceId}:${event.status}:${Math.floor(Date.now() / 60000)}`;
+        const offlineMiner = { ...miner, active: false, status: "offline", stale: true, offlineConcern: isConcerningState(miner, thresholdsRef.current) };
+        const event = buildStatusLog(offlineMiner, "online");
+        const key = `${event.type}:${event.deviceId}:${event.status}:${Math.floor(event.timestamp / 60000)}`;
         if (!emittedEventRef.current.has(key)) {
           addEvent(emittedEventRef.current, key);
           writeActivityLog(event).catch(() => {});
