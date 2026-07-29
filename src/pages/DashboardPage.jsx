@@ -49,18 +49,11 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
         />
         <AlertBanner miners={miners} thresholds={thresholds} dismissedAlertIds={dismissedAlertIds} onDismissAlerts={onDismissAlerts} />
 
-        <section className="stagger-1" style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 10 }}>
+        <section className="stagger-1" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <StatCard label="Active Miners" value={activeMiners.length} unit={`/${miners.length}`} color={activeMiners.length ? C.green : C.offline} sub={`${contactCount} with chest contact`} />
           <StatCard label="Avg Heart Rate" value={formatReading(average(activeMiners.map((item) => item.hr)), 0)} unit="bpm" color={C.red} sub={`${thresholds.hrMin}-${thresholds.hrMax} normal range`} />
           <StatCard label="Avg SpO2" value={formatReading(average(activeMiners.map((item) => item.spo2)), 0)} unit="%" color={C.primary} sub={`minimum ${thresholds.spo2Min}%`} />
           <StatCard label="Avg Body Temp" value={formatReading(average(activeMiners.map((item) => item.temp)), 1)} unit="°C" color={C.teal} sub={`${thresholds.tempMin}–${thresholds.tempMax}°C normal`} />
-          {(() => {
-            const battMiners = activeMiners.filter((item) => item.battery > 0);
-            const avgBatt = battMiners.length ? Math.round(average(battMiners.map((item) => item.battery))) : null;
-            const lowCount = miners.filter((item) => item.battery > 0 && item.battery <= (thresholds.batteryMin ?? 20)).length;
-            const battColor = avgBatt === null ? C.offline : avgBatt <= (thresholds.batteryMin ?? 20) ? C.red : avgBatt <= 40 ? C.amber : C.green;
-            return <StatCard label="Avg Battery" value={avgBatt !== null ? avgBatt : "--"} unit="%" color={battColor} sub={lowCount > 0 ? `${lowCount} device${lowCount !== 1 ? "s" : ""} low` : "all levels OK"} />;
-          })()}
           <StatCard label="Warnings" value={alerts.length ? alerts.length : "Clear"} color={alerts.length ? C.amber : C.green} sub="live conditions" />
         </section>
 
@@ -102,7 +95,7 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
                         <span style={{ color: C.textMuted, fontSize: 10 }}>{item.id}</span>
                         <span style={{ color: C.red, fontSize: 10, fontWeight: 900 }}>{item.active ? `${formatReading(item.hr, 0)} bpm` : "--"}</span>
                         <span style={{ color: C.primary, fontSize: 10, fontWeight: 900 }}>{item.active ? `${formatReading(item.spo2, 0)}%` : "--"}</span>
-                        {item.battery > 0 && <span style={{ color: dashBattColor(item.battery), fontSize: 10, fontWeight: 900 }}>{item.battery}%</span>}
+                        <span style={{ color: C.teal, fontSize: 10, fontWeight: 900 }}>{item.active && item.temp > 0 ? `${formatReading(item.temp, 1)}°C` : "--"}</span>
                       </div>
                     </div>
                     <span style={{ color: statusColor, fontSize: 9, fontWeight: 900, letterSpacing: "0.06em", flexShrink: 0 }}>
@@ -146,11 +139,11 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
               <div style={{ minHeight: 180, border: `1px solid ${C.borderSoft}`, borderRadius: 8, background: "#151515", padding: 8, display: "grid" }}>
                 {activeVital && chartData.length ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData} margin={{ top: 12, right: 16, left: -20, bottom: 0 }}>
+                    <LineChart data={chartData} margin={{ top: 12, right: 24, left: 4, bottom: 18 }}>
                       <CartesianGrid stroke={C.borderSoft} vertical={false} />
-                      <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={22} />
-                      <YAxis yAxisId="hr" domain={[40, 140]} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
-                      <YAxis yAxisId="spo2" orientation="right" domain={[85, 100]} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={34} />
+                      <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={22} label={{ value: "Time", fill: C.textMuted, fontSize: 10, position: "insideBottom", offset: -4 }} />
+                      <YAxis yAxisId="hr" domain={[40, 140]} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={42} label={{ value: "bpm", angle: -90, fill: C.textMuted, fontSize: 10, position: "insideLeft" }} />
+                      <YAxis yAxisId="spo2" orientation="right" domain={[85, 100]} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={40} label={{ value: "%", angle: 90, fill: C.textMuted, fontSize: 10, position: "insideRight" }} />
                       <YAxis yAxisId="temp" orientation="right" domain={[34, 42]} hide />
                       <ReferenceLine yAxisId="hr" y={thresholds.hrMax} stroke={C.amber} strokeDasharray="4 4" />
                       <ReferenceLine yAxisId="hr" y={thresholds.hrMin} stroke={C.amber} strokeDasharray="4 4" />
@@ -182,9 +175,8 @@ export default function DashboardPage({ miners, liveData, thresholds, dismissedA
               <VitalCard label="Heart Rate" icon="heart" value={activeVital ? formatReading(miner.hr, 0) : "--"} unit="bpm" color={C.red} status={activeVital ? getVitalStatus(miner.hr, "hr", thresholds) : "OFFLINE"} />
               <VitalCard label="SpO2" icon="droplet" value={activeVital ? formatReading(miner.spo2, 0) : "--"} unit="%" color={C.primary} status={activeVital ? getVitalStatus(miner.spo2, "spo2", thresholds) : "OFFLINE"} />
               <VitalCard label="Body Temp" icon="thermometer" value={activeVital ? formatReading(miner.temp, 1) : "--"} unit="°C" color={C.teal} status={activeVital ? getVitalStatus(miner.temp, "temp", thresholds) : "OFFLINE"} />
-              <VitalCard label="Battery" icon="battery" value={miner?.battery > 0 ? `${miner.battery}` : "--"} unit="%" color={!miner?.battery ? C.offline : miner.battery <= (thresholds.batteryMin ?? 20) ? C.red : miner.battery <= 40 ? C.amber : C.green} status={!miner?.battery ? "OFFLINE" : getVitalStatus(miner.battery, "battery", thresholds) === "LOW" ? "LOW" : "NORMAL"} />
               <VitalCard label="Chest Contact" icon="contact" value={miner?.active ? (miner?.finger === false ? "No" : "Yes") : "--"} color={!miner?.active ? C.offline : miner?.finger === false ? C.amber : C.green} status={!miner?.active ? "OFFLINE" : miner?.finger === false ? "WARNING" : "NORMAL"} />
-              <VitalCard label="Manual Alert" icon="siren" value={miner?.active ? (miner?.manual_alert ? "Active" : "Clear") : "--"} color={!miner?.active ? C.offline : miner?.manual_alert ? C.red : C.green} status={!miner?.active ? "OFFLINE" : miner?.manual_alert ? "CRITICAL" : "NORMAL"} />
+              <VitalCard label="Manual SOS" icon="siren" value={miner?.active ? (miner?.button_pressed || miner?.manual_alert ? "Pressed" : "Clear") : "--"} unit={miner?.active ? `${miner?.button_press_count || 0}x` : ""} color={!miner?.active ? C.offline : miner?.button_pressed || miner?.manual_alert ? C.red : C.green} status={!miner?.active ? "OFFLINE" : miner?.button_pressed || miner?.manual_alert ? "PRESSED" : "NORMAL"} />
               </div>
             </div>
           </main>
@@ -332,12 +324,5 @@ function MinerStatusPill({ miner }) {
       {label}
     </span>
   );
-}
-
-function dashBattColor(pct) {
-  if (!pct || pct <= 0) return C.offline;
-  if (pct <= 20) return C.red;
-  if (pct <= 40) return C.amber;
-  return C.green;
 }
 

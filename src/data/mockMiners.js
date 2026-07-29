@@ -11,5 +11,7 @@ export const MINERS_INIT = [
     temp: 0,
     finger: false,
     manual_alert: false,
+    button_pressed: false,
+    button_press_count: 0,
   },
 ];

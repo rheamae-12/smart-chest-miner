@@ -49,7 +49,7 @@ function isAlertEntry(log) {
 }
 
 function deriveAlertType(log) {
-  if (log.type === "manual_alert") return "Manual Alert";
+  if (log.type === "manual_alert") return "Manual SOS";
   if (log.type === "status") return "Device Offline";
   const t = (log.title || "").toLowerCase();
   if (t.includes("heart rate") || t.includes("hr")) return log.status === "high" ? "High HR" : "Low HR";
@@ -222,7 +222,7 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
           label="IoT Vital Signs Monitoring"
           title="Alert History"
           titleSize={26}
-          subtitle="Full log of all critical and warning events, device offline events, and manual alerts."
+          subtitle="Full log of all critical and warning events, device offline events, and manual SOS alerts."
           right={
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
               <HeaderStat label="Unresolved" value={unresolvedCount} color={unresolvedCount > 0 ? C.red : C.green} />
@@ -353,7 +353,7 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
               <SummaryMetric label="Critical alerts" value={alertLogs.filter((l) => l.severity === "critical").length} color={C.red} />
               <SummaryMetric label="Warning alerts" value={alertLogs.filter((l) => l.severity === "warning").length} color={C.amber} />
               <SummaryMetric label="Device offline" value={alertLogs.filter((l) => l.type === "status").length} color={C.offline} />
-              <SummaryMetric label="Manual alerts" value={alertLogs.filter((l) => l.type === "manual_alert").length} color={C.primary} />
+              <SummaryMetric label="Manual SOS" value={alertLogs.filter((l) => l.type === "manual_alert").length} color={C.primary} />
             </InfoCard>
 
             <InfoCard title="Status Overview">

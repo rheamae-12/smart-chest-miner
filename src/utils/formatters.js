@@ -53,10 +53,12 @@ export function lastSeenValue(miner) {
 // device + same title within 60s) that the system can emit repeatedly (e.g. a
 // device flapping offline). Expects the list sorted newest-first; preserves order.
 export function dedupeConsecutiveLogs(logs) {
-  return (logs || []).filter((log, index, all) => {
-    if (index === 0) return true;
-    const prev = all[index - 1];
-    const timeDiff = Math.abs(Number(log.timestamp || 0) - Number(prev.timestamp || 0));
-    return !(log.deviceId === prev.deviceId && log.title === prev.title && timeDiff < 60_000);
+  const seen = new Set();
+  return (logs || []).filter((log) => {
+    const bucket = Math.floor(Number(log.timestamp || 0) / 60_000);
+    const key = `${log.deviceId}|${log.type}|${log.title}|${log.status}|${bucket}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
 }

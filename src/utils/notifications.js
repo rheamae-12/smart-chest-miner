@@ -8,7 +8,6 @@ export function conditionForAlertId(id = "") {
   if (s.endsWith("-offline")) return "offline";
   if (s.endsWith("-manual")) return "manual";
   if (s.endsWith("-contact")) return "contact";
-  if (s.endsWith("-battery")) return "battery";
   if (s.endsWith("-spo2-low") || s.endsWith("-spo2")) return "spo2";
   if (s.endsWith("-temp-high") || s.endsWith("-temp-low")) return "temp";
   if (s.endsWith("-hr")) return "hr";

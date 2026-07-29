@@ -64,7 +64,7 @@ export default function SensorStatusPage({ miners, activityLogs = [], onClearAct
           label="Sensor diagnostics"
           title="Sensor Status"
           titleSize={26}
-          subtitle="Health of the SpO2 and heart-rate sensors attached to each Smart Chest Miner device."
+          subtitle="Health of the heart-rate, SpO2, and body-temperature sensors attached to each Smart Chest Miner device."
           right={
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <HeaderStat label="Active miners" value={`${active}/${miners.length}`} color={C.green} />
@@ -74,12 +74,11 @@ export default function SensorStatusPage({ miners, activityLogs = [], onClearAct
         />
 
         {/* Signal integrity — per-sensor-type roll-up as a visual stat strip */}
-        <section className="cc-vitals" style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 10 }}>
+        <section className="cc-vitals" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <IntegrityTile label="HR Sensors" value={miners.filter((m) => m.active && m.hr > 0).length} total={miners.length} color={C.red} />
           <IntegrityTile label="SpO2 Sensors" value={miners.filter((m) => m.active && m.spo2 > 0).length} total={miners.length} color={C.primary} />
           <IntegrityTile label="Temp Sensors" value={miners.filter((m) => m.active && m.temp > 0).length} total={miners.length} color={C.teal} />
           <IntegrityTile label="Chest Contact" value={miners.filter((m) => m.active && m.finger !== false).length} total={miners.length} color={C.green} />
-          <IntegrityTile label="Battery OK" value={miners.filter((m) => m.battery > 20).length} total={miners.length} color={miners.some((m) => m.battery > 0 && m.battery <= 20) ? C.amber : C.green} />
           <IntegrityTile label="Offline" value={miners.filter((m) => !m.active).length} total={miners.length} color={miners.some((m) => !m.active) ? C.offline : C.green} />
         </section>
 
@@ -169,8 +168,8 @@ function SensorNode({ miner }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginTop: 12 }}>
         <SensorMetric label="Heart-rate sensor" value={miner.active ? `${formatReading(miner.hr, 0)} bpm` : "--"} color={miner.active && miner.hr > 0 ? C.red : C.offline} state={miner.active && miner.hr > 0 ? "Reading" : "No signal"} />
         <SensorMetric label="SpO2 sensor" value={miner.active ? `${formatReading(miner.spo2, 0)}%` : "--"} color={miner.active && miner.spo2 > 0 ? C.primary : C.offline} state={miner.active && miner.spo2 > 0 ? "Reading" : "No signal"} />
+        <SensorMetric label="Manual SOS" value={miner.active ? (miner.button_pressed || miner.manual_alert ? "Pressed" : "Clear") : "--"} color={miner.active && (miner.button_pressed || miner.manual_alert) ? C.red : miner.active ? C.green : C.offline} state={miner.active ? `${miner.button_press_count || 0} presses` : "No signal"} />
         <SensorMetric label="Body temp sensor" value={miner.active ? `${formatReading(miner.temp, 1)}°C` : "--"} color={miner.active && miner.temp > 0 ? C.teal : C.offline} state={miner.active && miner.temp > 0 ? "Reading" : "No signal"} />
-        <SensorMetric label="Battery" value={miner.battery > 0 ? `${miner.battery}%` : "--"} color={batteryNodeColor(miner.battery)} state={miner.battery > 0 ? (miner.battery <= 20 ? "Low" : "OK") : "Unknown"} />
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, color: C.textMuted, fontSize: 11 }}>
         <span>Contact: <b style={{ color: miner.finger === false ? C.amber : miner.active ? C.green : C.offline }}>{miner.finger === false ? "Missing" : miner.active ? "Valid" : "Offline"}</b></span>
@@ -189,14 +188,6 @@ function SensorMetric({ label, value, color, state }) {
       <div style={{ color, fontSize: 10, fontWeight: 900, marginTop: 5 }}>{state}</div>
     </div>
   );
-}
-
-// batteryNodeColor — maps battery % to a color for the sensor node card
-function batteryNodeColor(pct) {
-  if (!pct || pct <= 0) return C.offline;
-  if (pct <= 20) return C.red;
-  if (pct <= 40) return C.amber;
-  return C.green;
 }
 
 // EventRow — single row in the Miner Activity Records log table

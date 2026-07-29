@@ -4,18 +4,18 @@ import Modal from "../components/Modal";
 import PageHeader from "../components/PageHeader";
 import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
 import { DEFAULT_THRESHOLDS } from "../utils/alertChecker";
-import { average, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
+import { average, compactTimestamp, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 
 const SESSION_GAP_MS = 3 * 60 * 1000;
 
-export default function HealthLogsPage({ miners, analyticsData, activityLogs = [], thresholds = DEFAULT_THRESHOLDS, onClearHealthLogs }) {
+export default function HealthLogsPage({ miners, analyticsData, liveData = {}, activityLogs = [], thresholds = DEFAULT_THRESHOLDS, onClearHealthLogs }) {
   const [selected, setSelected] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [clearOpen, setClearOpen] = useState(false);
   const [clearError, setClearError] = useState("");
   const [clearing, setClearing] = useState(false);
-  const sortedMiners = useMemo(() => [...miners].sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)), [miners]);
+  const sortedMiners = useMemo(() => buildMinerOptions(miners, analyticsData, liveData), [analyticsData, liveData, miners]);
   // One miner is always selected (defaults to the first) — no "all" aggregate view.
   const selectedId = sortedMiners.some((miner) => miner.id === selected) ? selected : (sortedMiners[0]?.id || "");
   const visibleMiners = useMemo(() => sortedMiners.filter((miner) => miner.id === selectedId), [sortedMiners, selectedId]);
@@ -25,10 +25,11 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
     start: dateFrom ? new Date(dateFrom).getTime() : null,
     end: dateTo ? new Date(dateTo).getTime() : null,
   }), [dateFrom, dateTo]);
+  const combinedAnalytics = useMemo(() => mergeAnalyticsWithLive(sortedMiners, analyticsData, liveData), [analyticsData, liveData, sortedMiners]);
   const scopedAnalytics = useMemo(() => {
-    if (!dateRange.start && !dateRange.end) return analyticsData;
+    if (!dateRange.start && !dateRange.end) return combinedAnalytics;
     const out = {};
-    Object.entries(analyticsData || {}).forEach(([id, rows]) => {
+    Object.entries(combinedAnalytics || {}).forEach(([id, rows]) => {
       out[id] = (rows || []).filter((row) => {
         const t = Number(row.timestamp || 0);
         if (dateRange.start && t < dateRange.start) return false;
@@ -37,7 +38,7 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
       });
     });
     return out;
-  }, [analyticsData, dateRange]);
+  }, [combinedAnalytics, dateRange]);
 
   const sessions = useMemo(() => buildSessions(visibleMiners, scopedAnalytics, activityLogs, thresholds), [activityLogs, scopedAnalytics, thresholds, visibleMiners]);
   const chartData = useMemo(() => buildChartData(visibleMiners, scopedAnalytics), [scopedAnalytics, visibleMiners]);
@@ -84,7 +85,7 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
           label="Miner health records"
           title="Health Logs"
           titleSize={26}
-          subtitle="Session history, start and end time, readings, status, and manual alert events."
+          subtitle="Session history, start and end time, readings, status, and manual SOS events."
           right={
             <>
               <FilterLabel text="Miner">
@@ -112,7 +113,7 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
 
         <section style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <Summary label="Sessions" value={sessions.length} color={C.primary} />
-          <Summary label="Manual Alerts" value={manualAlerts} color={manualAlerts ? C.red : C.green} />
+          <Summary label="Manual SOS" value={manualAlerts} color={manualAlerts ? C.red : C.green} />
           <Summary label="Healthy Miners" value={visibleMiners.length - unhealthy} unit={`/${visibleMiners.length}`} color={unhealthy ? C.amber : C.green} />
           <Summary label="Readings Logged" value={chartData.length} color={C.amber} />
           <Summary label="Avg Body Temp" value={formatReading(average(chartData.map((row) => row.temp).filter(Boolean)), 1)} unit="°C" color={C.teal} />
@@ -120,9 +121,9 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
 
         <section style={{ display: "grid", gridTemplateRows: "220px minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
             <div className="cc-vitals" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, minHeight: 0 }}>
-              <SensorChart data={chartData} dataKey="hr" name="Heart Rate" unit="bpm" color={C.red} digits={0} />
-              <SensorChart data={chartData} dataKey="spo2" name="SpO2" unit="%" color={C.primary} domain={[80, 100]} digits={0} />
-              <SensorChart data={chartData} dataKey="temp" name="Body Temp" unit="°C" color={C.teal} domain={[34, 42]} digits={1} />
+              <SensorChart data={chartData} dataKey="hr" name="Heart Rate" unit="bpm" color={C.red} digits={0} yLabel="bpm" />
+              <SensorChart data={chartData} dataKey="spo2" name="SpO2" unit="%" color={C.primary} domain={[80, 100]} digits={0} yLabel="%" />
+              <SensorChart data={chartData} dataKey="temp" name="Body Temp" unit="°C" color={C.teal} domain={dynamicDomain(chartData, "temp", 0.4)} digits={1} yLabel="°C" />
             </div>
 
             <div style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
@@ -148,7 +149,7 @@ export default function HealthLogsPage({ miners, analyticsData, activityLogs = [
                   <span>Avg Temp</span>
                   <span>Status</span>
                   <span>Press Count</span>
-                  <span>Manual Alert</span>
+                  <span>Manual SOS</span>
                   <span>Sensor Spike</span>
                 </div>
                 {sessions.map((session) => (
@@ -183,7 +184,8 @@ function buildSessions(miners, analyticsData, activityLogs, thresholds) {
   return miners.flatMap((miner) => {
     const rows = [...(analyticsData[miner.id] || [])]
       .filter((row) => Number(row.timestamp) > 0)
-      .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+      .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
+      .filter((row, index, all) => index === 0 || Number(row.timestamp || 0) !== Number(all[index - 1].timestamp || 0));
 
     if (rows.length === 0) return [];
 
@@ -245,15 +247,121 @@ function sessionSortValue(session) {
 }
 
 function countManualPresses(miner, rows, activityLogs, startTimestamp, endTimestamp, includeLive) {
-  const analyticsPresses = rows.filter((row) => row.manual_alert).length;
+  const buttonCounts = uniquePressCounts(rows);
+  const liveCount = includeLive ? Number(miner.button_press_count || miner.buttonPressCount || 0) : 0;
+  const maxCount = Math.max(...buttonCounts, liveCount, 0);
+  const minCount = Math.min(...buttonCounts, maxCount);
+  const firstCountIsPress = rows.some((row) => {
+    const count = Number(row.button_press_count ?? row.buttonPressCount ?? 0);
+    return count === minCount && count > 0 && (row.button_pressed || row.manual_alert);
+  });
+  const counterPresses = buttonCounts.length
+    ? Math.max(0, maxCount - minCount + (firstCountIsPress ? 1 : 0))
+    : 0;
+  const analyticsPresses = rows.filter((row, index, all) => {
+    const pressed = row.button_pressed || row.manual_alert;
+    if (!pressed) return false;
+    const previous = all[index - 1];
+    return !(previous?.button_pressed || previous?.manual_alert);
+  }).length;
   const logPresses = activityLogs.filter((log) => {
     const timestamp = Number(log.timestamp || 0);
-    const isManual = log.type === "manual_alert" || /manual alert/i.test(`${log.title} ${log.detail}`);
+    const isManual = log.type === "manual_alert" || /manual alert|button pressed|sos/i.test(`${log.title} ${log.detail}`);
     const inSession = !startTimestamp || (timestamp >= startTimestamp && timestamp <= endTimestamp + SESSION_GAP_MS);
     return log.deviceId === miner.id && isManual && inSession;
   }).length;
-  const livePress = includeLive && miner.manual_alert ? 1 : 0;
-  return Math.max(analyticsPresses + livePress, logPresses);
+  const livePress = includeLive && (miner.button_pressed || miner.manual_alert) ? 1 : 0;
+  return Math.max(counterPresses, analyticsPresses + livePress, logPresses);
+}
+
+function uniquePressCounts(rows) {
+  return [...new Set(
+    rows
+      .map((row) => Number(row.button_press_count ?? row.buttonPressCount ?? 0))
+      .filter((count) => Number.isFinite(count) && count > 0),
+  )].sort((a, b) => a - b);
+}
+
+function buildMinerOptions(miners, analyticsData, liveData) {
+  const byId = new Map(miners.map((miner) => [miner.id, miner]));
+  [...Object.keys(analyticsData || {}), ...Object.keys(liveData || {})].forEach((id) => {
+    if (!id || byId.has(id)) return;
+    const rows = analyticsData[id] || [];
+    const latest = rows[rows.length - 1] || {};
+    byId.set(id, {
+      id,
+      name: latest.miner || id,
+      location: "Historical",
+      active: false,
+      status: "offline",
+      lastSeen: latest.timestamp ? new Date(latest.timestamp) : null,
+      hr: latest.hr || 0,
+      spo2: latest.spo2 || 0,
+      temp: latest.temp || 0,
+      finger: latest.finger ?? true,
+      manual_alert: latest.manual_alert ?? false,
+      button_pressed: latest.button_pressed ?? false,
+      button_press_count: latest.button_press_count ?? 0,
+    });
+  });
+  return Array.from(byId.values()).sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id));
+}
+
+function mergeAnalyticsWithLive(miners, analyticsData, liveData) {
+  const merged = { ...(analyticsData || {}) };
+  miners.forEach((miner) => {
+    const rows = [...(merged[miner.id] || []), ...liveRowsForMiner(miner, liveData[miner.id] || {})];
+    const current = liveRowFromMiner(miner);
+    if (current) rows.push(current);
+    merged[miner.id] = dedupeRows(rows).sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+  });
+  return merged;
+}
+
+function liveRowsForMiner(miner, series) {
+  const byTimestamp = new Map();
+  ["hr", "spo2", "temp"].forEach((key) => {
+    (series[key] || []).forEach((point) => {
+      const timestamp = Number(point.timestamp || 0);
+      if (!timestamp) return;
+      const row = byTimestamp.get(timestamp) || {
+        minerId: miner.id,
+        miner: miner.name,
+        timestamp,
+        time: point.time || compactTimestamp(timestamp),
+      };
+      row[key] = Number(point[key]) || null;
+      byTimestamp.set(timestamp, row);
+    });
+  });
+  return Array.from(byTimestamp.values());
+}
+
+function liveRowFromMiner(miner) {
+  const timestamp = lastSeenValue(miner);
+  if (!miner.active || timestamp <= 0 || (!miner.hr && !miner.spo2 && !miner.temp && !miner.manual_alert && !miner.button_pressed)) return null;
+  return {
+    minerId: miner.id,
+    miner: miner.name,
+    timestamp,
+    time: compactTimestamp(timestamp),
+    hr: Number(miner.hr) || null,
+    spo2: Number(miner.spo2) || null,
+    temp: Number(miner.temp) || null,
+    manual_alert: miner.manual_alert,
+    button_pressed: miner.button_pressed,
+    button_press_count: miner.button_press_count,
+  };
+}
+
+function dedupeRows(rows) {
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = Number(row.timestamp || 0);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function detectSensorSpike(miner, rows, thresholds) {
@@ -325,7 +433,7 @@ function PanelHeader({ title, meta }) {
 
 // SensorChart — single-sensor trend (small multiple). Shows that sensor's average
 // over the selected range plus a filled area chart for just that reading.
-function SensorChart({ data, dataKey, name, unit, color, domain, digits = 0 }) {
+function SensorChart({ data, dataKey, name, unit, color, domain, digits = 0, yLabel = "" }) {
   const valid = (data || []).filter((row) => Number(row[dataKey]) > 0);
   const avg = valid.length ? average(valid.map((row) => Number(row[dataKey]))) : null;
   const gradientId = `sensor-${dataKey}`;
@@ -344,7 +452,7 @@ function SensorChart({ data, dataKey, name, unit, color, domain, digits = 0 }) {
       <div style={{ minHeight: 0, border: `1px solid ${C.borderSoft}`, borderRadius: 8, background: "#151515", padding: 6 }}>
         {valid.length ? (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 6, right: 8, left: -22, bottom: 0 }}>
+            <AreaChart data={data} margin={{ top: 8, right: 10, left: 2, bottom: 18 }}>
               <defs>
                 <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={color} stopOpacity={0.32} />
@@ -352,8 +460,24 @@ function SensorChart({ data, dataKey, name, unit, color, domain, digits = 0 }) {
                 </linearGradient>
               </defs>
               <CartesianGrid stroke={C.borderSoft} vertical={false} />
-              <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 9 }} axisLine={false} tickLine={false} minTickGap={34} interval="preserveStartEnd" height={16} />
-              <YAxis domain={domain || ["auto", "auto"]} tick={{ fill: C.textMuted, fontSize: 9 }} axisLine={false} tickLine={false} width={28} />
+              <XAxis
+                dataKey="time"
+                tick={{ fill: C.textMuted, fontSize: 9 }}
+                axisLine={false}
+                tickLine={false}
+                minTickGap={34}
+                interval="preserveStartEnd"
+                height={28}
+                label={{ value: "Time", fill: C.textMuted, fontSize: 9, position: "insideBottom", offset: -4 }}
+              />
+              <YAxis
+                domain={domain || ["auto", "auto"]}
+                tick={{ fill: C.textMuted, fontSize: 9 }}
+                axisLine={false}
+                tickLine={false}
+                width={34}
+                label={{ value: yLabel, angle: -90, fill: C.textMuted, fontSize: 9, position: "insideLeft" }}
+              />
               <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
               <Area type="monotone" dataKey={dataKey} name={name} stroke={color} fill={`url(#${gradientId})`} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
             </AreaChart>
@@ -364,6 +488,15 @@ function SensorChart({ data, dataKey, name, unit, color, domain, digits = 0 }) {
       </div>
     </div>
   );
+}
+
+function dynamicDomain(data, key, padding = 1) {
+  const values = (data || []).map((row) => Number(row[key])).filter((value) => Number.isFinite(value) && value > 0);
+  if (!values.length) return ["auto", "auto"];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (min === max) return [Number((min - padding).toFixed(1)), Number((max + padding).toFixed(1))];
+  return [Number((min - padding).toFixed(1)), Number((max + padding).toFixed(1))];
 }
 
 function StatusText({ session }) {

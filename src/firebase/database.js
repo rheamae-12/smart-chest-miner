@@ -263,6 +263,8 @@ export async function registerDevice(device) {
       timestamp: Number(device.lastSeen) || 0,
       finger: device.finger ?? false,
       manual_alert: device.manual_alert ?? false,
+      button_pressed: device.button_pressed ?? false,
+      button_press_count: device.button_press_count ?? 0,
       sim_mode: false,
     },
   };
@@ -304,6 +306,8 @@ export async function updateDeviceStatus(deviceId, status, lastSeen = Date.now()
         timestamp: lastSeenMs,
         finger: false,
         manual_alert: false,
+        button_pressed: false,
+        button_press_count: 0,
         sim_mode: false,
         offlineAt: Date.now(),
       },
@@ -339,6 +343,8 @@ export async function removeDevice(deviceId) {
       timestamp,
       finger: false,
       manual_alert: false,
+      button_pressed: false,
+      button_press_count: 0,
       sim_mode: false,
       offlineAt: timestamp,
     },
@@ -387,6 +393,8 @@ export async function clearActivityLogs() {
 export async function clearHealthLogs() {
   return updateMultiPath({
     analytics: null,
+    healthLogs: null,
+    miningSessions: null,
   });
 }
 
@@ -434,4 +442,20 @@ export async function writeAnalyticsSnapshot(deviceId, avgHR, avgSpo2, avgTemp) 
     timestamp,
   });
   return true;
+}
+
+export async function saveHistorySummaries(deviceId, healthLogs = {}, miningSessions = {}) {
+  if (!deviceId) return false;
+  const updates = {};
+
+  Object.entries(healthLogs || {}).forEach(([id, payload]) => {
+    updates[`healthLogs/${deviceId}/${id}`] = payload;
+  });
+
+  Object.entries(miningSessions || {}).forEach(([id, payload]) => {
+    updates[`miningSessions/${deviceId}/${id}`] = payload;
+  });
+
+  if (Object.keys(updates).length === 0) return true;
+  return updateMultiPath(updates);
 }

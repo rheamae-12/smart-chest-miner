@@ -5,11 +5,14 @@ import { C, cardStyle, controlStyle, pageStyle } from "../theme";
 import { average, compactTimestamp, dedupeConsecutiveLogs, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 
 // AnalyticsPage — trend charts and miner comparison for HR, SpO2, and body temperature analytics
-export default function AnalyticsPage({ miners, analyticsData, activityLogs = [] }) {
+export default function AnalyticsPage({ miners, analyticsData, liveData = {}, activityLogs = [] }) {
   const [filter, setFilter] = useState({ miner: "all", range: "24H", bucket: "1" });
-  const sortedMiners = useMemo(() => [...miners].sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)), [miners]);
-  const visibleMiners = filter.miner === "all" ? sortedMiners : sortedMiners.filter((miner) => miner.id === filter.miner);
-  const rows = useMemo(() => buildRows(visibleMiners, analyticsData, filter.range), [analyticsData, filter.range, visibleMiners]);
+  const sortedMiners = useMemo(() => buildMinerOptions(miners, analyticsData, liveData), [analyticsData, liveData, miners]);
+  const visibleMiners = useMemo(
+    () => (filter.miner === "all" ? sortedMiners : sortedMiners.filter((miner) => miner.id === filter.miner)),
+    [filter.miner, sortedMiners],
+  );
+  const rows = useMemo(() => buildRows(visibleMiners, analyticsData, liveData, filter.range), [analyticsData, liveData, filter.range, visibleMiners]);
   const chartData = useMemo(() => bucketRows(rows, Number(filter.bucket)), [filter.bucket, rows]);
   const logs = useMemo(() => buildActivityLogEntries(activityLogs, filter.miner), [activityLogs, filter.miner]);
 
@@ -20,7 +23,7 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
           label="Sensor analytics"
           title="Reading Trends"
           titleSize={26}
-          subtitle="Filter HR and SpO2 readings by miner and readings-per-minute interval."
+          subtitle="Filter HR, SpO2, and body temperature readings by miner and interval."
           right={
             <>
               <Select label="Miner" value={filter.miner} onChange={(miner) => setFilter({ ...filter, miner })}>
@@ -67,7 +70,7 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
               <div style={{ minHeight: 0, borderRadius: 8, border: `1px solid ${C.borderSoft}`, background: "#151515", padding: 8 }}>
                 {chartData.length ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={chartData} margin={{ top: 12, right: 44, left: -18, bottom: 0 }}>
+                    <ComposedChart data={chartData} margin={{ top: 12, right: 52, left: 4, bottom: 18 }}>
                       <defs>
                         <linearGradient id="analyticsHr" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor={C.red} stopOpacity={0.22} />
@@ -75,9 +78,9 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
                         </linearGradient>
                       </defs>
                       <CartesianGrid stroke={C.borderSoft} vertical={false} />
-                      <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={26} />
-                      <YAxis yAxisId="vital" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
-                      <YAxis yAxisId="temp" orientation="right" domain={[34, 42]} tick={{ fill: C.teal, fontSize: 10 }} axisLine={false} tickLine={false} width={38} unit="°C" />
+                      <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={26} label={{ value: "Time", fill: C.textMuted, fontSize: 10, position: "insideBottom", offset: -4 }} />
+                      <YAxis yAxisId="vital" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={42} label={{ value: "bpm / %", angle: -90, fill: C.textMuted, fontSize: 10, position: "insideLeft" }} />
+                      <YAxis yAxisId="temp" orientation="right" domain={dynamicDomain(chartData, "temp", 0.4)} tick={{ fill: C.teal, fontSize: 10 }} axisLine={false} tickLine={false} width={46} unit="°C" label={{ value: "°C", angle: 90, fill: C.teal, fontSize: 10, position: "insideRight" }} />
                       <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
                       <Area yAxisId="vital" type="monotone" dataKey="hr" name="Heart Rate" stroke={C.red} fill="url(#analyticsHr)" strokeWidth={2.2} dot={false} isAnimationActive={false} />
                       <Area yAxisId="vital" type="monotone" dataKey="spo2" name="SpO2" stroke={C.primary} fill="transparent" strokeWidth={2} dot={false} isAnimationActive={false} />
@@ -129,15 +132,89 @@ export default function AnalyticsPage({ miners, analyticsData, activityLogs = []
 }
 
 // buildRows — flattens per-miner analyticsData into a flat array filtered by time range
-function buildRows(miners, analyticsData, range) {
+function buildRows(miners, analyticsData, liveData, range) {
   const start = getRangeStart(range);
-  return miners
-    .flatMap((miner) =>
-      (analyticsData[miner.id] || [])
+  const rows = miners
+    .flatMap((miner) => {
+      const storedRows = (analyticsData[miner.id] || [])
         .filter((point) => !start || Number(point.timestamp || 0) >= start)
-        .map((point) => ({ ...point, minerId: miner.id, miner: miner.name })),
-    )
+        .map((point) => ({ ...point, minerId: miner.id, miner: miner.name, source: "analytics" }));
+      const liveRows = liveRowsForMiner(miner, liveData[miner.id] || {})
+        .filter((point) => !start || Number(point.timestamp || 0) >= start);
+      const currentRow = liveRowFromMiner(miner);
+      return [...storedRows, ...liveRows, ...(currentRow && (!start || currentRow.timestamp >= start) ? [currentRow] : [])];
+    })
     .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+  return dedupeRows(rows);
+}
+
+function buildMinerOptions(miners, analyticsData, liveData) {
+  const byId = new Map(miners.map((miner) => [miner.id, miner]));
+  [...Object.keys(analyticsData || {}), ...Object.keys(liveData || {})].forEach((id) => {
+    if (!id || byId.has(id)) return;
+    const rows = analyticsData[id] || [];
+    const latest = rows[rows.length - 1] || {};
+    byId.set(id, {
+      id,
+      name: latest.miner || id,
+      location: "Historical",
+      active: false,
+      status: "offline",
+      lastSeen: latest.timestamp ? new Date(latest.timestamp) : null,
+      hr: latest.hr || 0,
+      spo2: latest.spo2 || 0,
+      temp: latest.temp || 0,
+    });
+  });
+  return Array.from(byId.values()).sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id));
+}
+
+function liveRowsForMiner(miner, series) {
+  const byTimestamp = new Map();
+  ["hr", "spo2", "temp"].forEach((key) => {
+    (series[key] || []).forEach((point) => {
+      const timestamp = Number(point.timestamp || 0);
+      if (!timestamp) return;
+      const row = byTimestamp.get(timestamp) || {
+        minerId: miner.id,
+        miner: miner.name,
+        timestamp,
+        time: point.time || compactTimestamp(timestamp),
+        source: "live",
+      };
+      row[key] = Number(point[key]) || null;
+      byTimestamp.set(timestamp, row);
+    });
+  });
+  return Array.from(byTimestamp.values());
+}
+
+function liveRowFromMiner(miner) {
+  const timestamp = lastSeenValue(miner);
+  if (!miner.active || timestamp <= 0 || (!miner.hr && !miner.spo2 && !miner.temp)) return null;
+  return {
+    minerId: miner.id,
+    miner: miner.name,
+    timestamp,
+    time: compactTimestamp(timestamp),
+    hr: Number(miner.hr) || null,
+    spo2: Number(miner.spo2) || null,
+    temp: Number(miner.temp) || null,
+    manual_alert: miner.manual_alert,
+    button_pressed: miner.button_pressed,
+    button_press_count: miner.button_press_count,
+    source: "current",
+  };
+}
+
+function dedupeRows(rows) {
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = `${row.minerId}|${Number(row.timestamp || 0)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // bucketRows — aggregates flat rows into time buckets of N minutes, averaging HR/SpO2/temp per bucket
@@ -166,6 +243,14 @@ function bucketRows(rows, minutes) {
 }
 
 // getRangeStart — returns a Unix ms timestamp for the start of the selected range (or 0 for all-time)
+function dynamicDomain(data, key, padding = 1) {
+  const values = (data || []).map((row) => Number(row[key])).filter((value) => Number.isFinite(value) && value > 0);
+  if (!values.length) return ["auto", "auto"];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return [Number((min - padding).toFixed(1)), Number((max + padding).toFixed(1))];
+}
+
 function getRangeStart(range) {
   const now = Date.now();
   if (range === "30M") return now - 30 * 60 * 1000;
@@ -269,6 +354,6 @@ function ActivityLog({ log }) {
 
 // EmptyState — shown inside the chart area when the selected filter returns no data points
 function EmptyState() {
-  return <div style={{ height: "100%", display: "grid", placeItems: "center", color: C.textMuted, fontSize: 13 }}>No valid HR or SpO2 analytics for this filter yet.</div>;
+  return <div style={{ height: "100%", display: "grid", placeItems: "center", color: C.textMuted, fontSize: 13 }}>No valid analytics for this filter yet.</div>;
 }
 

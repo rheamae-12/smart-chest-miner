@@ -201,15 +201,13 @@ function MinerHeader({ miner }) {
 
 function VitalsRow({ miner, thresholds }) {
   const live = miner.active && miner.finger !== false;
-  const battColor = !miner.battery ? C.offline : miner.battery <= (thresholds?.batteryMin ?? 20) ? C.red : miner.battery <= 40 ? C.amber : C.green;
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 10 }} className="cc-vitals">
       <VitalTile label="Heart Rate" icon="heart" value={live ? formatReading(miner.hr, 0) : "--"} unit="bpm" color={C.red} status={live ? getVitalStatus(miner.hr, "hr", thresholds) : "OFFLINE"} />
       <VitalTile label="SpO2" icon="droplet" value={live ? formatReading(miner.spo2, 0) : "--"} unit="%" color={C.primary} status={live ? getVitalStatus(miner.spo2, "spo2", thresholds) : "OFFLINE"} />
       <VitalTile label="Body Temp" icon="thermometer" value={live ? formatReading(miner.temp, 1) : "--"} unit="°C" color={C.teal} status={live ? getVitalStatus(miner.temp, "temp", thresholds) : "OFFLINE"} />
-      <VitalTile label="Battery" icon="battery" value={miner.battery > 0 ? `${miner.battery}` : "--"} unit="%" color={battColor} status={!miner.battery ? "OFFLINE" : miner.battery <= (thresholds?.batteryMin ?? 20) ? "LOW" : "NORMAL"} />
       <VitalTile label="Chest Contact" icon="contact" value={miner.active ? (miner.finger === false ? "No" : "Yes") : "--"} color={!miner.active ? C.offline : miner.finger === false ? C.amber : C.green} status={!miner.active ? "OFFLINE" : miner.finger === false ? "WARNING" : "NORMAL"} />
-      <VitalTile label="Manual Alert" icon="siren" value={miner.active ? (miner.manual_alert ? "Active" : "Clear") : "--"} color={!miner.active ? C.offline : miner.manual_alert ? C.red : C.green} status={!miner.active ? "OFFLINE" : miner.manual_alert ? "CRITICAL" : "NORMAL"} />
+      <VitalTile label="Manual SOS" icon="siren" value={miner.active ? (miner.button_pressed || miner.manual_alert ? "Pressed" : "Clear") : "--"} unit={miner.active ? `${miner.button_press_count || 0}x` : ""} color={!miner.active ? C.offline : miner.button_pressed || miner.manual_alert ? C.red : C.green} status={!miner.active ? "OFFLINE" : miner.button_pressed || miner.manual_alert ? "PRESSED" : "NORMAL"} />
     </div>
   );
 }
@@ -238,7 +236,7 @@ function VitalTile({ label, value, unit, color, status, icon }) {
 function OverviewTab({ miner, liveData, thresholds }) {
   const chartData = useMemo(() => mergeLiveSeries(liveData[miner.id] || { hr: [], spo2: [], temp: [] }), [liveData, miner.id]);
   const live = miner.active && miner.finger !== false;
-  const hasData = live && chartData.some((d) => d.hr != null || d.spo2 != null);
+  const hasData = live && chartData.some((d) => d.hr != null || d.spo2 != null || d.temp != null);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 240px", gap: 14, height: "100%", minHeight: 0 }} className="cc-overview">
@@ -246,15 +244,17 @@ function OverviewTab({ miner, liveData, thresholds }) {
         <div style={{ color: C.text, fontSize: 14, fontWeight: 950, marginBottom: 10 }}>Live Readings</div>
         {hasData ? (
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={chartData} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
+            <LineChart data={chartData} margin={{ top: 8, right: 22, left: 4, bottom: 18 }}>
               <CartesianGrid stroke={C.borderSoft} strokeDasharray="3 6" vertical={false} />
-              <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={28} />
-              <YAxis yAxisId="hr" domain={[40, 140]} tick={{ fill: C.red, fontSize: 10 }} axisLine={false} tickLine={false} width={34} />
-              <YAxis yAxisId="spo2" orientation="right" domain={[80, 100]} tick={{ fill: C.primary, fontSize: 10 }} axisLine={false} tickLine={false} width={30} />
+              <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={28} label={{ value: "Time", fill: C.textMuted, fontSize: 10, position: "insideBottom", offset: -4 }} />
+              <YAxis yAxisId="hr" domain={[40, 140]} tick={{ fill: C.red, fontSize: 10 }} axisLine={false} tickLine={false} width={42} label={{ value: "bpm", angle: -90, fill: C.red, fontSize: 10, position: "insideLeft" }} />
+              <YAxis yAxisId="spo2" orientation="right" domain={[80, 100]} tick={{ fill: C.primary, fontSize: 10 }} axisLine={false} tickLine={false} width={38} label={{ value: "%", angle: 90, fill: C.primary, fontSize: 10, position: "insideRight" }} />
+              <YAxis yAxisId="temp" orientation="right" domain={[34, 42]} hide />
               <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
-              <ReferenceLine yAxisId="spo2" y={thresholds?.spo2Min ?? 94} stroke={C.amber} strokeDasharray="4 4" strokeOpacity={0.5} />
+              <ReferenceLine yAxisId="spo2" y={thresholds?.spo2Min ?? 80} stroke={C.amber} strokeDasharray="4 4" strokeOpacity={0.5} />
               <Line yAxisId="hr" type="monotone" dataKey="hr" name="HR" stroke={C.red} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
               <Line yAxisId="spo2" type="monotone" dataKey="spo2" name="SpO2" stroke={C.primary} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="temp" type="monotone" dataKey="temp" name="Body Temp" stroke={C.teal} strokeWidth={1.8} dot={false} isAnimationActive={false} connectNulls />
             </LineChart>
           </ResponsiveContainer>
         ) : (
@@ -267,8 +267,8 @@ function OverviewTab({ miner, liveData, thresholds }) {
         <div style={{ color: C.text, fontSize: 13, fontWeight: 950, marginBottom: 2 }}>Status</div>
         <Indicator color={miner.active ? C.green : C.offline} label={miner.active ? "Readings online" : "Readings offline"} />
         <Indicator color={!miner.active ? C.offline : miner.finger === false ? C.amber : C.green} label={!miner.active ? "Chest contact offline" : miner.finger === false ? "Chest contact missing" : "Chest contact normal"} />
-        <Indicator color={!miner.active ? C.offline : miner.manual_alert ? C.red : C.green} label={!miner.active ? "Manual alert offline" : miner.manual_alert ? "Manual alert pressed" : "Manual alert clear"} />
-        <Indicator color={!miner.battery ? C.offline : miner.battery <= 20 ? C.red : miner.battery <= 40 ? C.amber : C.green} label={!miner.battery ? "Battery unknown" : `Battery ${miner.battery}%`} />
+        <Indicator color={!miner.active ? C.offline : miner.button_pressed || miner.manual_alert ? C.red : C.green} label={!miner.active ? "Manual SOS offline" : miner.button_pressed || miner.manual_alert ? `Manual SOS pressed (${miner.button_press_count || 0} total)` : `Manual SOS clear (${miner.button_press_count || 0} total)`} />
+        <Indicator color={!miner.active ? C.offline : miner.temp > 0 ? C.teal : C.amber} label={!miner.active ? "Body temp offline" : miner.temp > 0 ? `Body temp ${formatReading(miner.temp, 1)}°C` : "Body temp waiting"} />
       </div>
     </div>
   );
@@ -307,6 +307,7 @@ function SignalTab({ miner }) {
     { label: "Chest contact", value: miner.finger === false ? "Not detected" : miner.active ? "Detected" : "—", good: miner.active && miner.finger !== false },
     { label: "Heart-rate sensor", value: miner.active ? (miner.hr > 0 ? "Reporting" : "No reading") : "—", good: miner.active && miner.hr > 0 },
     { label: "SpO2 sensor", value: miner.active ? (miner.spo2 > 0 ? "Reporting" : "No reading") : "—", good: miner.active && miner.spo2 > 0 },
+    { label: "Body-temp sensor", value: miner.active ? (miner.temp > 0 ? "Reporting" : "No reading") : "—", good: miner.active && miner.temp > 0 },
     { label: "Simulation mode", value: miner.sim_mode ? "ON (test data)" : "Off", good: !miner.sim_mode },
     { label: "Last reading", value: formatLastSeen(miner.lastSeen), good: miner.active },
   ];

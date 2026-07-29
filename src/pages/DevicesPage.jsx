@@ -93,7 +93,7 @@ export default function DevicesPage({ miners, setMiners }) {
 
     try {
       if (type === "register") {
-        const newDevice = { ...payload, active: false, status: "offline", lastSeen: null, hr: 0, spo2: 0, temp: 0, battery: 0, finger: false, manual_alert: false, sim_mode: false };
+        const newDevice = { ...payload, active: false, status: "offline", lastSeen: null, hr: 0, spo2: 0, temp: 0, finger: false, manual_alert: false, sim_mode: false };
         await registerDevice(newDevice);
         setMiners((prev) => {
           const existing = prev.some((m) => m.id === newDevice.id);
@@ -256,11 +256,11 @@ export default function DevicesPage({ miners, setMiners }) {
                   <div style={{ display: "grid", gap: 4 }}>
                     <span style={{ color: C.red, fontWeight: 900 }}>HR {miner.active ? formatReading(miner.hr, 0) : "--"} bpm</span>
                     <span style={{ color: C.primary, fontWeight: 900 }}>SpO2 {miner.active ? formatReading(miner.spo2, 0) : "--"}%</span>
-                    <span style={{ color: batteryColor(miner.battery), fontWeight: 900 }}>Batt {miner.battery > 0 ? `${miner.battery}%` : "--"}</span>
+                    <span style={{ color: C.teal, fontWeight: 900 }}>Temp {miner.active && miner.temp > 0 ? `${formatReading(miner.temp, 1)}°C` : "--"}</span>
                   </div>
                   <div style={{ display: "grid", gap: 4 }}>
                     <StatePill label={miner.finger === false ? "No contact" : miner.active ? "Contact normal" : "No signal"} color={miner.finger === false ? C.amber : miner.active ? C.green : C.offline} />
-                    <StatePill label={miner.manual_alert ? "Manual alert" : "Alert clear"} color={miner.manual_alert ? C.red : C.green} />
+                    <StatePill label={miner.active ? `Manual SOS ${miner.button_pressed || miner.manual_alert ? "pressed" : "clear"} (${miner.button_press_count || 0})` : "Manual SOS offline"} color={!miner.active ? C.offline : miner.button_pressed || miner.manual_alert ? C.red : C.green} />
                   </div>
                   <LastSeenCell miner={miner} />
                   <span style={{ display: "flex", gap: 6 }}>
@@ -421,14 +421,6 @@ function LastSeenCell({ miner }) {
       <span style={{ color: C.textMuted, fontSize: 10 }}>{formatLastSeen(miner.lastSeen)}</span>
     </div>
   );
-}
-
-// batteryColor — maps a battery % to a status color (green / amber / red / offline)
-function batteryColor(pct) {
-  if (!pct || pct <= 0) return C.offline;
-  if (pct <= 20) return C.red;
-  if (pct <= 40) return C.amber;
-  return C.green;
 }
 
 const tableHeader = {

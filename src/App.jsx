@@ -136,7 +136,7 @@ export default function App() {
                 />
                 <Route
                   path="/analytics"
-                  element={<AnalyticsPage miners={system.miners} analyticsData={system.analyticsData} activityLogs={system.activityLogs} />}
+                  element={<AnalyticsPage miners={system.miners} analyticsData={system.analyticsData} liveData={system.liveData} activityLogs={system.activityLogs} />}
                 />
                 <Route
                   path="/devices"
@@ -144,7 +144,7 @@ export default function App() {
                 />
                 <Route
                   path="/health-logs"
-                  element={<HealthLogsPage miners={system.miners} analyticsData={system.analyticsData} activityLogs={system.activityLogs} thresholds={system.thresholds} onClearHealthLogs={canManage ? system.clearHealthLogs : undefined} />}
+                  element={<HealthLogsPage miners={system.miners} analyticsData={system.analyticsData} liveData={system.liveData} activityLogs={system.activityLogs} thresholds={system.thresholds} onClearHealthLogs={canManage ? system.clearHealthLogs : undefined} />}
                 />
                 <Route
                   path="/sensor-status"
@@ -159,8 +159,6 @@ export default function App() {
                   element={
                     <SettingsPage
                       miners={system.miners}
-                      thresholds={system.thresholds}
-                      setThresholds={system.setThresholds}
                       staleSeconds={system.staleSeconds}
                       setStaleSeconds={system.setStaleSeconds}
                     />

@@ -1,10 +1,9 @@
 export const DEFAULT_THRESHOLDS = {
   hrMin: 55,
   hrMax: 105,
-  spo2Min: 94,
-  tempMin: 36.0,
+  spo2Min: 80,
+  tempMin: 30.0,
   tempMax: 38.0,
-  batteryMin: 20,
 };
 
 export function getVitalStatus(value, type, thresholds = DEFAULT_THRESHOLDS) {
@@ -22,10 +21,6 @@ export function getVitalStatus(value, type, thresholds = DEFAULT_THRESHOLDS) {
   if (type === "temp") {
     if (value < thresholds.tempMin) return "LOW";
     if (value > thresholds.tempMax) return "HIGH";
-    return "NORMAL";
-  }
-  if (type === "battery") {
-    if (value <= (thresholds.batteryMin ?? 20)) return "LOW";
     return "NORMAL";
   }
   return "NORMAL";
@@ -56,9 +51,6 @@ export function buildAlerts(miners, thresholds = DEFAULT_THRESHOLDS) {
       return alerts;
     }
 
-    if (miner.battery > 0 && miner.battery <= (thresholds.batteryMin ?? 20)) {
-      alerts.push({ id: `${miner.id}-battery`, deviceId: miner.id, severity: "warning", message: `${miner.name}: BATTERY LOW (${miner.battery}%)` });
-    }
     const hrStatus = getVitalStatus(miner.hr, "hr", thresholds);
     const spo2Status = getVitalStatus(miner.spo2, "spo2", thresholds);
     const tempStatus = getVitalStatus(miner.temp, "temp", thresholds);

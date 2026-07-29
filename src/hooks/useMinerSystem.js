@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MINERS_INIT } from "../data/mockMiners";
 import { firebaseConfigured } from "../firebase/config";
-import { clearActivityLogs as clearActivityLogsRemote, clearHealthLogs as clearHealthLogsRemote, subscribeToActivityLogs, subscribeToAllAnalytics, subscribeToDevices, trimAnalyticsHistory, updateDeviceStatus, writeActivityLog } from "../firebase/database";
+import { clearActivityLogs as clearActivityLogsRemote, clearHealthLogs as clearHealthLogsRemote, saveHistorySummaries, subscribeToActivityLogs, subscribeToAllAnalytics, subscribeToDevices, trimAnalyticsHistory, updateDeviceStatus, writeActivityLog } from "../firebase/database";
 import { DEFAULT_THRESHOLDS, getVitalStatus } from "../utils/alertChecker";
 import { formatSystemTimestamp, timeLabel } from "../utils/formatters";
 
@@ -11,6 +11,8 @@ const MAX_LIVE_POINTS = 30;
 const MAX_ANALYTICS_POINTS = 120;
 const ONLINE_TIMEOUT_MS = 75000;
 const MAX_ACTIVITY_LOGS = 160;
+const LIVE_SAMPLE_DEDUPE_MS = 900;
+const SESSION_GAP_MS = 3 * 60 * 1000;
 
 const DEFAULT_STALE_SECONDS = 75;
 
@@ -108,6 +110,8 @@ function mapRealtimeDevices(value, timeoutMs = ONLINE_TIMEOUT_MS) {
       const active = !forcedOffline && (firebaseActive || hasValidSensorPayload) && fresh;
       const finger = toBoolean(live.finger ?? live.chestDetected, true);
       const manualAlert = toBoolean(live.manual_alert ?? live.manualAlert, false);
+      const buttonPressed = toBoolean(live.button_pressed ?? live.buttonPressed, false);
+      const buttonPressCount = toReading(live.button_press_count ?? live.buttonPressCount ?? device?.button_press_count ?? device?.buttonPressCount);
 
       return {
         id,
@@ -117,11 +121,13 @@ function mapRealtimeDevices(value, timeoutMs = ONLINE_TIMEOUT_MS) {
         lastSeen,
         status: active ? "online" : "offline",
         stale: !fresh && (hasSensorPayload || firebaseActive),
-        hr: toReading(live.heartRate ?? live.hr ?? device?.heartRate),
-        spo2: toReading(live.spo2 ?? device?.spo2),
+        hr: finger ? toReading(live.heartRate ?? live.hr ?? device?.heartRate) : 0,
+        spo2: finger ? toReading(live.spo2 ?? device?.spo2) : 0,
         temp: toReading(live.temp ?? live.temperature ?? live.bodyTemp ?? device?.temp),
         finger,
         manual_alert: manualAlert,
+        button_pressed: buttonPressed,
+        button_press_count: buttonPressCount,
         battery: toReading(live.battery ?? device?.battery),
         sim_mode: toBoolean(live.sim_mode ?? live.simMode, false),
       };
@@ -134,26 +140,33 @@ function mapRealtimeDevices(value, timeoutMs = ONLINE_TIMEOUT_MS) {
 function mapRealtimeAnalytics(value) {
   const data = {};
   Object.entries(value || {}).forEach(([deviceId, rows]) => {
-    data[deviceId] = Object.values(rows || {})
+    data[deviceId] = Object.entries(rows || {})
+      .map(([key, row]) => ({ ...(row || {}), timestamp: normalizeTimestamp(row?.timestamp) || normalizeTimestamp(key) }))
       .filter((row) => {
         const timestamp = normalizeTimestamp(row.timestamp);
         const hr = toReading(row.hr ?? row.heartRate);
         const spo2 = toReading(row.spo2);
-        const finger = toBoolean(row.finger, true);
-        return timestamp > 0 && finger && hr > 0 && spo2 > 0;
+        const temp = toReading(row.temp ?? row.temperature ?? row.bodyTemp);
+        const manualAlert = toBoolean(row.manual_alert, false);
+        const buttonPressed = toBoolean(row.button_pressed ?? row.buttonPressed, false);
+        const buttonPressCount = toReading(row.button_press_count ?? row.buttonPressCount);
+        return timestamp > 0 && (hr > 0 || spo2 > 0 || temp > 0 || manualAlert || buttonPressed || buttonPressCount > 0);
       })
       .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
       .slice(-MAX_ANALYTICS_POINTS)
       .map((row) => {
         const timestamp = normalizeTimestamp(row.timestamp);
         const date = new Date(timestamp);
+        const finger = toBoolean(row.finger, true);
         return {
           time: timeLabel(date),
-          hr: toReading(row.hr ?? row.heartRate),
-          spo2: toReading(row.spo2),
+          hr: finger ? toReading(row.hr ?? row.heartRate) : 0,
+          spo2: finger ? toReading(row.spo2) : 0,
           temp: toReading(row.temp ?? row.temperature ?? row.bodyTemp),
-          finger: toBoolean(row.finger, true),
+          finger,
           manual_alert: toBoolean(row.manual_alert, false),
+          button_pressed: toBoolean(row.button_pressed ?? row.buttonPressed, false),
+          button_press_count: toReading(row.button_press_count ?? row.buttonPressCount),
           status: row.status || "online",
           timestamp,
         };
@@ -180,6 +193,8 @@ function latestAnalyticsMiner(rows, timeoutMs) {
     temp: latest.temp ?? 0,
     finger: latest.finger ?? true,
     manual_alert: latest.manual_alert ?? false,
+    button_pressed: latest.button_pressed ?? false,
+    button_press_count: latest.button_press_count ?? 0,
     stale: !active,
     sim_mode: false,
   };
@@ -196,13 +211,100 @@ function latestAnalyticsMiners(mappedAnalytics, timeoutMs) {
 }
 
 // clearLiveDataForDevice — resets hr/spo2/temp arrays for a device; skips if already empty
-function clearLiveDataForDevice(prev, deviceId) {
-  const current = prev[deviceId] || { hr: [], spo2: [] };
-  if (current.hr.length === 0 && current.spo2.length === 0 && (current.temp || []).length === 0) return prev;
+function averageReading(rows, key) {
+  const values = rows.map((row) => Number(row[key] || 0)).filter((value) => Number.isFinite(value) && value > 0);
+  if (values.length === 0) return 0;
+  return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(key === "temp" ? 1 : 0));
+}
 
-  return {
-    ...prev,
-    [deviceId]: { hr: [], spo2: [], temp: [] },
+function buildHistorySummariesForDevice(deviceId, rows, miner, thresholds) {
+  const sortedRows = [...(rows || [])]
+    .filter((row) => Number(row.timestamp || 0) > 0)
+    .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+  if (sortedRows.length === 0) return { healthLogs: {}, miningSessions: {} };
+
+  const groups = sortedRows.reduce((sessions, row) => {
+    const current = sessions[sessions.length - 1];
+    const previous = current?.[current.length - 1];
+    if (!current || Number(row.timestamp || 0) - Number(previous?.timestamp || 0) > SESSION_GAP_MS) {
+      sessions.push([row]);
+    } else {
+      current.push(row);
+    }
+    return sessions;
+  }, []);
+
+  const healthLogs = {};
+  const miningSessions = {};
+  groups.forEach((sessionRows) => {
+    const first = sessionRows[0];
+    const last = sessionRows[sessionRows.length - 1];
+    const id = String(first.timestamp);
+    const counts = uniquePressCounts(sessionRows);
+    const liveCount = Number(miner?.button_press_count || miner?.buttonPressCount || 0);
+    const maxCount = Math.max(...counts, liveCount, 0);
+    const minCount = Math.min(...counts, maxCount);
+    const firstCountIsPress = sessionRows.some((row) => {
+      const count = Number(row.button_press_count ?? row.buttonPressCount ?? 0);
+      return count === minCount && count > 0 && (row.button_pressed || row.manual_alert);
+    });
+    const counterPresses = counts.length ? Math.max(0, maxCount - minCount + (firstCountIsPress ? 1 : 0)) : 0;
+    const manualPressCount = Math.max(counterPresses, sessionRows.filter((row) => row.manual_alert || row.button_pressed).length);
+    const avgHr = averageReading(sessionRows, "hr");
+    const avgSpo2 = averageReading(sessionRows, "spo2");
+    const avgTemp = averageReading(sessionRows, "temp");
+    const payload = {
+      id,
+      deviceId,
+      miner: miner?.name || deviceId,
+      location: miner?.location || "Unassigned",
+      startTimestamp: Number(first.timestamp),
+      endTimestamp: Number(last.timestamp),
+      readingCount: sessionRows.length,
+      avgHr,
+      avgSpo2,
+      avgTemp,
+      manualPressCount,
+      hasManualAlert: manualPressCount > 0,
+      updatedAt: Date.now(),
+    };
+    miningSessions[id] = payload;
+    healthLogs[id] = {
+      ...payload,
+      hrStatus: getVitalStatus(avgHr, "hr", thresholds) || "NORMAL",
+      spo2Status: getVitalStatus(avgSpo2, "spo2", thresholds) || "NORMAL",
+      tempStatus: getVitalStatus(avgTemp, "temp", thresholds) || "NORMAL",
+    };
+  });
+
+  return { healthLogs, miningSessions };
+}
+
+function uniquePressCounts(rows) {
+  return [...new Set(
+    rows
+      .map((row) => Number(row.button_press_count ?? row.buttonPressCount ?? 0))
+      .filter((count) => Number.isFinite(count) && count > 0),
+  )].sort((a, b) => a - b);
+}
+
+function appendLiveSample(next, deviceId, sample) {
+  const timestamp = Number(sample.timestamp || 0);
+  if (!deviceId || timestamp <= 0) return;
+
+  const cur = next[deviceId] || { hr: [], spo2: [], temp: [] };
+  const lastTimestamp = Math.max(
+    Number(cur.hr[cur.hr.length - 1]?.timestamp || 0),
+    Number(cur.spo2[cur.spo2.length - 1]?.timestamp || 0),
+    Number((cur.temp || [])[(cur.temp || []).length - 1]?.timestamp || 0),
+  );
+  if (Math.abs(timestamp - lastTimestamp) < LIVE_SAMPLE_DEDUPE_MS) return;
+
+  const label = sample.time || timeLabel(new Date(timestamp));
+  next[deviceId] = {
+    hr: Number(sample.hr) > 0 ? [...cur.hr.slice(-(MAX_LIVE_POINTS - 1)), { time: label, hr: Number(sample.hr), timestamp }] : cur.hr,
+    spo2: Number(sample.spo2) > 0 ? [...cur.spo2.slice(-(MAX_LIVE_POINTS - 1)), { time: label, spo2: Number(sample.spo2), timestamp }] : cur.spo2,
+    temp: Number(sample.temp) > 0 ? [...(cur.temp || []).slice(-(MAX_LIVE_POINTS - 1)), { time: label, temp: Number(sample.temp), timestamp }] : (cur.temp || []),
   };
 }
 
@@ -241,6 +343,7 @@ function mapActivityLogs(value) {
 function isConcerningState(miner, thresholds) {
   if (!miner || !miner.active) return false;
   if (miner.manual_alert) return true;
+  if (miner.button_pressed) return true;
   if (miner.finger === false) return true;
   if (getVitalStatus(miner.spo2, "spo2", thresholds) === "CRITICAL") return true;
   if (getVitalStatus(miner.temp, "temp", thresholds) === "HIGH") return true;
@@ -339,15 +442,17 @@ function buildVitalLogs(miner, thresholds) {
     });
   }
 
-  if (miner.manual_alert) {
+  if (miner.button_pressed || miner.manual_alert) {
     rows.push({
       deviceId: miner.id,
       miner: miner.name,
       type: "manual_alert",
       status: "pressed",
       severity: "critical",
-      title: "Manual alert pressed",
-      detail: `${miner.name} activated the manual alert button.`,
+      title: "Manual SOS pressed",
+      detail: miner.button_pressed
+        ? `${miner.name} pressed the manual SOS button (${miner.button_press_count || 1} total).`
+        : `${miner.name} activated the manual SOS alert.`,
       timestamp: miner.lastSeen?.getTime?.() || Date.now(),
     });
   }
@@ -363,13 +468,18 @@ export function useMinerSystem(enabled) {
   const [liveData, setLiveData] = useState(initialLiveData);
   const [analyticsData, setAnalyticsData] = useState(initialAnalyticsData);
   const [activityLogs, setActivityLogs] = useState([]);
-  const [thresholds, setThresholds] = useState({ ...DEFAULT_THRESHOLDS, ...(stored?.thresholds || {}) });
+  const [thresholds, setThresholds] = useState({
+    ...DEFAULT_THRESHOLDS,
+    ...(stored?.thresholds || {}),
+    tempMin: Number(stored?.thresholds?.tempMin) === 36 ? DEFAULT_THRESHOLDS.tempMin : (stored?.thresholds?.tempMin ?? DEFAULT_THRESHOLDS.tempMin),
+  });
   const [pollingInterval, setPollingInterval] = useState(stored?.pollingInterval || 5);
   const [staleSeconds, setStaleSeconds] = useState(stored?.staleSeconds || DEFAULT_STALE_SECONDS);
   const [usingRealtime, setUsingRealtime] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const minersRef = useRef(miners);
   const lastTrimRef = useRef(0);
+  const persistedHistoryRef = useRef({});
   const hasDeviceSnapshotRef = useRef(false);
   const previousStatusRef = useRef({});
   const emittedEventRef = useRef(new Set());
@@ -496,20 +606,16 @@ export function useMinerSystem(enabled) {
         setLiveData((prev) => {
           const next = { ...prev };
           realtimeMiners.forEach((miner) => {
-            if (!miner.active || miner.stale || !miner.finger || (!miner.hr && !miner.spo2)) {
-              next[miner.id] = { hr: [], spo2: [], temp: [] };
+            if (!miner.active || miner.stale || miner.finger === false || (!miner.hr && !miner.spo2 && !miner.temp)) {
               return;
             }
-            const label = timeLabel(miner.lastSeen);
-            const cur = next[miner.id] || { hr: [], spo2: [], temp: [] };
-            const timestamp = miner.lastSeen.getTime();
-            const lastHr = cur.hr[cur.hr.length - 1];
-            if (lastHr?.timestamp === timestamp) return;
-            next[miner.id] = {
-              hr: [...cur.hr.slice(-(MAX_LIVE_POINTS - 1)), { time: label, hr: miner.hr, timestamp }],
-              spo2: [...cur.spo2.slice(-(MAX_LIVE_POINTS - 1)), { time: label, spo2: miner.spo2, timestamp }],
-              temp: [...(cur.temp || []).slice(-(MAX_LIVE_POINTS - 1)), { time: label, temp: miner.temp, timestamp }],
-            };
+            appendLiveSample(next, miner.id, {
+              time: timeLabel(miner.lastSeen),
+              timestamp: miner.lastSeen.getTime(),
+              hr: miner.hr,
+              spo2: miner.spo2,
+              temp: miner.temp,
+            });
           });
           return next;
         });
@@ -534,9 +640,13 @@ export function useMinerSystem(enabled) {
 
         setLiveData((prev) =>
           Object.keys(mappedAnalytics).reduce((next, deviceId) => {
-            if ((mappedAnalytics[deviceId] || []).length > 0) return next;
-            return clearLiveDataForDevice(next, deviceId);
-          }, prev),
+            const rows = mappedAnalytics[deviceId] || [];
+            if (rows.length > 0) {
+              rows.slice(-MAX_LIVE_POINTS).forEach((row) => appendLiveSample(next, deviceId, row));
+              return next;
+            }
+            return next;
+          }, { ...prev }),
         );
 
         if (Date.now() - lastTrimRef.current > 60000) {
@@ -545,6 +655,15 @@ export function useMinerSystem(enabled) {
             trimAnalyticsHistory(deviceId, MAX_ANALYTICS_POINTS).catch(() => {});
           });
         }
+
+        Object.entries(mappedAnalytics).forEach(([deviceId, rows]) => {
+          const latestTimestamp = rows[rows.length - 1]?.timestamp || 0;
+          if (!latestTimestamp || persistedHistoryRef.current[deviceId] === latestTimestamp) return;
+          persistedHistoryRef.current[deviceId] = latestTimestamp;
+          const miner = minersRef.current.find((item) => item.id === deviceId);
+          const summaries = buildHistorySummariesForDevice(deviceId, rows, miner, thresholdsRef.current);
+          saveHistorySummaries(deviceId, summaries.healthLogs, summaries.miningSessions).catch(() => {});
+        });
       },
       (message) => setConnectionError(message),
     );

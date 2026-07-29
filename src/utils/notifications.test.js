@@ -7,7 +7,6 @@ describe("condition mapping", () => {
     expect(conditionForAlertId("MCM-1-spo2-low")).toBe("spo2");
     expect(conditionForAlertId("MCM-1-temp-high")).toBe("temp");
     expect(conditionForAlertId("MCM-1-offline")).toBe("offline");
-    expect(conditionForAlertId("MCM-1-battery")).toBe("battery");
   });
 
   it("maps activity-log rows to the same vocabulary", () => {

@@ -36,8 +36,8 @@
 const char* WIFI_SSID     = "ZTE_2.4G_uuCrK2";
 const char* WIFI_PASSWORD = "TizH3Ucd";
 
-#define FIREBASE_DATABASE_URL    "placeholder"
-#define FIREBASE_DATABASE_SECRET "placeholder"
+#define FIREBASE_DATABASE_URL    "https://smart-chest-miner-default-rtdb.firebaseio.com"
+#define FIREBASE_DATABASE_SECRET "GJY8fpUA211duwUw7o92ks0EXlYOFdqWYz5rK6N5"
 
 const char* DEVICE_ID      = "SCM-003";
 const char* MINER_NAME     = "Acuzar Great Miner";
@@ -58,17 +58,33 @@ const char* MINER_LOCATION = "Masara Shaft-3";
 #define SENSOR_READ_INTERVAL     10
 #define DEBOUNCE_DELAY_MS        50
 #define WIFI_RECONNECT_INTERVAL  10000
+#define WIFI_CONFIG_POLL_MS      30000
 #define RED_LED_BLINK_INTERVAL   200
 #define BUZZER_BEEP_INTERVAL     100
 
 // ---- Contact (finger/chest) detection on the MAX30102 IR channel ----
-#define FINGER_THRESHOLD     7000
+#define FINGER_THRESHOLD     20000
 #define FINGER_ON_COUNT      1
-#define FINGER_OFF_COUNT     10
+#define FINGER_OFF_COUNT     3
+#define CONTACT_LOST_TIMEOUT_MS 5000
 
 // ---- Real-vitals sample buffer (Maxim algorithm) ----
 #define RAW_BUFFER_LEN       100   // ~4s window at 25Hz output (100Hz / avg 4)
 #define RAW_SLIDE            25    // recompute every 25 new samples (~1s)
+
+// ---- Vital filtering ----
+#define HR_MIN_VALID         40
+#define HR_MAX_VALID         180
+#define HR_MAX_JUMP          25
+#define HR_SMOOTH_ALPHA      0.25f
+#define HR_DOUBLE_ARTIFACT   130
+#define HR_HALF_MIN          55
+#define HR_HALF_MAX          95
+#define HR_HIGH_CONFIRM      4
+#define SPO2_MIN_VALID       80
+#define SPO2_MAX_VALID       100
+#define SPO2_MAX_JUMP        5
+#define SPO2_SMOOTH_ALPHA    0.35f
 
 // ---- Device-local safety thresholds (drive the buzzer independent of network) ----
 #define SPO2_CRITICAL        90
@@ -105,6 +121,7 @@ unsigned long lastLiveUploadTime     = 0;
 unsigned long lastAnalyticsUploadTime = 0;
 unsigned long lastSensorRead         = 0;
 unsigned long lastWiFiReconnect      = 0;
+unsigned long lastWiFiConfigPoll     = 0;
 unsigned long lastRedLedToggle       = 0;
 unsigned long lastGreenLedToggle     = 0;
 unsigned long lastPrintTime          = 0;
@@ -119,6 +136,9 @@ bool  forceUpload = false;
 volatile bool buttonInterruptFlag = false;
 bool manualAlertActive = false;
 unsigned long lastButtonPress = 0;
+bool buttonPressedDisplay = false;
+unsigned long buttonPressCount = 0;
+int hrHighCandidateCount = 0;
 
 bool redLedState   = false;
 bool greenLedState = false;
@@ -131,6 +151,7 @@ bool noFingerStateUploaded = false;
 int fingerOnCounter  = 0;
 int fingerOffCounter = 0;
 uint32_t latestIrValue = 0;
+unsigned long lastPulseSampleTime = 0;
 
 // Maxim-algorithm sample buffers
 uint32_t irBuffer[RAW_BUFFER_LEN];
@@ -228,6 +249,15 @@ void connectWiFi() {
   }
 }
 
+void connectWiFiWithCredentials(const char* ssid, const char* password) {
+  if (ssid == NULL || strlen(ssid) == 0) return;
+  Serial.printf("[WIFI] Applying queued SSID: %s\n", ssid);
+  WiFi.disconnect(true);
+  delay(150);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+}
+
 void waitForTimeSync(unsigned long timeoutMs) {
   Serial.print("[INIT] Waiting for NTP time sync ");
   unsigned long start = millis();
@@ -260,6 +290,9 @@ void handleMonitoring(unsigned long now) {
   if (now - lastSensorRead >= SENSOR_READ_INTERVAL) {
     lastSensorRead = now;
     readSensor();
+  }
+  if (fingerDetected && lastPulseSampleTime > 0 && now - lastPulseSampleTime > CONTACT_LOST_TIMEOUT_MS) {
+    updateFingerState(false);
   }
 
   if (fingerDetected && !wasFingerDetected) {
@@ -362,6 +395,7 @@ void readSensor() {
     particleSensor.nextSample();
 
     latestIrValue = ir;
+    lastPulseSampleTime = millis();
     gotSample = true;
     if (ir >= FINGER_THRESHOLD) anyDetected = true;
 
@@ -418,12 +452,44 @@ void computeVitals() {
 
   if (!fingerDetected) return;
 
-  if (validHr && hr > 30 && hr < 220) {
-    currentBPM = (float)hr;
+  if (validHr) acceptHeartRate((float)hr);
+  if (validSpo2) acceptSpO2((float)spo2);
+}
+
+void acceptHeartRate(float bpm) {
+  if (bpm < HR_MIN_VALID || bpm > HR_MAX_VALID) return;
+
+  if (bpm >= HR_DOUBLE_ARTIFACT) {
+    float halfBpm = bpm * 0.5f;
+    bool halfLooksHuman = halfBpm >= HR_HALF_MIN && halfBpm <= HR_HALF_MAX;
+    bool halfMatchesCurrent = currentBPM <= 0 || fabsf(halfBpm - currentBPM) <= HR_MAX_JUMP;
+    if (halfLooksHuman && halfMatchesCurrent) {
+      bpm = halfBpm;
+      hrHighCandidateCount = 0;
+    } else {
+      hrHighCandidateCount++;
+      if (hrHighCandidateCount < HR_HIGH_CONFIRM) return;
+    }
+  } else {
+    hrHighCandidateCount = 0;
   }
-  if (validSpo2 && spo2 > 70 && spo2 <= 100) {
-    currentSpO2 = (float)spo2;
+
+  if (currentBPM <= 0) {
+    currentBPM = bpm;
+    return;
   }
+  if (fabsf(bpm - currentBPM) > HR_MAX_JUMP) return;
+  currentBPM = (currentBPM * (1.0f - HR_SMOOTH_ALPHA)) + (bpm * HR_SMOOTH_ALPHA);
+}
+
+void acceptSpO2(float spo2) {
+  if (spo2 < SPO2_MIN_VALID || spo2 > SPO2_MAX_VALID) return;
+  if (currentSpO2 <= 0) {
+    currentSpO2 = spo2;
+    return;
+  }
+  if (fabsf(spo2 - currentSpO2) > SPO2_MAX_JUMP) return;
+  currentSpO2 = (currentSpO2 * (1.0f - SPO2_SMOOTH_ALPHA)) + (spo2 * SPO2_SMOOTH_ALPHA);
 }
 #endif
 
@@ -496,12 +562,16 @@ void updateIndicators(unsigned long now) {
 }
 
 void handleButton(unsigned long now) {
+  buttonPressedDisplay = digitalRead(BUTTON_PIN) == LOW;
   if (buttonInterruptFlag) {
     buttonInterruptFlag = false;
     if (now - lastButtonPress >= DEBOUNCE_DELAY_MS) {
       lastButtonPress = now;
+      buttonPressCount++;
       manualAlertActive = !manualAlertActive;
+      buttonPressedDisplay = true;
       forceUpload = true;
+      enqueueButtonAnalyticsUpload();
       Serial.println(manualAlertActive ? "[ALERT] MANUAL ALERT ACTIVATED"
                                         : "[ALERT] Manual alert deactivated");
     }
@@ -516,6 +586,9 @@ void handleWiFiReconnect(unsigned long now) {
       WiFi.disconnect();
       WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     }
+  } else if (now - lastWiFiConfigPoll >= WIFI_CONFIG_POLL_MS) {
+    lastWiFiConfigPoll = now;
+    applyQueuedWifiConfig();
   }
 }
 
@@ -524,9 +597,8 @@ void handleWiFiReconnect(unsigned long now) {
 // =================================================================
 void enqueueLiveUpload(float bpm, float spo2) {
   double ts = currentTimestampMs();
-  if (ts <= 0) { Serial.println("[LIVE] Clock not ready, skipping."); return; }
-
-  String tsText = String(ts, 0);
+  String tsText = timestampJson(ts);
+  if (ts <= 0) Serial.println("[LIVE] Clock not ready, using Firebase server timestamp.");
   String live = buildReadingPayload(bpm, spo2, tsText, fingerDetected);
 
   String devicePayload = "{";
@@ -554,14 +626,26 @@ void enqueueAnalyticsUpload(float avgBPM, float avgSpO2) {
   enqueueJob("PUT", "/analytics/" + String(DEVICE_ID) + "/" + minuteText, payload);
 }
 
+void enqueueButtonAnalyticsUpload() {
+  double ts = currentTimestampMs();
+  if (ts <= 0) { Serial.println("[BUTTON] Clock not ready, analytics event skipped."); return; }
+  String tsText = String(ts, 0);
+  String payload = buildReadingPayload(currentBPM, currentSpO2, tsText, fingerDetected);
+  enqueueJob("PUT", "/analytics/" + String(DEVICE_ID) + "/" + tsText, payload);
+}
+
 String buildReadingPayload(float bpm, float spo2, String tsText, bool finger) {
+  float safeBpm = finger ? bpm : 0;
+  float safeSpO2 = finger ? spo2 : 0;
   String p = "{";
-  p += "\"heartRate\":" + String(bpm, 1) + ",";
-  p += "\"hr\":" + String(bpm, 1) + ",";
-  p += "\"spo2\":" + String(spo2, 1) + ",";
+  p += "\"heartRate\":" + String(safeBpm, 1) + ",";
+  p += "\"hr\":" + String(safeBpm, 1) + ",";
+  p += "\"spo2\":" + String(safeSpO2, 1) + ",";
   p += "\"status\":\"" + String(healthStateToString(healthState)) + "\",";
   p += "\"finger\":" + String(finger ? "true" : "false") + ",";
   p += "\"manual_alert\":" + String(manualAlertActive ? "true" : "false") + ",";
+  p += "\"button_pressed\":" + String(buttonPressedDisplay ? "true" : "false") + ",";
+  p += "\"button_press_count\":" + String(buttonPressCount) + ",";
   p += "\"timestamp\":" + tsText + ",";
   p += "\"sim_mode\":" + String(USE_SIMULATION ? "true" : "false");
   p += "}";
@@ -570,14 +654,14 @@ String buildReadingPayload(float bpm, float spo2, String tsText, bool finger) {
 
 void registerDeviceInfo() {
   double ts = currentTimestampMs();
-  if (ts <= 0) return;
+  String tsText = timestampJson(ts);
 
   String payload = "{";
   payload += "\"name\":\"" + String(MINER_NAME) + "\",";
   payload += "\"location\":\"" + String(MINER_LOCATION) + "\",";
   payload += "\"active\":true,";
   payload += "\"status\":\"online\",";
-  payload += "\"lastSeen\":" + String(ts, 0);
+  payload += "\"lastSeen\":" + tsText;
   payload += "}";
 
   enqueueJob("PATCH", "/devices/" + String(DEVICE_ID), payload);
@@ -615,9 +699,18 @@ void networkTask(void* param) {
 }
 
 bool firebaseWrite(const char* method, const char* path, const char* payload) {
+  if (!firebaseConfigured()) {
+    Serial.println("[FIREBASE] Missing FIREBASE_DATABASE_URL or FIREBASE_DATABASE_SECRET.");
+    return false;
+  }
+
   HTTPClient http;
-  String url = String(FIREBASE_DATABASE_URL) + String(path) +
-               ".json?auth=" + String(FIREBASE_DATABASE_SECRET);
+  String baseUrl = String(FIREBASE_DATABASE_URL);
+  baseUrl.trim();
+  if (baseUrl.endsWith("/")) baseUrl.remove(baseUrl.length() - 1);
+  String cleanPath = String(path);
+  if (!cleanPath.startsWith("/")) cleanPath = "/" + cleanPath;
+  String url = baseUrl + cleanPath + ".json?auth=" + String(FIREBASE_DATABASE_SECRET);
 
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
@@ -635,6 +728,57 @@ bool firebaseWrite(const char* method, const char* path, const char* payload) {
   return true;
 }
 
+bool firebaseRead(const String& path, String& body) {
+  if (!firebaseConfigured() || WiFi.status() != WL_CONNECTED) return false;
+
+  HTTPClient http;
+  String baseUrl = String(FIREBASE_DATABASE_URL);
+  baseUrl.trim();
+  if (baseUrl.endsWith("/")) baseUrl.remove(baseUrl.length() - 1);
+  String cleanPath = path;
+  if (!cleanPath.startsWith("/")) cleanPath = "/" + cleanPath;
+  String url = baseUrl + cleanPath + ".json?auth=" + String(FIREBASE_DATABASE_SECRET);
+
+  http.begin(url);
+  http.setTimeout(4000);
+  int code = http.GET();
+  if (code >= 200 && code < 300) body = http.getString();
+  http.end();
+  return code >= 200 && code < 300;
+}
+
+String jsonStringValue(const String& json, const char* key) {
+  String marker = "\"" + String(key) + "\":\"";
+  int start = json.indexOf(marker);
+  if (start < 0) return "";
+  start += marker.length();
+  int end = json.indexOf("\"", start);
+  if (end < 0) return "";
+  return json.substring(start, end);
+}
+
+void applyQueuedWifiConfig() {
+  String body;
+  if (!firebaseRead("/wifiConfigurations/" + String(DEVICE_ID), body)) return;
+  if (body == "null" || body.indexOf("\"ssid\"") < 0) return;
+
+  String ssid = jsonStringValue(body, "ssid");
+  String password = jsonStringValue(body, "password");
+  if (ssid.length() == 0 || ssid == WiFi.SSID()) return;
+  connectWiFiWithCredentials(ssid.c_str(), password.c_str());
+}
+
+bool firebaseConfigured() {
+  String databaseUrl = String(FIREBASE_DATABASE_URL);
+  String databaseSecret = String(FIREBASE_DATABASE_SECRET);
+  databaseUrl.trim();
+  databaseSecret.trim();
+  return databaseUrl.length() > 0 &&
+         databaseSecret.length() > 0 &&
+         databaseUrl != "placeholder" &&
+         databaseSecret != "placeholder";
+}
+
 // currentTimestampMs — real epoch milliseconds, or 0 when the clock is not yet
 // synced (callers must skip uploads on 0 so the dashboard never sees a bad ts).
 double currentTimestampMs() {
@@ -645,6 +789,11 @@ double currentTimestampMs() {
     return (double)now * 1000.0;
   }
   return 0;
+}
+
+String timestampJson(double timestampMs) {
+  if (timestampMs > 0) return String(timestampMs, 0);
+  return "{\".sv\":\"timestamp\"}";
 }
 
 const char* healthStateToString(HealthState state) {
