@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import FilterToolbar, { FilterField, FilterTabs } from "../components/FilterToolbar";
 import Modal from "../components/Modal";
-import PageHeader from "../components/PageHeader";
 import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
 import { DEFAULT_THRESHOLDS } from "../utils/alertChecker";
 import { DATE_RANGE_OPTIONS, isWithinDateRange, resolveDateRange } from "../utils/filtering";
@@ -51,7 +50,6 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
   const sessions = useMemo(() => buildSessions(visibleMiners, scopedAnalytics, activityLogs, thresholds), [activityLogs, scopedAnalytics, thresholds, visibleMiners]);
   const chartData = useMemo(() => buildChartData(visibleMiners, scopedAnalytics), [scopedAnalytics, visibleMiners]);
   const manualAlerts = sessions.reduce((sum, session) => sum + session.manualPressCount, 0);
-  const unhealthy = visibleMiners.filter((miner) => !miner.active || miner.stale || miner.finger === false || miner.manual_alert).length;
   const activeFilterCount = Number(minerChanged) + Number(rangePreset !== "all");
   const selectedMinerName = visibleMiners[0]?.name || "No miner selected";
   const rangeLabel = DATE_RANGE_OPTIONS.find((option) => option.value === rangePreset)?.label || "All time";
@@ -91,14 +89,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
           {clearError && <div style={{ color: C.amber, fontSize: 12, marginTop: 10 }}>{clearError}</div>}
         </Modal>
       )}
-      <div style={{ display: "grid", gridTemplateRows: "auto auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
-        <PageHeader
-          label="Miner health records"
-          title="Health Logs"
-          titleSize={26}
-          subtitle="Session history, start and end time, readings, status, and manual SOS events."
-        />
-
+      <div className="health-logs-layout page-layout" style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
         <FilterToolbar
           summary={`${selectedMinerName} · ${rangeLabel}`}
           activeCount={activeFilterCount}
@@ -126,28 +117,26 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
           </FilterField>
           {rangePreset === "custom" && (
             <>
-              <FilterField label="Start date">
+              <FilterField label="Start date" className="filter-field-date">
                 <input type="date" value={dateFrom} max={dateTo || undefined} onChange={(event) => setDateFrom(event.target.value)} style={{ ...controlStyle, width: 158, padding: "8px 10px" }} />
               </FilterField>
-              <FilterField label="End date">
+              <FilterField label="End date" className="filter-field-date">
                 <input type="date" value={dateTo} min={dateFrom || undefined} onChange={(event) => setDateTo(event.target.value)} style={{ ...controlStyle, width: 158, padding: "8px 10px" }} />
               </FilterField>
             </>
           )}
         </FilterToolbar>
 
-        <section style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
+        <section className="health-summary-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
           <Summary label="Sessions" value={sessions.length} color={C.primary} />
           <Summary label="Manual SOS" value={manualAlerts} color={manualAlerts ? C.red : C.green} />
-          <Summary label="Healthy Miners" value={visibleMiners.length - unhealthy} unit={`/${visibleMiners.length}`} color={unhealthy ? C.amber : C.green} />
           <Summary label="Readings Logged" value={chartData.length} color={C.amber} />
-          <Summary label="Avg Body Temp" value={formatReading(average(chartData.map((row) => row.temp).filter(Boolean)), 1)} unit="°C" color={C.teal} />
         </section>
 
-        <section style={{ display: "grid", gridTemplateRows: "220px minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
+        <section className="health-content-grid" style={{ display: "grid", gridTemplateRows: "220px minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
             <div className="cc-vitals" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, minHeight: 0 }}>
               <SensorChart data={chartData} dataKey="hr" name="Heart Rate" unit="bpm" color={C.red} digits={0} yLabel="bpm" />
-              <SensorChart data={chartData} dataKey="spo2" name="SpO2" unit="%" color={C.oxygen} domain={[80, 100]} digits={0} yLabel="%" />
+              <SensorChart data={chartData} dataKey="spo2" name="SpO2" unit="%" color={C.oxygen} domain={dynamicDomain(chartData, "spo2", 2)} digits={0} yLabel="%" />
               <SensorChart data={chartData} dataKey="temp" name="Body Temp" unit="°C" color={C.teal} domain={dynamicDomain(chartData, "temp", 0.4)} digits={1} yLabel="°C" />
             </div>
 
@@ -178,7 +167,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
                   <span>Sensor Spike</span>
                 </div>
                 {sessions.map((session) => (
-                  <div key={session.id} style={tableRow}>
+                  <div key={session.id} className="health-session-table-row" style={tableRow}>
                     <div>
                       <div style={{ color: C.text, fontWeight: 900 }}>{session.name}</div>
                       <div style={{ color: C.textMuted, fontSize: 10 }}>{session.deviceId}</div>
@@ -449,7 +438,8 @@ function buildChartData(miners, analyticsData) {
     .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
     .slice(-36)
     .map((row) => ({
-      time: row.time || formatSystemTimestamp(row.timestamp),
+      timestamp: Number(row.timestamp || 0),
+      time: compactTimestamp(row.timestamp),
       hr: Number(row.hr) || null,
       spo2: Number(row.spo2) || null,
       temp: Number(row.temp) || null,
@@ -480,6 +470,8 @@ function PanelHeader({ title, meta }) {
 function SensorChart({ data, dataKey, name, unit, color, domain, digits = 0, yLabel = "" }) {
   const valid = (data || []).filter((row) => Number(row[dataKey]) > 0);
   const avg = valid.length ? average(valid.map((row) => Number(row[dataKey]))) : null;
+  const min = valid.length ? Math.min(...valid.map((row) => Number(row[dataKey]))) : null;
+  const max = valid.length ? Math.max(...valid.map((row) => Number(row[dataKey]))) : null;
   const gradientId = `sensor-${dataKey}`;
   return (
     <div style={{ ...cardStyle, padding: 13, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr" }}>
@@ -488,14 +480,19 @@ function SensorChart({ data, dataKey, name, unit, color, domain, digits = 0, yLa
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}`, flexShrink: 0 }} />
           <span style={{ color: C.text, fontSize: 13, fontWeight: 950 }}>{name}</span>
         </div>
-        <span style={{ color, fontSize: 15, fontWeight: 950 }}>
-          {avg !== null ? formatReading(avg, digits) : "--"}
-          <span style={{ color: C.textMuted, fontSize: 10, marginLeft: 3 }}>{unit}</span>
-        </span>
+        <div style={{ textAlign: "right" }}>
+          <span style={{ color, fontSize: 15, fontWeight: 950 }}>
+            {avg !== null ? formatReading(avg, digits) : "--"}
+            <span style={{ color: C.textMuted, fontSize: 10, marginLeft: 3 }}>{unit}</span>
+          </span>
+          <div style={{ color: C.textMuted, fontSize: 9, marginTop: 3, whiteSpace: "nowrap" }}>
+            Min {min !== null ? formatReading(min, digits) : "--"} · Max {max !== null ? formatReading(max, digits) : "--"}
+          </div>
+        </div>
       </div>
-      <div style={{ minHeight: 0, border: `1px solid ${C.borderSoft}`, borderRadius: 8, background: "#151515", padding: 6 }}>
-        {valid.length ? (
-          <ResponsiveContainer width="100%" height="100%">
+              <div className="health-chart-frame" style={{ minHeight: 0, height: "100%", border: `1px solid ${C.borderSoft}`, borderRadius: 8, background: "#151515", padding: 6 }}>
+                {valid.length ? (
+          <ResponsiveContainer key={`${dataKey}-${data.length}-${data[0]?.timestamp || 0}-${data[data.length - 1]?.timestamp || 0}`} width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 8, right: 10, left: 2, bottom: 18 }}>
               <defs>
                 <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
@@ -523,7 +520,7 @@ function SensorChart({ data, dataKey, name, unit, color, domain, digits = 0, yLa
                 label={{ value: yLabel, angle: -90, fill: C.textMuted, fontSize: 9, position: "insideLeft" }}
               />
               <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
-              <Area type="monotone" dataKey={dataKey} name={name} stroke={color} fill={`url(#${gradientId})`} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+              <Area type="monotone" dataKey={dataKey} name={name} stroke={color} fill={`url(#${gradientId})`} strokeWidth={2} dot={valid.length < 2 ? { r: 3 } : false} isAnimationActive={false} connectNulls />
             </AreaChart>
           </ResponsiveContainer>
         ) : (

@@ -106,7 +106,7 @@ export default function DevicesPage({ miners, setMiners }) {
 
     try {
       if (type === "register") {
-        const newDevice = { ...payload, active: false, status: "offline", lastSeen: null, hr: 0, spo2: 0, temp: 0, finger: false, manual_alert: false, sim_mode: false };
+        const newDevice = { ...payload, active: false, status: "offline", lastSeen: null, hr: 0, spo2: 0, temp: 0, finger: false, manual_alert: false };
         await registerDevice(newDevice);
         setMiners((prev) => {
           const existing = prev.some((m) => m.id === newDevice.id);
@@ -201,7 +201,7 @@ export default function DevicesPage({ miners, setMiners }) {
         </Modal>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%", minHeight: 0, overflow: "hidden" }}>
+      <div className="devices-layout page-layout" style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%", minHeight: 0, overflow: "hidden" }}>
         <PageHeader
           label="Device registry"
           title="Miner Device Management"
@@ -241,22 +241,8 @@ export default function DevicesPage({ miners, setMiners }) {
           </div>
         )}
 
-        <section style={{ display: "grid", gridTemplateColumns: "210px minmax(0, 1fr)", gap: 12, alignItems: "stretch", flex: 1, minHeight: 0, overflow: "hidden" }}>
-          <aside className="hide-scrollbar" style={{ display: "grid", gridTemplateRows: "auto auto", gap: 12, alignContent: "start", minHeight: 0, overflow: "auto" }}>
-            <div style={{ ...cardStyle, padding: 14 }}>
-              <div style={{ color: C.text, fontSize: 14, fontWeight: 950, paddingBottom: 11, marginBottom: 6, borderBottom: `1px solid ${C.borderSoft}` }}>Miners Health</div>
-              <RegistryMetric label="Total devices" value={stats.total} color={C.primary} />
-              <RegistryMetric label="Online" value={stats.online} color={C.green} />
-              <RegistryMetric label="Offline" value={stats.offline} color={C.offline} />
-              <RegistryMetric label="Needs attention" value={stats.attention} color={stats.attention ? C.amber : C.green} />
-            </div>
-            <div style={{ ...cardStyle, padding: 14 }}>
-              <div style={{ color: C.text, fontSize: 13, fontWeight: 950, marginBottom: 7 }}>Registration Guide</div>
-              <p style={{ color: C.textMuted, fontSize: 12, lineHeight: 1.55, margin: 0 }}>Use stable IDs like MCM-001. A device comes online automatically once it sends new sensor data.</p>
-            </div>
-          </aside>
-
-          <div style={{ display: "grid", gridTemplateRows: "minmax(0, 1fr) auto", gap: 12, minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+        <section className="registry-main" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12, alignItems: "stretch", flex: 1, minHeight: 0, overflow: "hidden" }}>
+          <div style={{ display: "grid", gridTemplateRows: "minmax(0, 1fr)", gap: 12, minWidth: 0, minHeight: 0, overflow: "hidden" }}>
             <div style={{ ...cardStyle, minWidth: 0, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
               <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", gap: 10 }}>
               <div style={{ color: C.text, fontSize: 14, fontWeight: 900 }}>Registered Miners</div>
@@ -316,22 +302,6 @@ export default function DevicesPage({ miners, setMiners }) {
                 </div>
               ))}
                 {filtered.length === 0 && <div style={{ padding: 42, textAlign: "center", color: C.textMuted, fontSize: 13 }}>No matching device found.</div>}
-              </div>
-            </div>
-            <div className="registry-support-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.35fr) minmax(250px, 0.65fr)", gap: 12 }}>
-              <div style={{ ...cardStyle, padding: 14 }}>
-                <div style={{ color: C.text, fontSize: 13, fontWeight: 950 }}>Deployment workflow</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 10 }}>
-                  <RegistryStep number="01" title="Register" text="Create a stable device identity and location." />
-                  <RegistryStep number="02" title="Provision" text="Assign network credentials in WiFi Config." />
-                  <RegistryStep number="03" title="Verify" text="Confirm the first telemetry and chest contact." />
-                </div>
-              </div>
-              <div style={{ ...cardStyle, padding: 14 }}>
-                <div style={{ color: C.text, fontSize: 13, fontWeight: 950 }}>Registry quality</div>
-                <RegistryMetric label="Locations assigned" value={miners.filter((miner) => miner.location?.trim()).length} color={C.green} />
-                <RegistryMetric label="First data received" value={miners.filter((miner) => miner.lastSeen).length} color={C.oxygen} />
-                <RegistryMetric label="Awaiting first data" value={miners.filter((miner) => !miner.lastSeen).length} color={C.amber} />
               </div>
             </div>
           </div>
@@ -438,26 +408,6 @@ function IconButton({ children, danger, title, onClick }) {
     >
       {children}
     </button>
-  );
-}
-
-// RegistryMetric — fleet health stat row (label + large number) in the Fleet Health sidebar card
-function RegistryStep({ number, title, text }) {
-  return (
-    <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 8, padding: 10, background: "rgba(255,255,255,0.02)" }}>
-      <div style={{ color: C.primary, fontSize: 9.5, fontWeight: 950 }}>{number}</div>
-      <div style={{ color: C.text, fontSize: 11.5, fontWeight: 900, marginTop: 5 }}>{title}</div>
-      <div style={{ color: C.textMuted, fontSize: 10, lineHeight: 1.4, marginTop: 3 }}>{text}</div>
-    </div>
-  );
-}
-
-function RegistryMetric({ label, value, color }) {
-  return (
-    <div style={{ padding: "9px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
-      <div style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
-      <div style={{ color, fontSize: 21, fontWeight: 950, marginTop: 4 }}>{value}</div>
-    </div>
   );
 }
 

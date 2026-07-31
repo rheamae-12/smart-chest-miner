@@ -9,8 +9,8 @@ const navGroups = [
   {
     label: "Monitoring",
     items: [
-      { to: "/command", label: "Command Center", icon: "grid" },
-      { to: "/dashboard", label: "Live Dashboard", icon: "pulse" },
+      { to: "/command", label: "Live Monitoring", icon: "grid" },
+      { to: "/dashboard", label: "Dashboard", icon: "pulse" },
       { to: "/analytics", label: "Analytics", icon: "chart" },
       { to: "/health-logs", label: "Health Logs", icon: "clock" },
       { to: "/sensor-status", label: "Sensor Status", icon: "network" },
@@ -22,7 +22,7 @@ const navGroups = [
     items: [
       { to: "/devices", label: "Device Registry", icon: "device" },
       { to: "/wifi-config", label: "WiFi Config", icon: "wifi" },
-      { to: "/settings", label: "System Config", icon: "settings" },
+      { to: "/settings", label: "System Settings", icon: "settings" },
     ],
   },
 ];

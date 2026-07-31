@@ -48,15 +48,15 @@ export const C = {
 
 // Sidebar route → navbar page title mapping
 export const pageLabels = {
-  "/command": "Command Center",
-  "/dashboard": "Live Monitoring",
+  "/command": "Live Monitoring",
+  "/dashboard": "Dashboard",
   "/analytics": "Analytics",
   "/devices": "Device Registry",
   "/health-logs": "Health Logs",
   "/sensor-status": "Sensor Status",
   "/wifi-config": "WiFi Configuration",
   "/alert-history": "Alert History",
-  "/settings": "System Config",
+  "/settings": "System Settings",
 };
 
 // Base card style — used by every panel/section card in the app
@@ -72,7 +72,7 @@ export const cardStyle = {
 
 // Page wrapper — scrollable, full-height, consistent padding
 export const pageStyle = {
-  padding: "20px 22px",
+  padding: "clamp(14px, 1.45vw, 22px)",
   overflow: "hidden",
   overflowX: "hidden",
   height: "100%",

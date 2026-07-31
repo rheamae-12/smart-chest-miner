@@ -36,24 +36,27 @@ export default function FilterToolbar({
           </div>
           <div className="filter-toolbar-description">{summary}</div>
         </div>
+      </div>
+      <div className="filter-toolbar-controls">
+        {children}
         {activeCount > 0 && onReset && (
           <button
             type="button"
+            className="filter-reset-button"
             onClick={onReset}
-            style={{ ...ghostButtonStyle, padding: "7px 10px", fontSize: 11, whiteSpace: "nowrap" }}
+            style={{ ...ghostButtonStyle, padding: "8px 12px", fontSize: 11, whiteSpace: "nowrap" }}
           >
             Reset view
           </button>
         )}
       </div>
-      <div className="filter-toolbar-controls">{children}</div>
     </section>
   );
 }
 
-export function FilterField({ label, children, wide = false }) {
+export function FilterField({ label, children, wide = false, className = "" }) {
   return (
-    <label className={wide ? "filter-field is-wide" : "filter-field"}>
+    <label className={`${wide ? "filter-field is-wide" : "filter-field"}${className ? ` ${className}` : ""}`}>
       <span>{label}</span>
       {children}
     </label>

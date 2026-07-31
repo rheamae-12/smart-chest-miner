@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { changeFirebasePassword, createFirebaseAccount, loginWithEmail, logoutFirebase, observeFirebaseAuth, sendFirebasePasswordReset } from "../firebase/auth";
-import { firebaseConfigured } from "../firebase/config";
+import { auth, firebaseConfigError, firebaseConfigured } from "../firebase/config";
 import { getUserProfile, saveUserProfile, updateUserProfile } from "../firebase/firestore";
 import { passwordMeetsPolicy } from "../utils/password";
 import { isViewOnlyRole } from "../utils/roles";
@@ -122,12 +122,13 @@ export function AuthProvider({ children }) {
       return null;
     }
   });
-  const [authReady, setAuthReady] = useState(!firebaseConfigured);
-  const [authError, setAuthError] = useState("");
+  const [authReady, setAuthReady] = useState(!firebaseConfigured || !auth);
+  const [authError, setAuthError] = useState(firebaseConfigError);
   const [authMessage, setAuthMessage] = useState("");
 
   useEffect(() => {
     if (!firebaseConfigured) return undefined;
+    if (!auth) return undefined;
 
     return observeFirebaseAuth(async (firebaseUser) => {
       try {
@@ -187,7 +188,7 @@ export function AuthProvider({ children }) {
         }
       } catch (error) {
         registerFailedLogin();
-        setAuthError(error.message);
+        setAuthError(describeAuthError(error));
         return false;
       }
     } else {
@@ -253,7 +254,7 @@ export function AuthProvider({ children }) {
         if (error.code === "auth/email-already-in-use") {
           setAuthError("This email already exists in Firebase Authentication. Use Log In, and the app will create the missing Firestore profile automatically.");
         } else {
-          setAuthError(error.message);
+          setAuthError(describeAuthError(error));
         }
         return false;
       }
@@ -336,4 +337,21 @@ export function AuthProvider({ children }) {
   const value = { user, authReady, canManage, login, signUp, updateUser, changePassword, resetPassword, logout, authError, authMessage };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+function describeAuthError(error) {
+  const code = String(error?.code || "").replace(/^auth\//, "");
+  const messages = {
+    "invalid-credential": "Firebase rejected these credentials. Check the email and password, and confirm Email/Password sign-in is enabled.",
+    "invalid-login-credentials": "Firebase rejected these credentials. Check the email and password, and confirm Email/Password sign-in is enabled.",
+    "user-not-found": "No Firebase account exists for this email.",
+    "wrong-password": "The Firebase password is incorrect.",
+    "user-disabled": "This Firebase account has been disabled.",
+    "operation-not-allowed": "Email/Password sign-in is disabled in Firebase Authentication.",
+    "network-request-failed": "Firebase could not be reached. Check the network, Firebase project, and authorized domain.",
+    "invalid-api-key": "The Firebase API key is invalid. Check the VITE_FIREBASE_* values used during the build.",
+    "app-not-authorized": "This domain is not authorized in Firebase Authentication settings.",
+    "too-many-requests": "Firebase temporarily blocked requests from this device. Try again later.",
+  };
+  return messages[code] || error?.message || "Authentication failed. Check the Firebase configuration and account details.";
 }

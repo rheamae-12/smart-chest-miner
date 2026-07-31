@@ -65,7 +65,7 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
 
   return (
     <div style={{ ...pageStyle, padding: "14px 16px" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0, 1fr)", gap: 12, alignItems: "stretch", height: "100%", minHeight: 0, overflow: "hidden" }} className="cc-grid">
+      <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0, 1fr)", gap: 12, alignItems: "stretch", height: "100%", minHeight: 0, overflow: "hidden" }} className="cc-grid page-layout">
 
         {/* ── Fleet rail (master) ── */}
         <aside style={{ ...cardStyle, display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", minHeight: 0, overflow: "hidden" }}>
@@ -267,11 +267,11 @@ function OverviewTab({ miner, liveData, thresholds }) {
   const hasData = live && chartData.some((d) => d.hr != null || d.spo2 != null || d.temp != null);
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 260px", gap: 14, alignItems: "start" }} className="cc-overview">
-      <div>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 260px", gap: 14, alignItems: "stretch", height: "100%", minHeight: 0 }} className="cc-overview">
+      <div className="cc-overview-readings" style={{ minWidth: 0, minHeight: 0 }}>
         <div style={{ color: C.text, fontSize: 14, fontWeight: 950, marginBottom: 10 }}>Live Readings</div>
         {hasData ? (
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData} margin={{ top: 8, right: 22, left: 4, bottom: 18 }}>
               <CartesianGrid stroke={C.borderSoft} strokeDasharray="3 6" vertical={false} />
               <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={28} label={{ value: "Time", fill: C.textMuted, fontSize: 10, position: "insideBottom", offset: -4 }} />
@@ -286,7 +286,7 @@ function OverviewTab({ miner, liveData, thresholds }) {
             </LineChart>
           </ResponsiveContainer>
         ) : (
-          <div style={{ minHeight: 230, display: "grid", placeItems: "center", border: `1px dashed ${C.border}`, borderRadius: 10, color: C.textMuted, fontSize: 13, textAlign: "center", padding: 20 }}>
+          <div className="cc-overview-empty" style={{ display: "grid", placeItems: "center", border: `1px dashed ${C.border}`, borderRadius: 10, color: C.textMuted, fontSize: 13, textAlign: "center", padding: 20 }}>
             <div>
               <Icon name={miner.active ? "pulse" : "wifi"} size={24} color={miner.active ? C.amber : C.offline} />
               <div style={{ color: miner.active ? C.amber : C.offline, fontWeight: 900, marginTop: 10 }}>{miner.active ? "Waiting for valid readings" : "Device offline"}</div>
@@ -295,7 +295,7 @@ function OverviewTab({ miner, liveData, thresholds }) {
           </div>
         )}
       </div>
-      <div style={{ display: "grid", gap: 8, alignContent: "start" }}>
+      <div className="cc-overview-status" style={{ ...cardStyle, padding: "8px 12px", display: "flex", flexDirection: "column", gap: 0, minHeight: 0, alignSelf: "start" }}>
         <div style={{ color: C.text, fontSize: 13, fontWeight: 950, marginBottom: 2 }}>Status</div>
         <Indicator color={miner.active ? C.green : C.offline} label={miner.active ? "Readings online" : "Readings offline"} />
         <Indicator color={!miner.active ? C.offline : miner.finger === false ? C.amber : C.green} label={!miner.active ? "Chest contact offline" : miner.finger === false ? "Chest contact missing" : "Chest contact normal"} />
@@ -340,14 +340,13 @@ function SignalTab({ miner }) {
     { label: "Heart-rate sensor", value: miner.active ? (miner.hr > 0 ? "Reporting" : "No reading") : "—", good: miner.active && miner.hr > 0 },
     { label: "SpO2 sensor", value: miner.active ? (miner.spo2 > 0 ? "Reporting" : "No reading") : "—", good: miner.active && miner.spo2 > 0 },
     { label: "Body-temp sensor", value: miner.active ? (miner.temp > 0 ? "Reporting" : "No reading") : "—", good: miner.active && miner.temp > 0 },
-    { label: "Simulation mode", value: miner.sim_mode ? "ON (test data)" : "Off", good: !miner.sim_mode },
     { label: "Last reading", value: formatLastSeen(miner.lastSeen), good: miner.active },
   ];
   const healthy = rows.filter((row) => row.good).length;
   const score = Math.round((healthy / rows.length) * 100);
   return (
-    <div className="cc-signal-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.5fr) minmax(250px, 0.75fr)", gap: 14, alignItems: "start" }}>
-      <div style={{ display: "grid", gap: 8 }}>
+    <div className="cc-signal-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.5fr) minmax(250px, 0.75fr)", gap: 14, alignItems: "stretch", height: "100%", minHeight: 0 }}>
+      <div className="cc-signal-list" style={{ display: "grid", gap: 8, minHeight: 0 }}>
         {rows.map((r) => (
           <div key={r.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "11px 14px", border: `1px solid ${C.borderSoft}`, borderRadius: 9, background: "rgba(255,255,255,0.02)" }}>
             <span style={{ color: C.textMuted, fontSize: 12 }}>{r.label}</span>
@@ -358,16 +357,37 @@ function SignalTab({ miner }) {
           </div>
         ))}
       </div>
-      <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 10, padding: 16, background: "rgba(255,255,255,0.02)" }}>
+      <div className="cc-signal-readiness" style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 10, padding: 16, background: "rgba(255,255,255,0.02)", minHeight: 0 }}>
         <div style={moduleLabel}>Signal readiness</div>
-        <div style={{ color: score === 100 ? C.green : C.amber, fontSize: 34, fontWeight: 950, marginTop: 10, fontVariantNumeric: "tabular-nums" }}>{score}%</div>
-        <div style={{ height: 6, background: C.borderSoft, borderRadius: 999, overflow: "hidden", margin: "12px 0" }}>
+        <div className="cc-signal-score-row">
+          <div style={{ color: score === 100 ? C.green : C.amber, fontSize: 34, fontWeight: 950, fontVariantNumeric: "tabular-nums" }}>{score}%</div>
+          <span>{healthy}/{rows.length} checks healthy</span>
+        </div>
+        <div className="cc-signal-progress" style={{ height: 6, background: C.borderSoft, borderRadius: 999, overflow: "hidden" }}>
           <div style={{ width: `${score}%`, height: "100%", background: score === 100 ? C.green : C.amber }} />
         </div>
-        <div style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.6 }}>
+        <div className="cc-signal-readiness-copy" style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.6 }}>
           {miner.active
             ? `${healthy} of ${rows.length} signal checks are healthy. Review amber rows before relying on the live readings.`
             : "The last known state is preserved here. Confirm power and queued WiFi settings before restarting the device."}
+        </div>
+        <div className="cc-signal-readiness-details">
+          <div className="cc-signal-readiness-detail">
+            <span>Needs review</span>
+            <strong>{rows.length - healthy}</strong>
+          </div>
+          <div className="cc-signal-readiness-detail">
+            <span>Connection</span>
+            <strong>{miner.active && !miner.stale ? "Online" : miner.stale ? "Stale" : "Offline"}</strong>
+          </div>
+          <div className="cc-signal-readiness-detail">
+            <span>Chest contact</span>
+            <strong>{miner.active && miner.finger !== false ? "Detected" : "Missing"}</strong>
+          </div>
+          <div className="cc-signal-readiness-detail">
+            <span>Last reading</span>
+            <strong>{formatLastSeen(miner.lastSeen)}</strong>
+          </div>
         </div>
       </div>
     </div>
@@ -376,7 +396,7 @@ function SignalTab({ miner }) {
 
 function Indicator({ color, label }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 8, background: `${color}0A`, border: `1px solid ${color}22` }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 35, padding: "7px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
       <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 10px ${color}`, flexShrink: 0 }} />
       <span style={{ color: C.textDim, fontSize: 12 }}>{label}</span>
     </div>

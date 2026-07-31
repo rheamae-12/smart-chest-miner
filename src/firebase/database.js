@@ -1,4 +1,4 @@
-import { onValue, push, ref, remove, serverTimestamp, set, update } from "firebase/database";
+import { get, onValue, push, ref, remove, serverTimestamp, set, update } from "firebase/database";
 import { auth, db, firebaseDatabaseUrl } from "./config";
 
 // restAuthParam — returns "&auth=<idToken>" for the signed-in user so the REST
@@ -34,6 +34,32 @@ export function subscribeToDevices(onData, onError) {
   return () => {
     unsubscribeSdk();
     stopRestPolling?.();
+  };
+}
+
+// testFirebaseConnection — performs one read-only database check for the
+// Settings page. It deliberately reads the devices collection only and never
+// writes test records or changes device state.
+export async function testFirebaseConnection() {
+  if (db) {
+    const snapshot = await get(ref(db, "devices"));
+    const devices = snapshot.val() || {};
+    return {
+      connected: true,
+      source: "Realtime Database SDK",
+      devices,
+    };
+  }
+
+  const url = firebaseRestUrl("devices");
+  if (!url) throw new Error("Firebase is not configured. Add VITE_FIREBASE_* values to .env.");
+
+  const response = await fetch(`${url}?print=pretty${await restAuthParam()}`);
+  if (!response.ok) throw new Error(`Firebase device check failed: HTTP ${response.status}`);
+  return {
+    connected: true,
+    source: "Realtime Database REST",
+    devices: (await response.json()) || {},
   };
 }
 
@@ -265,7 +291,6 @@ export async function registerDevice(device) {
       manual_alert: device.manual_alert ?? false,
       button_pressed: device.button_pressed ?? false,
       button_press_count: device.button_press_count ?? 0,
-      sim_mode: false,
     },
   };
 
@@ -308,7 +333,6 @@ export async function updateDeviceStatus(deviceId, status, lastSeen = Date.now()
         manual_alert: false,
         button_pressed: false,
         button_press_count: 0,
-        sim_mode: false,
         offlineAt: Date.now(),
       },
     });
@@ -345,7 +369,6 @@ export async function removeDevice(deviceId) {
       manual_alert: false,
       button_pressed: false,
       button_press_count: 0,
-      sim_mode: false,
       offlineAt: timestamp,
     },
   };

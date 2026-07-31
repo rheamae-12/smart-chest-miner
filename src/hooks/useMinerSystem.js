@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { MINERS_INIT } from "../data/mockMiners";
 import { firebaseConfigured } from "../firebase/config";
 import { clearActivityLogs as clearActivityLogsRemote, clearHealthLogs as clearHealthLogsRemote, saveHistorySummaries, subscribeToActivityLogs, subscribeToAllAnalytics, subscribeToDevices, trimAnalyticsHistory, updateDeviceStatus, writeActivityLog } from "../firebase/database";
 import { DEFAULT_THRESHOLDS, getVitalStatus } from "../utils/alertChecker";
@@ -39,24 +38,6 @@ function readStoredSystem() {
   } catch {
     return null;
   }
-}
-
-// initialLiveData — creates the per-device live chart series map seeded from MINERS_INIT
-function initialLiveData() {
-  const data = {};
-  MINERS_INIT.forEach((miner) => {
-    data[miner.id] = { hr: [], spo2: [], temp: [] };
-  });
-  return data;
-}
-
-// initialAnalyticsData — creates the per-device analytics array map seeded from MINERS_INIT
-function initialAnalyticsData() {
-  const data = {};
-  MINERS_INIT.forEach((miner) => {
-    data[miner.id] = [];
-  });
-  return data;
 }
 
 // normalizeTimestamp — converts a raw timestamp value to a valid Unix ms number; returns 0 if invalid
@@ -134,7 +115,6 @@ export function mapRealtimeDevices(value, timeoutMs = ONLINE_TIMEOUT_MS) {
         button_pressed: buttonPressed,
         button_press_count: buttonPressCount,
         battery: toReading(live.battery ?? device?.battery),
-        sim_mode: toBoolean(live.sim_mode ?? live.simMode, false),
       };
     })
     .sort((a, b) => a.id.localeCompare(b.id));
@@ -201,7 +181,6 @@ function latestAnalyticsMiner(rows, timeoutMs) {
     button_pressed: latest.button_pressed ?? false,
     button_press_count: latest.button_press_count ?? 0,
     stale: !active,
-    sim_mode: false,
   };
 }
 
@@ -473,9 +452,9 @@ export function buildVitalLogs(miner, thresholds) {
 // manages live chart data, stale detection interval, threshold state, and localStorage persistence
 export function useMinerSystem(enabled) {
   const stored = readStoredSystem();
-  const [miners, rawSetMiners] = useState(() => (firebaseConfigured ? [] : stored?.miners || MINERS_INIT));
-  const [liveData, setLiveData] = useState(initialLiveData);
-  const [analyticsData, setAnalyticsData] = useState(initialAnalyticsData);
+  const [miners, rawSetMiners] = useState(() => (firebaseConfigured ? [] : stored?.miners || []));
+  const [liveData, setLiveData] = useState({});
+  const [analyticsData, setAnalyticsData] = useState({});
   const [activityLogs, setActivityLogs] = useState([]);
   const [thresholds, setThresholds] = useState({
     ...DEFAULT_THRESHOLDS,
@@ -483,7 +462,7 @@ export function useMinerSystem(enabled) {
     tempMin: Number(stored?.thresholds?.tempMin) === 36 ? DEFAULT_THRESHOLDS.tempMin : (stored?.thresholds?.tempMin ?? DEFAULT_THRESHOLDS.tempMin),
   });
   const [pollingInterval, setPollingInterval] = useState(stored?.pollingInterval || 5);
-  const [staleSeconds, setStaleSeconds] = useState(stored?.staleSeconds || DEFAULT_STALE_SECONDS);
+  const [staleSeconds] = useState(DEFAULT_STALE_SECONDS);
   const [usingRealtime, setUsingRealtime] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const minersRef = useRef(miners);
@@ -540,7 +519,7 @@ export function useMinerSystem(enabled) {
   // Persist settings locally. When Firebase is the source of truth we deliberately
   // do NOT cache the live miners array — it would go stale and rewrite on every
   // reading tick. Only thresholds/timing are cached there. Offline/demo mode keeps
-  // the mock fleet so it survives a reload.
+  // locally registered devices so they survive a reload when Firebase is unavailable.
   useEffect(() => {
     localStorage.setItem(
       SYSTEM_STORAGE_KEY,
@@ -548,10 +527,9 @@ export function useMinerSystem(enabled) {
         miners: firebaseConfigured ? undefined : miners,
         thresholds,
         pollingInterval,
-        staleSeconds,
       }),
     );
-  }, [miners, thresholds, pollingInterval, staleSeconds]);
+  }, [miners, thresholds, pollingInterval]);
 
   useEffect(() => {
     if (!enabled || !firebaseConfigured) return undefined;
@@ -741,7 +719,6 @@ export function useMinerSystem(enabled) {
     pollingInterval,
     setPollingInterval,
     staleSeconds,
-    setStaleSeconds,
     usingRealtime,
     connectionError,
     clearActivityLogs: async () => {

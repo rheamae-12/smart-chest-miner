@@ -95,7 +95,7 @@ export default function App() {
         className="app-shell"
         style={{
           display: "flex",
-          height: "100vh",
+          height: "100dvh",
           background: C.bg0,
           color: C.text,
           overflow: "hidden",
@@ -160,7 +160,6 @@ export default function App() {
                     <SettingsPage
                       miners={system.miners}
                       staleSeconds={system.staleSeconds}
-                      setStaleSeconds={system.setStaleSeconds}
                     />
                   }
                 />

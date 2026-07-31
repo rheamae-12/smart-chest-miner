@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
-import { firebaseConfigured } from "../firebase/config";
+import { firebaseConfigError, firebaseConfigured } from "../firebase/config";
 import logo from "../assets/smart-chest-miner-logo.png";
 import { C, cardStyle, controlStyle, primaryButtonStyle } from "../theme";
 import { passwordMeetsPolicy, passwordRequirements, passwordStrength } from "../utils/password";
@@ -86,7 +86,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="login-stage" style={{ height: "100vh", background: C.bg0, display: "grid", placeItems: "center", overflow: "hidden", position: "relative", padding: 24, boxSizing: "border-box" }}>
+    <div className="login-stage" style={{ height: "100dvh", background: C.bg0, display: "grid", placeItems: "center", overflow: "hidden", position: "relative", padding: 24, boxSizing: "border-box" }}>
       <div className="login-gridline" />
       <div className="login-orb login-orb-a" />
       <div className="login-orb login-orb-b" />
@@ -113,6 +113,17 @@ export default function LoginPage() {
             </div>
 
             <LivePulseInline />
+
+            <div className={`login-config-status ${firebaseConfigured ? "is-ready" : "is-demo"}`} role="status">
+              <span className="login-config-dot" aria-hidden="true" />
+              <span>
+                {firebaseConfigError
+                  ? firebaseConfigError
+                  : firebaseConfigured
+                    ? "Firebase Authentication is enabled for this build."
+                    : "Firebase is not configured in this build. Demo: admin@smartchestminer.io / admin123"}
+              </span>
+            </div>
 
             <div style={{ display: "grid", gap: 14 }}>
               {mode === "signup" && <Field label="Full Name" value={form.name} autoComplete="name" onChange={(name) => setForm({ ...form, name })} placeholder="Juan Dela Cruz" />}

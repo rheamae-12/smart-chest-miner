@@ -1,18 +1,14 @@
 import { useState } from "react";
-import Modal from "../components/Modal";
 import PageHeader from "../components/PageHeader";
-import { useAuth } from "../context/useAuth";
-import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
+import { testFirebaseConnection } from "../firebase/database";
+import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle } from "../theme";
 
 const PUSH_ENABLED_KEY = "smart-chest-miner-push-enabled";
 
-export default function SettingsPage({ miners, staleSeconds, setStaleSeconds }) {
-  const { canManage } = useAuth();
-  const [localStaleSeconds, setLocalStaleSeconds] = useState(staleSeconds ?? 75);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState("");
+export default function SettingsPage({ miners, staleSeconds }) {
   const [pushEnabled, setPushEnabled] = useState(() => localStorage.getItem(PUSH_ENABLED_KEY) !== "false");
+  const [firebaseTest, setFirebaseTest] = useState(null);
+  const [testingFirebase, setTestingFirebase] = useState(false);
 
   const online = miners.filter((miner) => miner.active && !miner.stale).length;
   const offline = miners.filter((miner) => !miner.active || miner.stale).length;
@@ -23,52 +19,35 @@ export default function SettingsPage({ miners, staleSeconds, setStaleSeconds }) 
     localStorage.setItem(PUSH_ENABLED_KEY, String(enabled));
   };
 
-  const requestSave = () => {
-    setError("");
-    if (localStaleSeconds < 10 || localStaleSeconds > 300) {
-      setError("Offline timeout must be between 10 and 300 seconds.");
-      return;
+  const runFirebaseTest = async () => {
+    setTestingFirebase(true);
+    setFirebaseTest({ state: "checking" });
+    try {
+      const result = await testFirebaseConnection();
+      const detectedDevices = Object.keys(result.devices || {}).length;
+      const onlineDevices = miners.filter((miner) => miner.active && !miner.stale).length;
+      setFirebaseTest({
+        state: "success",
+        source: result.source,
+        detectedDevices,
+        onlineDevices,
+        offlineDevices: Math.max(0, detectedDevices - onlineDevices),
+      });
+    } catch (testError) {
+      setFirebaseTest({ state: "error", message: testError.message || "Firebase device check failed." });
+    } finally {
+      setTestingFirebase(false);
     }
-    setConfirmOpen(true);
-  };
-
-  const executeSave = () => {
-    setStaleSeconds?.(localStaleSeconds);
-    setConfirmOpen(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2800);
-  };
-
-  const discard = () => {
-    setLocalStaleSeconds(staleSeconds ?? 75);
-    setError("");
   };
 
   return (
     <div style={pageStyle}>
-      {confirmOpen && (
-        <Modal
-          title="Save Settings"
-          onClose={() => setConfirmOpen(false)}
-          actions={
-            <>
-              <button onClick={() => setConfirmOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>Cancel</button>
-              <button onClick={executeSave} style={{ ...primaryButtonStyle, padding: "9px 15px" }}>Confirm Save</button>
-            </>
-          }
-        >
-          <div style={{ color: C.textMuted, fontSize: 13, lineHeight: 1.6 }}>
-            Apply an offline timeout of <strong style={{ color: C.text }}>{localStaleSeconds} seconds</strong> to connected miners?
-          </div>
-        </Modal>
-      )}
-
-      <div style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 10, height: "100%", minHeight: 0, overflow: "hidden" }}>
+      <div className="settings-layout page-layout" style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", gap: 10, height: "100%", minHeight: 0, overflow: "hidden" }}>
         <PageHeader
           label="Configuration"
           title="System Settings"
           titleSize={20}
-          subtitle="Adjust monitoring behavior and alert delivery for connected miners."
+          subtitle="Review fixed monitoring behavior and manage alert delivery for connected miners."
           padding="14px 18px"
           right={
             <>
@@ -88,14 +67,27 @@ export default function SettingsPage({ miners, staleSeconds, setStaleSeconds }) 
             <SettingField
               label="Offline Timeout"
               unit="seconds"
-              value={localStaleSeconds}
-              onChange={(v) => setLocalStaleSeconds(Number(v))}
-              hint="Mark a miner offline after this many seconds with no data (10-300)."
+              value={staleSeconds ?? 75}
+              hint="Fixed monitoring timeout used to identify devices that stop sending data."
             />
             <InfoRow
               label="Status"
               text="Vital limits are fixed in software and firmware so the website no longer exposes threshold configuration."
             />
+            <div className="firebase-test-block">
+              <button type="button" onClick={runFirebaseTest} disabled={testingFirebase} style={{ ...ghostButtonStyle, width: "100%", padding: "9px 11px", fontSize: 11, opacity: testingFirebase ? 0.7 : 1 }}>
+                {testingFirebase ? "Testing Firebase..." : "Test Firebase Connection"}
+              </button>
+              {firebaseTest?.state === "checking" && <div className="firebase-test-result is-checking">Reading device status...</div>}
+              {firebaseTest?.state === "success" && (
+                <div className="firebase-test-result is-success">
+                  <strong>Firebase reachable</strong>
+                  <span>{firebaseTest.detectedDevices} detected · {firebaseTest.onlineDevices} online · {firebaseTest.offlineDevices} offline</span>
+                  <small>{firebaseTest.source}</small>
+                </div>
+              )}
+              {firebaseTest?.state === "error" && <div className="firebase-test-result is-error">{firebaseTest.message}</div>}
+            </div>
           </SettingsCard>
 
           <SettingsCard
@@ -133,26 +125,11 @@ export default function SettingsPage({ miners, staleSeconds, setStaleSeconds }) 
             description="A compact preview of how live device state changes under this configuration."
           >
             <LifecycleRow label="Receiving data" value="Online" color={C.green} text="Vitals and contact state update in real time." />
-            <LifecycleRow label={`No data for ${localStaleSeconds}s`} value="Offline" color={C.offline} text="The device is removed from active averages." />
+            <LifecycleRow label={`No data for ${staleSeconds ?? 75}s`} value="Offline" color={C.offline} text="The device is removed from active averages." />
             <LifecycleRow label="Stream resumes" value="Recovered" color={C.oxygen} text="The existing row updates in place without reordering." />
-            <LifecycleRow label="Simulation enabled" value="Flagged" color={C.amber} text="Test data stays identifiable in diagnostics." />
           </SettingsCard>
         </div>
 
-        <footer style={{ ...cardStyle, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "11px 12px" }}>
-          <button
-            onClick={requestSave}
-            disabled={!canManage}
-            title={canManage ? undefined : "Your account is view-only"}
-            style={{ ...primaryButtonStyle, padding: "11px 28px", fontSize: 13, opacity: canManage ? 1 : 0.5, cursor: canManage ? "pointer" : "not-allowed" }}
-          >
-            Save Changes
-          </button>
-          <button onClick={discard} disabled={!canManage} style={{ ...ghostButtonStyle, padding: "11px 18px", fontSize: 13, opacity: canManage ? 1 : 0.5, cursor: canManage ? "pointer" : "not-allowed" }}>Discard Changes</button>
-          {!canManage && <span style={{ fontSize: 12, color: C.textMuted, fontStyle: "italic" }}>View-only account; settings are read-only.</span>}
-          {saved && <span style={{ fontSize: 12, color: C.green, fontWeight: 800 }}>Settings saved</span>}
-          {error && <span style={{ fontSize: 12, color: C.red, fontWeight: 800 }}>{error}</span>}
-        </footer>
       </div>
     </div>
   );
@@ -175,21 +152,16 @@ function SettingsCard({ number, title, description, children }) {
   );
 }
 
-function SettingField({ label, unit, value, onChange, hint }) {
+function SettingField({ label, unit, value, hint }) {
   return (
     <label style={{ display: "grid", gap: 5, marginBottom: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <span style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 900 }}>{label}</span>
         <span style={{ color: C.primary, fontSize: 9, fontWeight: 900, textTransform: "uppercase" }}>{unit}</span>
       </div>
-      <input
-        type="number"
-        min={10}
-        max={300}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        style={{ ...controlStyle, width: "100%", textAlign: "center", fontSize: 17, fontWeight: 950, padding: "8px" }}
-      />
+      <div aria-label={`${label}: ${value} ${unit}`} style={{ ...controlStyle, width: "100%", boxSizing: "border-box", textAlign: "center", fontSize: 17, fontWeight: 950, padding: "8px", cursor: "default" }}>
+        {value}
+      </div>
       <span style={{ color: C.textMuted, fontSize: 10, lineHeight: 1.4 }}>{hint}</span>
     </label>
   );

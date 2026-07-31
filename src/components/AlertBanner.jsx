@@ -26,6 +26,7 @@ export default function AlertBanner({ miners, thresholds, dismissedAlertIds = []
 
   return (
     <section
+      className="alert-banner"
       aria-live="polite"
       style={{
         ...cardStyle,

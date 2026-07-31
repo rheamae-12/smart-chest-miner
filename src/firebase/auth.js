@@ -7,13 +7,13 @@ export function observeFirebaseAuth(onUser) {
 }
 
 export async function loginWithEmail(email, password) {
-  if (!auth) return null;
+  if (!auth) throw new Error("Firebase Authentication is not configured. Add the VITE_FIREBASE_* values to .env and rebuild.");
   const credential = await signInWithEmailAndPassword(auth, email, password);
   return credential.user;
 }
 
 export async function createFirebaseAccount({ name, email, password }) {
-  if (!auth) return null;
+  if (!auth) throw new Error("Firebase Authentication is not configured. Add the VITE_FIREBASE_* values to .env and rebuild.");
   const credential = await createUserWithEmailAndPassword(auth, email, password);
   if (name) {
     await updateProfile(credential.user, { displayName: name });

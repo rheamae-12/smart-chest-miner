@@ -107,8 +107,9 @@ export default function Modal({ title, children, actions, onClose, width = 560 }
           maxHeight: "min(88vh, 820px)",
           boxShadow: C.shadow,
           display: "grid",
-          gridTemplateRows: "auto minmax(0, auto) auto",
+          gridTemplateRows: "auto minmax(0, 1fr) auto",
           overflow: "hidden",
+          minHeight: 0,
           outline: "none",
         }}
       >
@@ -126,7 +127,7 @@ export default function Modal({ title, children, actions, onClose, width = 560 }
             </button>
           )}
         </header>
-        <div className="modal-body hide-scrollbar" style={{ overflowY: "auto", overscrollBehavior: "contain", padding: "4px 22px 2px" }}>
+        <div className="modal-body hide-scrollbar" style={{ overflowY: "auto", overscrollBehavior: "contain", padding: "4px 22px 2px", minHeight: 0 }}>
           {children}
         </div>
         {actions && (

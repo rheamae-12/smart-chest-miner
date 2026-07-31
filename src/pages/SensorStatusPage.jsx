@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import PageHeader from "../components/PageHeader";
 import { C, cardStyle, pageStyle } from "../theme";
 import { formatLastSeen, formatReading } from "../utils/formatters";
 import { sortMinersActiveFirst } from "../utils/minerOrdering";
@@ -12,25 +11,11 @@ export default function SensorStatusPage({ miners = [] }) {
   );
   const isOnline = (miner) => miner.active && !miner.stale;
   const active = miners.filter(isOnline).length;
-  const warnings = miners.filter((miner) => miner.finger === false || miner.stale || !miner.active).length;
   const maintenance = fleet.map(buildMaintenanceItem);
 
   return (
     <div style={pageStyle}>
-      <div style={{ display: "grid", gridTemplateRows: "auto auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
-        <PageHeader
-          label="Sensor diagnostics"
-          title="Sensor Status"
-          titleSize={26}
-          subtitle="Signal integrity, contact quality, and guided recovery for every registered device."
-          right={
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <HeaderStat label="Active miners" value={`${active}/${miners.length}`} color={active ? C.green : C.offline} />
-              <HeaderStat label="Need review" value={warnings} color={warnings ? C.amber : C.green} />
-            </div>
-          }
-        />
-
+      <div className="sensor-status-layout page-layout" style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
         <section className="cc-vitals" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <IntegrityTile label="HR Sensors" value={miners.filter((miner) => isOnline(miner) && miner.hr > 0).length} total={miners.length} color={C.red} />
           <IntegrityTile label="SpO2 Sensors" value={miners.filter((miner) => isOnline(miner) && miner.spo2 > 0).length} total={miners.length} color={C.oxygen} />
@@ -44,7 +29,7 @@ export default function SensorStatusPage({ miners = [] }) {
             <div style={{ color: C.text, fontSize: 15, fontWeight: 950 }}>Sensor nodes</div>
             <Indicator color={active ? C.green : C.offline} label="Diagnostics update automatically" />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(310px, 1fr))", gap: 10 }}>
+          <div className="sensor-nodes-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(310px, 1fr))", gap: 10 }}>
             {fleet.map((miner) => <SensorNode key={miner.id} miner={miner} />)}
           </div>
         </section>
@@ -155,15 +140,6 @@ function GuideStep({ number, title, text }) {
         <div style={{ color: C.text, fontSize: 11.5, fontWeight: 900 }}>{title}</div>
         <div style={{ color: C.textMuted, fontSize: 10.5, lineHeight: 1.45, marginTop: 3 }}>{text}</div>
       </div>
-    </div>
-  );
-}
-
-function HeaderStat({ label, value, color }) {
-  return (
-    <div style={{ ...cardStyle, padding: "10px 14px", minWidth: 132 }}>
-      <div style={{ color: C.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
-      <div style={{ color, fontSize: 22, fontWeight: 950, marginTop: 5, fontVariantNumeric: "tabular-nums" }}>{value}</div>
     </div>
   );
 }

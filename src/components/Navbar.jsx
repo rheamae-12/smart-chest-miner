@@ -275,7 +275,8 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
             </>
           }
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 11 }}>
+          <div className="notification-modal-content">
+          <div className="notification-modal-summary" style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 11 }}>
             {notificationCount === 0 ? (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: C.green, fontSize: 12, fontWeight: 800 }}>
                 <Icon name="check" size={14} color={C.green} /> All caught up
@@ -294,7 +295,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
               {showUnreadOnly ? "Showing unread" : "Show all"}
             </button>
           </div>
-          <div className="hide-scrollbar" style={{ display: "grid", gap: 8, maxHeight: 390, overflow: "auto" }}>
+          <div className="notification-list hide-scrollbar" style={{ display: "grid", gap: 8, overflow: "auto" }}>
             {visibleEvents.length === 0 ? (
               <div style={{ color: C.textMuted, fontSize: 13 }}>
                 {showUnreadOnly ? "No unread notifications." : "No miner activity has been recorded yet."}
@@ -311,6 +312,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
                 />
               ))
             )}
+          </div>
           </div>
         </Modal>
       )}
@@ -808,6 +810,7 @@ function NotificationRow({ event, read, onOpen, onToggleRead, onClear }) {
   const iconName = NOTIFICATION_ICONS[event.source] || (event.severity === "critical" ? "alert" : "clock");
   return (
     <div
+      className="notification-row"
       onClick={onOpen}
       role="button"
       tabIndex={0}
@@ -823,15 +826,15 @@ function NotificationRow({ event, read, onOpen, onToggleRead, onClear }) {
         transition: "opacity 0.15s, background 0.15s",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "start", minWidth: 0 }}>
+      <div className="notification-row-main" style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
+        <div className="notification-row-title" style={{ display: "flex", gap: 8, alignItems: "start", minWidth: 0 }}>
           <span style={{ marginTop: 1, flexShrink: 0, position: "relative" }}>
             <Icon name={iconName} size={14} color={color} />
             {!read && <span style={{ position: "absolute", top: -3, right: -3, width: 7, height: 7, borderRadius: "50%", background: color, boxShadow: `0 0 6px ${color}` }} />}
           </span>
           <div style={{ color: C.text, fontSize: 12, fontWeight: read ? 700 : 900, lineHeight: 1.35, minWidth: 0 }}>{event.title}</div>
         </div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+        <div className="notification-row-actions" style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
           <div style={{ color, border: `1px solid ${color}55`, background: `${color}14`, borderRadius: 999, padding: "3px 7px", fontSize: 9, fontWeight: 900, textTransform: "uppercase", whiteSpace: "nowrap" }}>{label}</div>
           <button
             onClick={(e) => { e.stopPropagation(); onToggleRead(); }}
@@ -853,8 +856,8 @@ function NotificationRow({ event, read, onOpen, onToggleRead, onClear }) {
           </button>
         </div>
       </div>
-      <div style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.45, marginTop: 4, paddingLeft: 22 }}>{event.detail}</div>
-      <div style={{ marginTop: 8, paddingLeft: 22 }}>
+      <div className="notification-row-detail" style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.45, marginTop: 4, paddingLeft: 22 }}>{event.detail}</div>
+      <div className="notification-row-time" style={{ marginTop: 8, paddingLeft: 22 }}>
         <span style={{ color: C.textMuted, fontSize: 10 }}>{event.timestamp ? formatSystemTimestamp(event.timestamp) : "Current condition"}</span>
       </div>
     </div>
