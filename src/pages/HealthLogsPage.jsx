@@ -3,9 +3,9 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import FilterToolbar, { FilterField, FilterTabs } from "../components/FilterToolbar";
 import Modal from "../components/Modal";
 import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
-import { DEFAULT_THRESHOLDS } from "../utils/alertChecker";
+import { DEFAULT_THRESHOLDS, getVitalStatus } from "../utils/alertChecker";
 import { DATE_RANGE_OPTIONS, isWithinDateRange, resolveDateRange } from "../utils/filtering";
-import { average, compactTimestamp, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
+import { average, compactTimestamp, formatReading, formatSystemTimestamp, lastSeenValue, uniqueChartLabels } from "../utils/formatters";
 import { compareMinersActiveFirst } from "../utils/minerOrdering";
 
 const SESSION_GAP_MS = 3 * 60 * 1000;
@@ -133,16 +133,16 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
           <Summary label="Readings Logged" value={chartData.length} color={C.amber} />
         </section>
 
-        <section className="health-content-grid" style={{ display: "grid", gridTemplateRows: "220px minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
-            <div className="cc-vitals" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, minHeight: 0 }}>
-              <SensorChart data={chartData} dataKey="hr" name="Heart Rate" unit="bpm" color={C.red} digits={0} yLabel="bpm" />
-              <SensorChart data={chartData} dataKey="spo2" name="SpO2" unit="%" color={C.oxygen} domain={dynamicDomain(chartData, "spo2", 2)} digits={0} yLabel="%" />
-              <SensorChart data={chartData} dataKey="temp" name="Body Temp" unit="°C" color={C.teal} domain={dynamicDomain(chartData, "temp", 0.4)} digits={1} yLabel="°C" />
+        <section className="health-content-grid" style={{ display: "grid", gridTemplateRows: "minmax(0, 220px) minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
+            <div className="cc-vitals health-chart-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, minHeight: 0, height: "100%" }}>
+              <SensorChart data={chartData} dataKey="hr" name="Heart Rate" color={C.red} yLabel="bpm" />
+              <SensorChart data={chartData} dataKey="spo2" name="SpO2" color={C.oxygen} domain={dynamicDomain(chartData, "spo2", 2)} yLabel="%" />
+              <SensorChart data={chartData} dataKey="temp" name="Body Temp" color={C.teal} domain={dynamicDomain(chartData, "temp", 0.4)} yLabel="°C" />
             </div>
 
             <div style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
               <div style={{ padding: "14px 16px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                <PanelHeader title="Mining Session Logs" meta="Start time, end time, readings, status, alerts, sensor spikes" />
+                <PanelHeader title="Mining Session Logs" meta="Session time, duration, vital ranges, alerts, SOS, status" />
                 <button
                   disabled={!sessions.length || !onClearHealthLogs}
                   onClick={() => {
@@ -157,14 +157,14 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
               <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
                 <div className="table-header-sticky" style={tableHeader}>
                   <span>Miner</span>
-                  <span>Start</span>
-                  <span>End</span>
-                  <span>Readings</span>
-                  <span>Avg Temp</span>
-                  <span>Status</span>
-                  <span>Press Count</span>
-                  <span>Manual SOS</span>
-                  <span>Sensor Spike</span>
+                  <span>Session Time</span>
+                  <span>Duration</span>
+                  <span>Heart Rate</span>
+                  <span>SpO₂</span>
+                  <span>Body Temperature</span>
+                  <span>Alerts</span>
+                  <span>SOS Presses</span>
+                  <span>Session Status</span>
                 </div>
                 {sessions.map((session) => (
                   <div key={session.id} className="health-session-table-row" style={tableRow}>
@@ -172,17 +172,17 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
                       <div style={{ color: C.text, fontWeight: 900 }}>{session.name}</div>
                       <div style={{ color: C.textMuted, fontSize: 10 }}>{session.deviceId}</div>
                     </div>
-                    <span style={{ color: C.textDim }}>{session.start}</span>
-                    <span style={{ color: C.textDim }}>{session.end}</span>
-                    <div style={{ display: "grid", gap: 3 }}>
-                      <span style={{ color: C.red, fontWeight: 900 }}>HR {session.avgHr} bpm</span>
-                      <span style={{ color: C.oxygen, fontWeight: 900 }}>SpO2 {session.avgSpo2}%</span>
+                    <div style={{ display: "grid", gap: 3, color: C.textDim }}>
+                      <span>{session.start}</span>
+                      <span style={{ color: C.textMuted, fontSize: 10 }}>to {session.end}</span>
                     </div>
-                    <span style={{ color: C.teal, fontWeight: 900 }}>{session.avgTemp ? `${session.avgTemp}°C` : "--"}</span>
-                    <StatusText session={session} />
+                    <span style={{ color: C.textDim, fontWeight: 800 }}>{session.duration}</span>
+                    <ReadingRange value={session.hr} color={C.red} unit="bpm" />
+                    <ReadingRange value={session.spo2} color={C.oxygen} unit="%" />
+                    <ReadingRange value={session.temp} color={C.teal} unit="°C" />
+                    <AlertsText alerts={session.alerts} />
                     <span style={{ color: session.manualPressCount ? C.red : C.textMuted, fontWeight: 900 }}>{session.manualPressCount}</span>
-                    <span style={{ color: session.manualAlerts ? C.red : C.green, fontWeight: 900 }}>{session.manualAlerts ? "Pressed" : "Clear"}</span>
-                    <SpikeText spike={session.spike} />
+                    <StatusText session={session} />
                   </div>
                 ))}
                 {sessions.length === 0 && <div style={{ padding: 42, color: C.textMuted, textAlign: "center", fontSize: 13 }}>No miner session logs available for this filter.</div>}
@@ -228,34 +228,66 @@ function buildSessions(miners, analyticsData, activityLogs, thresholds) {
           index === groups.length - 1 &&
           miner.active &&
           Date.now() - Number(last.timestamp || 0) < SESSION_GAP_MS * 2;
+        const isCurrentSession = index === groups.length - 1 && Math.abs(lastSeenValue(miner) - Number(last.timestamp || 0)) < SESSION_GAP_MS * 2;
+        const nextSessionStart = Number(groups[index + 1]?.[0]?.timestamp || 0);
+        const statusLog = findSessionStatusLog(activityLogs, miner.id, Number(first.timestamp), Number(last.timestamp), nextSessionStart);
+        // A device stores only its latest session status. Never apply that value
+        // to older grouped sessions; historical rows use their own status log.
+        const latestDeviceStatus = index === groups.length - 1 ? String(miner.sessionStatus || "").toLowerCase() : "";
+        const recordedStatus = statusLog?.status || latestDeviceStatus;
         const manualPressCount = countManualPresses(miner, sessionRows, activityLogs, Number(first.timestamp), Number(last.timestamp), active);
-        const spike = detectSensorSpike(miner, sessionRows, thresholds);
+        const alerts = detectSessionAlerts(miner, sessionRows, thresholds);
+        const sessionStatus = active
+          ? "active"
+          : ["completed", "interrupted", "offline"].includes(recordedStatus)
+            ? recordedStatus
+            : isCurrentSession && miner.offlineConcern
+              ? "interrupted"
+              : isCurrentSession && (!miner.active || miner.stale)
+                ? "offline"
+                : "completed";
 
         return {
           id: `${miner.id}-${first.timestamp}-${index}`,
           deviceId: miner.id,
           name: miner.name,
           active,
-          stale: active ? miner.stale : true,
-          contact: active ? miner.finger !== false : true,
-          manualAlerts: manualPressCount,
+          sessionStatus,
           manualPressCount,
-          spike,
+          alerts,
           sortTimestamp: active ? Date.now() : Number(last.timestamp || 0),
           start: formatSystemTimestamp(first.timestamp),
-          end: active ? "IN PROGRESS" : formatSystemTimestamp(last.timestamp),
-          avgHr: formatReading(average(sessionRows.map((row) => row.hr)) || (active ? miner.hr : 0), 0),
-          avgSpo2: formatReading(average(sessionRows.map((row) => row.spo2)) || (active ? miner.spo2 : 0), 0),
-          avgTemp: formatReading(average(sessionRows.map((row) => row.temp).filter(Boolean)) || (active && miner.temp ? miner.temp : 0), 1) || null,
+          end: active ? "Now" : formatSystemTimestamp(last.timestamp),
+          duration: formatDuration(Number(first.timestamp), active ? Date.now() : Number(last.timestamp)),
+          hr: summarizeReading(sessionRows, "hr", 0, active ? miner.hr : 0),
+          spo2: summarizeReading(sessionRows, "spo2", 0, active ? miner.spo2 : 0),
+          temp: summarizeReading(sessionRows, "temp", 1, active ? miner.temp : 0),
         };
       })
       .sort((a, b) => sessionSortValue(b) - sessionSortValue(a));
   }).sort((a, b) => sessionSortValue(b) - sessionSortValue(a));
 }
 
+function findSessionStatusLog(activityLogs, deviceId, startTimestamp, endTimestamp, nextSessionStart) {
+  const logs = (activityLogs || [])
+    .filter((log) => log.deviceId === deviceId && log.type === "session_status" && ["completed", "interrupted", "offline"].includes(String(log.status || "").toLowerCase()))
+    .map((log) => ({ ...log, status: String(log.status).toLowerCase(), timestamp: Number(log.timestamp || 0) }))
+    .filter((log) => log.timestamp > 0);
+  const exactMatch = logs.find((log) => log.timestamp === endTimestamp);
+  if (exactMatch) return exactMatch;
+
+  return logs
+    .filter((log) => {
+      const nearSessionEnd = log.timestamp >= endTimestamp - SESSION_GAP_MS && (!nextSessionStart || log.timestamp < nextSessionStart + SESSION_GAP_MS);
+      const insideSessionWindow = log.timestamp >= startTimestamp && (!nextSessionStart || log.timestamp < nextSessionStart);
+      return nearSessionEnd || insideSessionWindow;
+    })
+    .sort((a, b) => Math.abs(a.timestamp - endTimestamp) - Math.abs(b.timestamp - endTimestamp))[0] || null;
+}
+
 function sessionSortValue(session) {
   if (Number(session.sortTimestamp) > 0) return Number(session.sortTimestamp);
-  if (session.end === "IN PROGRESS") return Date.now();
+  if (session.end === "Now") return Date.now();
   const parsed = Date.parse(session.end);
   return Number.isNaN(parsed) ? 0 : parsed;
 }
@@ -406,6 +438,49 @@ function dedupeRows(rows) {
   });
 }
 
+function summarizeReading(rows, key, digits, fallback = 0) {
+  const values = rows.map((row) => Number(row[key])).filter((value) => Number.isFinite(value) && value > 0);
+  if (!values.length && Number(fallback) > 0) values.push(Number(fallback));
+  if (!values.length) return { avg: "--", min: "--", max: "--" };
+  return {
+    avg: formatReading(average(values), digits),
+    min: formatReading(Math.min(...values), digits),
+    max: formatReading(Math.max(...values), digits),
+  };
+}
+
+function formatDuration(startTimestamp, endTimestamp) {
+  const durationMs = Math.max(0, Number(endTimestamp || 0) - Number(startTimestamp || 0));
+  const totalMinutes = Math.floor(durationMs / 60_000);
+  if (totalMinutes < 1) return "< 1 min";
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function detectSessionAlerts(miner, rows, thresholds) {
+  const alerts = [];
+  const add = (key, label, color) => {
+    if (!alerts.some((alert) => alert.key === key)) alerts.push({ key, label, color });
+  };
+
+  rows.forEach((row) => {
+    const hr = Number(row.hr);
+    const spo2 = Number(row.spo2);
+    const temp = Number(row.temp);
+    const hrStatus = getVitalStatus(hr, "hr", thresholds);
+    const spo2Status = getVitalStatus(spo2, "spo2", thresholds);
+    const tempStatus = getVitalStatus(temp, "temp", thresholds);
+    if (hrStatus === "LOW" || hrStatus === "HIGH") add(`hr-${hrStatus}`, `HR ${hrStatus.toLowerCase()} threshold`, hrStatus === "HIGH" ? C.red : C.amber);
+    if (spo2Status === "CRITICAL" || spo2Status === "LOW") add(`spo2-${spo2Status}`, `SpO₂ ${spo2Status.toLowerCase()} threshold`, spo2Status === "CRITICAL" ? C.red : C.amber);
+    if (tempStatus === "HIGH" || tempStatus === "LOW") add(`temp-${tempStatus}`, `Temperature ${tempStatus.toLowerCase()} threshold`, tempStatus === "HIGH" ? C.red : C.amber);
+  });
+
+  const spike = detectSensorSpike(miner, rows, thresholds);
+  if (spike.sensor !== "No Spike") add(`spike-${spike.sensor}`, spike.label, spike.color);
+  return alerts;
+}
+
 function detectSensorSpike(miner, rows, thresholds) {
   const validRows = rows.filter((row) => Number(row.hr) > 0 || Number(row.spo2) > 0);
   const latest = validRows[validRows.length - 1] || miner;
@@ -433,13 +508,14 @@ function detectSensorSpike(miner, rows, thresholds) {
 }
 
 function buildChartData(miners, analyticsData) {
-  return miners
+  const rows = miners
     .flatMap((miner) => (analyticsData[miner.id] || []).map((row) => ({ ...row, miner: miner.name })))
     .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
-    .slice(-36)
-    .map((row) => ({
+    .slice(-36);
+  const labels = uniqueChartLabels(rows);
+  return rows.map((row, index) => ({
       timestamp: Number(row.timestamp || 0),
-      time: compactTimestamp(row.timestamp),
+      time: labels[index] || compactTimestamp(row.timestamp),
       hr: Number(row.hr) || null,
       spo2: Number(row.spo2) || null,
       temp: Number(row.temp) || null,
@@ -467,33 +543,21 @@ function PanelHeader({ title, meta }) {
 
 // SensorChart — single-sensor trend (small multiple). Shows that sensor's average
 // over the selected range plus a filled area chart for just that reading.
-function SensorChart({ data, dataKey, name, unit, color, domain, digits = 0, yLabel = "" }) {
+function SensorChart({ data, dataKey, name, color, domain, yLabel = "" }) {
   const valid = (data || []).filter((row) => Number(row[dataKey]) > 0);
-  const avg = valid.length ? average(valid.map((row) => Number(row[dataKey]))) : null;
-  const min = valid.length ? Math.min(...valid.map((row) => Number(row[dataKey]))) : null;
-  const max = valid.length ? Math.max(...valid.map((row) => Number(row[dataKey]))) : null;
   const gradientId = `sensor-${dataKey}`;
   return (
-    <div style={{ ...cardStyle, padding: 13, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, marginBottom: 9 }}>
+    <div style={{ ...cardStyle, padding: 13, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 9 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}`, flexShrink: 0 }} />
           <span style={{ color: C.text, fontSize: 13, fontWeight: 950 }}>{name}</span>
         </div>
-        <div style={{ textAlign: "right" }}>
-          <span style={{ color, fontSize: 15, fontWeight: 950 }}>
-            {avg !== null ? formatReading(avg, digits) : "--"}
-            <span style={{ color: C.textMuted, fontSize: 10, marginLeft: 3 }}>{unit}</span>
-          </span>
-          <div style={{ color: C.textMuted, fontSize: 9, marginTop: 3, whiteSpace: "nowrap" }}>
-            Min {min !== null ? formatReading(min, digits) : "--"} · Max {max !== null ? formatReading(max, digits) : "--"}
-          </div>
-        </div>
       </div>
-              <div className="health-chart-frame" style={{ minHeight: 0, height: "100%", border: `1px solid ${C.borderSoft}`, borderRadius: 8, background: "#151515", padding: 6 }}>
+              <div className="health-chart-frame" style={{ minHeight: 0, height: "auto", border: `1px solid ${C.borderSoft}`, borderRadius: 8, background: "#151515", padding: 6 }}>
                 {valid.length ? (
           <ResponsiveContainer key={`${dataKey}-${data.length}-${data[0]?.timestamp || 0}-${data[data.length - 1]?.timestamp || 0}`} width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 8, right: 10, left: 2, bottom: 18 }}>
+            <AreaChart data={data} margin={{ top: 8, right: 10, left: 2, bottom: 28 }}>
               <defs>
                 <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={color} stopOpacity={0.32} />
@@ -508,8 +572,8 @@ function SensorChart({ data, dataKey, name, unit, color, domain, digits = 0, yLa
                 tickLine={false}
                 minTickGap={34}
                 interval="preserveStartEnd"
-                height={28}
-                label={{ value: "Time", fill: C.textMuted, fontSize: 9, position: "insideBottom", offset: -4 }}
+                height={38}
+                label={{ value: "Time", fill: C.textMuted, fontSize: 9, position: "insideBottom", offset: -6 }}
               />
               <YAxis
                 domain={domain || ["auto", "auto"]}
@@ -519,7 +583,11 @@ function SensorChart({ data, dataKey, name, unit, color, domain, digits = 0, yLa
                 width={34}
                 label={{ value: yLabel, angle: -90, fill: C.textMuted, fontSize: 9, position: "insideLeft" }}
               />
-              <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
+              <Tooltip
+                allowEscapeViewBox={{ x: false, y: false }}
+                wrapperStyle={{ maxWidth: "calc(100% - 12px)", zIndex: 5 }}
+                contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }}
+              />
               <Area type="monotone" dataKey={dataKey} name={name} stroke={color} fill={`url(#${gradientId})`} strokeWidth={2} dot={valid.length < 2 ? { r: 3 } : false} isAnimationActive={false} connectNulls />
             </AreaChart>
           </ResponsiveContainer>
@@ -541,24 +609,41 @@ function dynamicDomain(data, key, padding = 1) {
 }
 
 function StatusText({ session }) {
-  const color = session.active ? C.green : C.offline;
-  const text = session.active ? "Mining active" : "Ended / offline";
-  return <span style={{ color, fontWeight: 900 }}>{text}</span>;
+  const tones = {
+    active: [C.green, "Active"],
+    completed: [C.primary, "Completed"],
+    offline: [C.offline, "Offline"],
+    interrupted: [C.red, "Interrupted"],
+  };
+  const [color, text] = tones[session.sessionStatus] || tones.offline;
+  return <span style={{ color, fontWeight: 900, textTransform: "capitalize" }}>{text}</span>;
 }
 
-function SpikeText({ spike }) {
+function ReadingRange({ value, color, unit }) {
   return (
     <div style={{ display: "grid", gap: 3 }}>
-      <span style={{ color: spike.color, fontWeight: 900 }}>{spike.sensor}</span>
-      <span style={{ color: C.textMuted, fontSize: 10 }}>{spike.label}</span>
+      <span style={{ color, fontWeight: 900 }}>{value.avg} {unit}</span>
+      <span style={{ color: C.textMuted, fontSize: 10 }}>min {value.min} · max {value.max}</span>
+    </div>
+  );
+}
+
+function AlertsText({ alerts }) {
+  if (!alerts.length) return <span style={{ color: C.green, fontWeight: 900 }}>None</span>;
+  return (
+    <div style={{ display: "grid", gap: 3 }}>
+      {alerts.slice(0, 3).map((alert) => (
+        <span key={alert.key} style={{ color: alert.color, fontSize: 10, fontWeight: 900 }}>{alert.label}</span>
+      ))}
+      {alerts.length > 3 && <span style={{ color: C.textMuted, fontSize: 10 }}>+{alerts.length - 3} more</span>}
     </div>
   );
 }
 
 const tableHeader = {
   display: "grid",
-  gridTemplateColumns: "1fr 1.1fr 1.1fr 0.85fr 0.7fr 0.85fr 0.7fr 0.8fr 1fr",
-  minWidth: 1260,
+  gridTemplateColumns: "1.05fr 1.2fr 0.65fr 1fr 1fr 1.15fr 1.5fr 0.7fr 0.85fr",
+  minWidth: 1480,
   gap: 12,
   padding: "10px 14px",
   color: C.textMuted,
@@ -570,8 +655,8 @@ const tableHeader = {
 
 const tableRow = {
   display: "grid",
-  gridTemplateColumns: "1fr 1.1fr 1.1fr 0.85fr 0.7fr 0.85fr 0.7fr 0.8fr 1fr",
-  minWidth: 1260,
+  gridTemplateColumns: "1.05fr 1.2fr 0.65fr 1fr 1fr 1.15fr 1.5fr 0.7fr 0.85fr",
+  minWidth: 1480,
   gap: 12,
   padding: "12px 14px",
   alignItems: "center",

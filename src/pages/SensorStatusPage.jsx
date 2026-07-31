@@ -37,14 +37,22 @@ export default function SensorStatusPage({ miners = [] }) {
         <section className="sensor-support-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.6fr) minmax(280px, 0.8fr)", gap: 12, minHeight: 0, overflow: "hidden" }}>
           <div className="hide-scrollbar" style={{ ...cardStyle, overflow: "auto", minHeight: 0 }}>
             <PanelHeader
-              title="Maintenance queue"
-              subtitle="Sensor-specific checks, separate from the general event log."
+              title="Device List"
+              subtitle="Device condition and sensor-specific checks, separate from the general event log."
               meta={`${maintenance.filter((item) => !item.healthy).length} need review`}
             />
             <div style={{ padding: 10, display: "grid", gap: 7 }}>
+              {maintenance.length > 0 && (
+                <div className="maintenance-table-head" style={{ display: "grid", gridTemplateColumns: "minmax(140px, 0.7fr) minmax(120px, 0.55fr) minmax(140px, 0.7fr) minmax(220px, 1.2fr)", gap: 12, padding: "0 12px 2px", color: C.textMuted, fontSize: 9, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  <span>Device</span>
+                  <span>Condition</span>
+                  <span>Sensor status</span>
+                  <span>Recommended action</span>
+                </div>
+              )}
               {maintenance.length
                 ? maintenance.map((item) => <MaintenanceRow key={item.id} item={item} />)
-                : <EmptyState text="Register a device to create a sensor maintenance queue." />}
+                : <EmptyState text="Register a device to populate the device list." />}
             </div>
           </div>
 
@@ -54,6 +62,10 @@ export default function SensorStatusPage({ miners = [] }) {
               <GuideStep number="01" title="Restore connection" text="Confirm power and WiFi before evaluating individual sensors." />
               <GuideStep number="02" title="Verify chest contact" text="Poor contact can suppress both HR and SpO2 while the device remains online." />
               <GuideStep number="03" title="Validate readings" text="Wait for stable HR, SpO2, and temperature values before clearing a warning." />
+              <GuideStep number="04" title="Check the power source" text="Confirm the battery is charged and the device is receiving a stable power connection." />
+              <GuideStep number="05" title="Inspect sensor placement" text="Look for loose leads, blocked optical sensors, or a temperature probe that is not seated correctly." />
+              <GuideStep number="06" title="Review device configuration" text="Confirm the device ID, assigned miner, WiFi profile, and reporting interval match the registry." />
+              <GuideStep number="07" title="Observe recovery" text="Keep the device under observation until readings remain stable and the condition returns to Good or Excellent." />
             </div>
           </div>
         </section>
@@ -99,21 +111,23 @@ function SensorMetric({ label, value, color, state }) {
 }
 
 function buildMaintenanceItem(miner) {
-  if (!miner.active) return { id: miner.id, miner: miner.name, healthy: false, color: C.offline, issue: "Device offline", action: "Check power, then confirm queued WiFi credentials." };
-  if (miner.stale) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, issue: "Stale stream", action: "Restart the stream if last seen exceeds the timeout." };
-  if (miner.finger === false) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, issue: "Contact missing", action: "Re-seat the strap and verify skin contact." };
-  if (!(miner.hr > 0) || !(miner.spo2 > 0)) return { id: miner.id, miner: miner.name, healthy: false, color: C.red, issue: "Optical sensor incomplete", action: "Inspect HR/SpO2 sensor placement and wiring." };
-  if (!(miner.temp > 0)) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, issue: "Temperature unavailable", action: "Inspect the probe and allow it to settle." };
-  return { id: miner.id, miner: miner.name, healthy: true, color: C.green, issue: "All sensors reporting", action: "No maintenance action is required." };
+  if (!miner.active) return { id: miner.id, miner: miner.name, healthy: false, color: C.offline, condition: "Offline", issue: "Device offline", action: "Check power, then confirm queued WiFi credentials." };
+  if (miner.stale) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, condition: "Attention", issue: "Stale stream", action: "Restart the stream if last seen exceeds the timeout." };
+  if (miner.finger === false) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, condition: "Attention", issue: "Contact missing", action: "Re-seat the strap and verify skin contact." };
+  if (!(miner.hr > 0) || !(miner.spo2 > 0)) return { id: miner.id, miner: miner.name, healthy: false, color: C.red, condition: "Attention", issue: "Optical sensor incomplete", action: "Inspect HR/SpO2 sensor placement and wiring." };
+  if (!(miner.temp > 0)) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, condition: "Attention", issue: "Temperature unavailable", action: "Inspect the probe and allow it to settle." };
+  if (miner.button_pressed || miner.manual_alert) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, condition: "Good", issue: "Manual SOS active", action: "Review the alert in Alert Logs before closing the check." };
+  return { id: miner.id, miner: miner.name, healthy: true, color: C.green, condition: "Excellent", issue: "All sensors reporting", action: "No maintenance action is required." };
 }
 
 function MaintenanceRow({ item }) {
   return (
-    <div className="maintenance-row" style={{ display: "grid", gridTemplateColumns: "minmax(140px, 0.7fr) minmax(140px, 0.7fr) minmax(220px, 1.2fr)", gap: 12, alignItems: "center", border: `1px solid ${C.borderSoft}`, borderLeft: `3px solid ${item.color}`, borderRadius: 8, padding: "10px 12px", background: `${item.color}07` }}>
+    <div className="maintenance-row" style={{ display: "grid", gridTemplateColumns: "minmax(140px, 0.7fr) minmax(120px, 0.55fr) minmax(140px, 0.7fr) minmax(220px, 1.2fr)", gap: 12, alignItems: "center", border: `1px solid ${C.borderSoft}`, borderLeft: `3px solid ${item.color}`, borderRadius: 8, padding: "10px 12px", background: `${item.color}07` }}>
       <div>
         <div style={{ color: C.text, fontSize: 12, fontWeight: 900 }}>{item.miner}</div>
         <div style={{ color: C.textMuted, fontSize: 9.5, marginTop: 3 }}>{item.id}</div>
       </div>
+      <div style={{ color: item.color, fontSize: 11, fontWeight: 950 }}>{item.condition}</div>
       <div style={{ color: item.color, fontSize: 11, fontWeight: 900 }}>{item.issue}</div>
       <div style={{ color: C.textMuted, fontSize: 10.5, lineHeight: 1.45 }}>{item.action}</div>
     </div>

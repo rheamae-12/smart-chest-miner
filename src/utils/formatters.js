@@ -29,6 +29,27 @@ export function compactTimestamp(value) {
   return `${md}, ${time}`;
 }
 
+export function uniqueChartLabels(rows = []) {
+  const baseLabels = rows.map((row) => compactTimestamp(row?.timestamp));
+  const counts = baseLabels.reduce((map, label) => {
+    map.set(label, (map.get(label) || 0) + 1);
+    return map;
+  }, new Map());
+
+  return rows.map((row, index) => {
+    const label = baseLabels[index];
+    if (!label || counts.get(label) < 2) return label;
+    const date = new Date(Number(row?.timestamp));
+    if (Number.isNaN(date.getTime())) return label;
+    return date.toLocaleString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  });
+}
+
 export function formatLastSeen(value) {
   return formatSystemTimestamp(value);
 }

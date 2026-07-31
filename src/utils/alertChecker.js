@@ -35,7 +35,9 @@ export function buildAlerts(miners, thresholds = DEFAULT_THRESHOLDS) {
     // dropped WHILE a critical condition was active (a possible emergency), flagged by
     // `offlineConcern` at the moment of disconnect.
     if (miner.stale) {
-      if (miner.offlineConcern) {
+      // A completed/offline decision closes the session and removes the
+      // temporary lost-device alarm. An interrupted decision remains actionable.
+      if (miner.offlineConcern && !["completed", "offline"].includes(miner.sessionStatus)) {
         alerts.push({ id: `${miner.id}-offline`, deviceId: miner.id, severity: "critical", message: `${miner.name}: LOST DURING ALERT` });
       }
       return alerts;

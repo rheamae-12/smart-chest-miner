@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Modal from "./components/Modal";
+import SessionStatusModal from "./components/SessionStatusModal";
 import Sidebar from "./components/Sidebar";
 import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -90,6 +91,12 @@ export default function App() {
         >
           <div style={{ color: C.textDim, fontSize: 13, lineHeight: 1.6 }}>Log out of the Smart Chest Miner console? Live device monitoring will stop for this browser session.</div>
         </Modal>
+      )}
+      {system.sessionPrompt && (
+        <SessionStatusModal
+          session={system.sessionPrompt}
+          onSelect={(sessionStatus) => system.resolveSessionStatus(system.sessionPrompt, sessionStatus)}
+        />
       )}
       <div
         className="app-shell"

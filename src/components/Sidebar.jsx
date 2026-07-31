@@ -14,7 +14,7 @@ const navGroups = [
       { to: "/analytics", label: "Analytics", icon: "chart" },
       { to: "/health-logs", label: "Health Logs", icon: "clock" },
       { to: "/sensor-status", label: "Sensor Status", icon: "network" },
-      { to: "/alert-history", label: "Alert History", icon: "alert" },
+      { to: "/alert-history", label: "Alert Logs", icon: "alert" },
     ],
   },
   {

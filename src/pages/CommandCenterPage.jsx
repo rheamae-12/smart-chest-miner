@@ -3,7 +3,7 @@ import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Too
 import Icon from "../components/Icon";
 import { C, cardStyle, controlStyle, moduleLabel, pageStyle } from "../theme";
 import { buildAlerts, getVitalStatus } from "../utils/alertChecker";
-import { dedupeConsecutiveLogs, formatLastSeen, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
+import { dedupeConsecutiveLogs, formatLastSeen, formatReading, formatSystemTimestamp, lastSeenValue, uniqueChartLabels } from "../utils/formatters";
 import { sortMinersActiveFirst } from "../utils/minerOrdering";
 import { mergeSensorSeries } from "../utils/sensorSeries";
 
@@ -68,7 +68,8 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
       <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0, 1fr)", gap: 12, alignItems: "stretch", height: "100%", minHeight: 0, overflow: "hidden" }} className="cc-grid page-layout">
 
         {/* ── Fleet rail (master) ── */}
-        <aside style={{ ...cardStyle, display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", minHeight: 0, overflow: "hidden" }}>
+        <aside className="cc-fleet-column">
+          <div className="cc-miners-card" style={{ ...cardStyle, display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", minHeight: 0, overflow: "hidden" }}>
           <div style={{ padding: "13px 14px", borderBottom: `1px solid ${C.borderSoft}` }}>
             <div style={moduleLabel}>Miners</div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
@@ -81,6 +82,68 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
               )}
             </div>
           </div>
+          <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.borderSoft}` }}>
+            <input
+              placeholder="Search miners"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ ...controlStyle, width: "100%", padding: "8px 11px", fontSize: 12 }}
+            />
+          </div>
+          <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0, padding: 8 }}>
+            {filtered.length === 0 ? (
+              <div style={{ padding: 28, textAlign: "center", color: C.textMuted, fontSize: 12 }}>No miners match.</div>
+            ) : (
+              filtered.map((m) => (
+                <FleetRow
+                  key={m.id}
+                  miner={m}
+                  thresholds={thresholds}
+                  active={selected?.id === m.id}
+                  hasAlert={alerts.some((a) => a.deviceId === m.id)}
+                  onSelect={() => setSelectedId(m.id)}
+                />
+              ))
+            )}
+          </div>
+          </div>
+          <div className="cc-alert-card" style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
+            <div style={{ padding: "11px 13px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={moduleLabel}>Alerts</div>
+              <button
+                type="button"
+                onClick={() => onDismissAlerts?.(minerAlerts.map((alert) => alert.id))}
+                disabled={!minerAlerts.length}
+                style={{ background: "transparent", border: `1px solid ${minerAlerts.length ? C.amber : C.borderSoft}55`, borderRadius: 6, color: minerAlerts.length ? C.amber : C.textMuted, cursor: minerAlerts.length ? "pointer" : "default", fontSize: 10, fontWeight: 900, padding: "4px 7px", opacity: minerAlerts.length ? 1 : 0.7 }}
+              >
+                {minerAlerts.length ? "Clear" : "Clear"}
+              </button>
+            </div>
+            <div className="cc-rail-alert-stack">
+          {minerAlerts.length > 0 && (
+            <>
+              {minerAlerts.map((a) => (
+                <div key={a.id} style={{ ...cardStyle, padding: "10px 12px", display: "flex", alignItems: "center", gap: 9, borderLeft: `3px solid ${a.severity === "critical" ? C.red : C.amber}`, background: `${a.severity === "critical" ? C.red : C.amber}0E` }}>
+                  <Icon name="alert" size={14} color={a.severity === "critical" ? C.red : C.amber} />
+                  <span style={{ color: a.severity === "critical" ? C.red : C.amber, fontSize: 11, fontWeight: 900, flex: 1 }}>{a.message}</span>
+                  <button onClick={() => onDismissAlerts?.([a.id])} style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 16, lineHeight: 1 }} title="Dismiss">×</button>
+                </div>
+              ))}
+            </>
+          )}
+          {!minerAlerts.length && (
+            <div className="cc-alert-empty">
+              <Icon name="check" size={16} color={C.green} />
+              <span>No active alerts</span>
+              <small>Miner conditions are within the current monitoring rules.</small>
+            </div>
+          )}
+            </div>
+          </div>
+        </aside>
+
+        {/* ── Detail ── */}
+        <aside className="cc-legacy-miner-fragment" style={{ display: "none" }}>
           <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.borderSoft}` }}>
             <input
               placeholder="Search miners…"
@@ -115,11 +178,14 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
             </div>
           ) : (
             <>
-              <div style={{ display: "grid", gap: 12 }}>
+              <div className="cc-live-detail-header">
+                <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
                 <MinerHeader miner={selected} />
+                <VitalsRow miner={selected} thresholds={thresholds} />
+                </div>
 
                 {minerAlerts.length > 0 && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                  <div className="cc-detail-alert-stack">
                     {minerAlerts.map((a) => (
                       <div key={a.id} style={{ ...cardStyle, padding: "9px 13px", display: "flex", alignItems: "center", gap: 10, borderLeft: `3px solid ${a.severity === "critical" ? C.red : C.amber}`, background: `${a.severity === "critical" ? C.red : C.amber}0E` }}>
                         <Icon name="alert" size={14} color={a.severity === "critical" ? C.red : C.amber} />
@@ -130,7 +196,6 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
                   </div>
                 )}
 
-                <VitalsRow miner={selected} thresholds={thresholds} />
               </div>
 
               <div style={{ ...cardStyle, display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", minHeight: 0, overflow: "hidden" }}>
@@ -153,7 +218,10 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
                     </button>
                   ))}
                 </div>
-                <div className="hide-scrollbar" style={{ padding: 14, minHeight: 0, overflow: "auto" }}>
+                <div
+                  className={`hide-scrollbar cc-tab-content cc-tab-${tab}`}
+                  style={{ padding: 14, minHeight: 0, overflow: tab === "overview" ? "hidden" : "auto" }}
+                >
                   {tab === "overview" && <OverviewTab miner={selected} liveData={liveData} thresholds={thresholds} />}
                   {tab === "logs" && <ActivityTab miner={selected} activityLogs={activityLogs} />}
                   {tab === "signal" && <SignalTab miner={selected} />}
@@ -262,7 +330,11 @@ function VitalTile({ label, value, unit, color, status, icon }) {
 // ─── Tabs ───────────────────────────────────────────────────────────────────
 
 function OverviewTab({ miner, liveData, thresholds }) {
-  const chartData = useMemo(() => mergeSensorSeries(liveData[miner.id]), [liveData, miner.id]);
+  const chartData = useMemo(() => {
+    const rows = mergeSensorSeries(liveData[miner.id]);
+    const labels = uniqueChartLabels(rows);
+    return rows.map((row, index) => ({ ...row, time: labels[index] || row.time }));
+  }, [liveData, miner.id]);
   const live = miner.active && miner.finger !== false;
   const hasData = live && chartData.some((d) => d.hr != null || d.spo2 != null || d.temp != null);
 
@@ -272,13 +344,17 @@ function OverviewTab({ miner, liveData, thresholds }) {
         <div style={{ color: C.text, fontSize: 14, fontWeight: 950, marginBottom: 10 }}>Live Readings</div>
         {hasData ? (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 8, right: 22, left: 4, bottom: 18 }}>
+            <LineChart data={chartData} margin={{ top: 8, right: 22, left: 4, bottom: 26 }}>
               <CartesianGrid stroke={C.borderSoft} strokeDasharray="3 6" vertical={false} />
-              <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={28} label={{ value: "Time", fill: C.textMuted, fontSize: 10, position: "insideBottom", offset: -4 }} />
+              <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 9 }} axisLine={false} tickLine={false} minTickGap={34} height={34} label={{ value: "Time", fill: C.textMuted, fontSize: 9, position: "insideBottom", offset: -5 }} />
               <YAxis yAxisId="hr" domain={[40, 140]} tick={{ fill: C.red, fontSize: 10 }} axisLine={false} tickLine={false} width={42} label={{ value: "bpm", angle: -90, fill: C.red, fontSize: 10, position: "insideLeft" }} />
               <YAxis yAxisId="spo2" orientation="right" domain={[80, 100]} tick={{ fill: C.oxygen, fontSize: 10 }} axisLine={false} tickLine={false} width={38} label={{ value: "%", angle: 90, fill: C.oxygen, fontSize: 10, position: "insideRight" }} />
               <YAxis yAxisId="temp" orientation="right" domain={[34, 42]} hide />
-              <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
+              <Tooltip
+                allowEscapeViewBox={{ x: false, y: false }}
+                wrapperStyle={{ maxWidth: "calc(100% - 12px)", zIndex: 5 }}
+                contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }}
+              />
               <ReferenceLine yAxisId="spo2" y={thresholds?.spo2Min ?? 80} stroke={C.amber} strokeDasharray="4 4" strokeOpacity={0.5} />
               <Line yAxisId="hr" type="monotone" dataKey="hr" name="HR" stroke={C.red} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
               <Line yAxisId="spo2" type="monotone" dataKey="spo2" name="SpO2" stroke={C.oxygen} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
@@ -295,12 +371,28 @@ function OverviewTab({ miner, liveData, thresholds }) {
           </div>
         )}
       </div>
-      <div className="cc-overview-status" style={{ ...cardStyle, padding: "8px 12px", display: "flex", flexDirection: "column", gap: 0, minHeight: 0, alignSelf: "start" }}>
+      <div className="cc-overview-status" style={{ ...cardStyle, padding: "8px 12px", display: "grid", gridTemplateRows: "auto repeat(4, minmax(0, 1fr))", gap: 0, minHeight: 0, height: "100%", alignSelf: "stretch", boxSizing: "border-box" }}>
         <div style={{ color: C.text, fontSize: 13, fontWeight: 950, marginBottom: 2 }}>Status</div>
-        <Indicator color={miner.active ? C.green : C.offline} label={miner.active ? "Readings online" : "Readings offline"} />
-        <Indicator color={!miner.active ? C.offline : miner.finger === false ? C.amber : C.green} label={!miner.active ? "Chest contact offline" : miner.finger === false ? "Chest contact missing" : "Chest contact normal"} />
-        <Indicator color={!miner.active ? C.offline : miner.button_pressed || miner.manual_alert ? C.red : C.green} label={!miner.active ? "Manual SOS offline" : miner.button_pressed || miner.manual_alert ? `Manual SOS pressed (${miner.button_press_count || 0} total)` : `Manual SOS clear (${miner.button_press_count || 0} total)`} />
-        <Indicator color={!miner.active ? C.offline : miner.temp > 0 ? C.teal : C.amber} label={!miner.active ? "Body temp offline" : miner.temp > 0 ? `Body temp ${formatReading(miner.temp, 1)}°C` : "Body temp waiting"} />
+        <Indicator
+          color={miner.active ? C.green : C.offline}
+          label={miner.active ? "Readings online" : "Readings offline"}
+          detail={miner.active ? `Last contact ${formatLastSeen(miner.lastSeen)}` : `Last contact ${formatLastSeen(miner.lastSeen)}`}
+        />
+        <Indicator
+          color={!miner.active ? C.offline : miner.finger === false ? C.amber : C.green}
+          label={!miner.active ? "Chest contact offline" : miner.finger === false ? "Chest contact missing" : "Chest contact normal"}
+          detail={!miner.active ? "Waiting for the device to reconnect" : miner.finger === false ? "Re-seat the chest strap to restore readings" : "Sensor contact is stable"}
+        />
+        <Indicator
+          color={!miner.active ? C.offline : miner.button_pressed || miner.manual_alert ? C.red : C.green}
+          label={!miner.active ? "Manual SOS offline" : miner.button_pressed || miner.manual_alert ? `Manual SOS pressed (${miner.button_press_count || 0} total)` : `Manual SOS clear (${miner.button_press_count || 0} total)`}
+          detail={miner.active ? `${miner.button_press_count || 0} activation${Number(miner.button_press_count || 0) === 1 ? "" : "s"} recorded` : "SOS state unavailable while offline"}
+        />
+        <Indicator
+          color={!miner.active ? C.offline : miner.temp > 0 ? C.teal : C.amber}
+          label={!miner.active ? "Body temp offline" : miner.temp > 0 ? `Body temp ${formatReading(miner.temp, 1)}°C` : "Body temp waiting"}
+          detail={!miner.active ? "No current temperature signal" : miner.temp > 0 ? "Within the live sensor stream" : "Waiting for a valid temperature"}
+        />
       </div>
     </div>
   );
@@ -394,11 +486,14 @@ function SignalTab({ miner }) {
   );
 }
 
-function Indicator({ color, label }) {
+function Indicator({ color, label, detail }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 35, padding: "7px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
+    <div style={{ display: "grid", gridTemplateColumns: "8px minmax(0, 1fr)", alignContent: "center", columnGap: 10, minHeight: 35, padding: "7px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
       <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 10px ${color}`, flexShrink: 0 }} />
-      <span style={{ color: C.textDim, fontSize: 12 }}>{label}</span>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ color: C.textDim, fontSize: 12, fontWeight: 800 }}>{label}</div>
+        {detail && <div style={{ color: C.textMuted, fontSize: 10, lineHeight: 1.35, marginTop: 3 }}>{detail}</div>}
+      </div>
     </div>
   );
 }

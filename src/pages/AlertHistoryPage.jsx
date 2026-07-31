@@ -5,7 +5,6 @@ import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonS
 import { dedupeConsecutiveLogs, formatSystemTimestamp } from "../utils/formatters";
 import { DATE_RANGE_OPTIONS, isWithinDateRange, matchesAlertType, matchesSearch, resolveDateRange } from "../utils/filtering";
 
-const ALERT_STATUS_KEY = "smart-chest-miner-alert-statuses";
 const PAGE_SIZE = 15;
 const ALERT_FILTERS = [
   { value: "all", label: "All", longLabel: "All alert types" },
@@ -40,19 +39,20 @@ const tableRow = {
   fontSize: 12,
 };
 
-function readStoredStatuses() {
-  try {
-    const value = JSON.parse(localStorage.getItem(ALERT_STATUS_KEY) || "{}");
-    return typeof value === "object" && value !== null ? value : {};
-  } catch {
-    return {};
-  }
-}
-
 function isAlertEntry(log) {
   if (log.severity === "info") return false;
   if (log.type === "status" && log.status === "online") return false;
   return true;
+}
+
+function normalizeSessionStatusLogs(logs) {
+  return logs.map((log) => {
+    if (log.type !== "status" || log.status !== "offline") return log;
+    // Offline is a session lifecycle state, not an alert level. If the operator
+    // later marks the session interrupted, the explicit session-status event is
+    // the actionable record shown in this page.
+    return { ...log, severity: "info" };
+  });
 }
 
 function deriveAlertType(log) {
@@ -72,7 +72,6 @@ function formatTimestamp(ms) {
 }
 
 export default function AlertHistoryPage({ activityLogs = [], onClearActivityLogs }) {
-  const [alertStatuses] = useState(readStoredStatuses);
   const [clearLogsOpen, setClearLogsOpen] = useState(false);
   const [clearLogsError, setClearLogsError] = useState("");
   const [clearingLogs, setClearingLogs] = useState(false);
@@ -86,7 +85,7 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
 
   const alertLogs = useMemo(
     () => dedupeConsecutiveLogs(
-      activityLogs
+      normalizeSessionStatusLogs(activityLogs)
         .filter(isAlertEntry)
         .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0)),
     ),
@@ -154,7 +153,6 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
       {snapshotLog && (
         <SnapshotModal
           log={snapshotLog}
-          status={alertStatuses[snapshotLog.id] || "unresolved"}
           onClose={() => setSnapshotLog(null)}
         />
       )}
@@ -275,7 +273,6 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
                   <RecentAlertNote
                     key={log.id}
                     log={log}
-                    status={alertStatuses[log.id] || "unresolved"}
                     onClick={() => setSnapshotLog(log)}
                   />
                 ))}
@@ -381,8 +378,7 @@ function InfoCard({ title, children }) {
   );
 }
 
-function RecentAlertNote({ log, status, onClick }) {
-  const statusColors = { unresolved: C.red, acknowledged: C.amber, resolved: C.green };
+function RecentAlertNote({ log, onClick }) {
   const accentColor = log.severity === "critical" ? C.red : C.amber;
   return (
     <button
@@ -396,18 +392,14 @@ function RecentAlertNote({ log, status, onClick }) {
     >
       <div style={{ color: C.text, fontSize: 12, fontWeight: 900 }}>{log.miner || log.deviceId}</div>
       <div style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.4, marginTop: 3 }}>{log.title}</div>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 5 }}>
-        <span style={{ color: C.textMuted, fontSize: 10 }}>{formatTimestamp(log.timestamp)}</span>
-        <strong style={{ color: statusColors[status] || C.red, fontSize: 10 }}>{status}</strong>
-      </div>
+      <div style={{ color: C.textMuted, fontSize: 10, marginTop: 5 }}>{formatTimestamp(log.timestamp)}</div>
     </button>
   );
 }
 
-function SnapshotModal({ log, status, onClose }) {
+function SnapshotModal({ log, onClose }) {
   const alertType = deriveAlertType(log);
   const isCritical = log.severity === "critical";
-  const statusColors = { unresolved: C.red, acknowledged: C.amber, resolved: C.green };
 
   return (
     <Modal
@@ -430,7 +422,6 @@ function SnapshotModal({ log, status, onClose }) {
         }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <div style={{ color: isCritical ? C.red : C.amber, fontSize: 14, fontWeight: 950 }}>{alertType}</div>
-            <span style={{ color: statusColors[status] || C.red, border: `1px solid ${(statusColors[status] || C.red)}55`, background: `${statusColors[status] || C.red}12`, borderRadius: 999, padding: "4px 8px", fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>{status}</span>
           </div>
           <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4, lineHeight: 1.5 }}>{log.detail}</div>
         </div>

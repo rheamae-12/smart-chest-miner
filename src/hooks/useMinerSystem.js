@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { firebaseConfigured } from "../firebase/config";
-import { clearActivityLogs as clearActivityLogsRemote, clearHealthLogs as clearHealthLogsRemote, saveHistorySummaries, subscribeToActivityLogs, subscribeToAllAnalytics, subscribeToDevices, trimAnalyticsHistory, updateDeviceStatus, writeActivityLog } from "../firebase/database";
+import { clearActivityLogs as clearActivityLogsRemote, clearHealthLogs as clearHealthLogsRemote, saveHistorySummaries, subscribeToActivityLogs, subscribeToAllAnalytics, subscribeToDevices, trimAnalyticsHistory, updateDevice, updateDeviceStatus, writeActivityLog } from "../firebase/database";
 import { DEFAULT_THRESHOLDS, getVitalStatus } from "../utils/alertChecker";
 import { formatSystemTimestamp, timeLabel } from "../utils/formatters";
 
@@ -106,6 +106,7 @@ export function mapRealtimeDevices(value, timeoutMs = ONLINE_TIMEOUT_MS) {
         active,
         lastSeen,
         status: active ? "online" : "offline",
+        sessionStatus: active ? "active" : String(live.sessionStatus ?? device?.sessionStatus ?? "").toLowerCase(),
         stale: !fresh && (hasSensorPayload || firebaseActive),
         hr: finger ? toReading(live.heartRate ?? live.hr ?? device?.heartRate) : 0,
         spo2: finger ? toReading(live.spo2 ?? device?.spo2) : 0,
@@ -334,9 +335,9 @@ function isConcerningState(miner, thresholds) {
   return false;
 }
 
-// buildStatusLog — activity log for an online/offline transition. A routine offline is
-// an informational "Session ended"; an offline that happened while a critical condition
-// was active (miner.offlineConcern) is a critical "Device lost during alert".
+// buildStatusLog — activity log for an online/offline transition. A timeout is not
+// enough evidence that a miner intentionally ended its session, so record it as a
+// connection loss. A disconnect during a critical condition is escalated.
 function buildStatusLog(miner, previousStatus) {
   if (miner.active) {
     return {
@@ -352,16 +353,22 @@ function buildStatusLog(miner, previousStatus) {
   }
 
   const concerning = Boolean(miner.offlineConcern);
+  const explicitlyCompleted = miner.sessionStatus === "completed";
   return {
     deviceId: miner.id,
     miner: miner.name,
     type: "status",
     status: "offline",
-    severity: concerning ? "critical" : "info",
-    title: concerning ? "Device lost during alert" : "Session ended",
+    // The timeout itself is informational. The operator's session decision is
+    // recorded separately; this prevents a normal completed session from being
+    // stored as a critical alert just because the last live state was concerning.
+    severity: "info",
+    title: concerning ? "Device lost during alert" : explicitlyCompleted ? "Session completed" : "Connection lost",
     detail: concerning
       ? `${miner.name} went offline while a critical condition was active — verify the miner immediately.`
-      : `${miner.name} session ended — stopped sending live data${previousStatus ? ` after being ${previousStatus}` : ""}.`,
+      : explicitlyCompleted
+        ? `${miner.name} reported an explicit session end after being ${previousStatus || "online"}.`
+        : `${miner.name} stopped sending live data after being ${previousStatus || "online"}. No explicit session-end signal was received.`,
     timestamp: miner.lastSeen?.getTime?.() || Date.now(),
   };
 }
@@ -465,6 +472,7 @@ export function useMinerSystem(enabled) {
   const [staleSeconds] = useState(DEFAULT_STALE_SECONDS);
   const [usingRealtime, setUsingRealtime] = useState(false);
   const [connectionError, setConnectionError] = useState("");
+  const [sessionPrompts, setSessionPrompts] = useState([]);
   const minersRef = useRef(miners);
   const lastTrimRef = useRef(0);
   const persistedHistoryRef = useRef({});
@@ -476,6 +484,48 @@ export function useMinerSystem(enabled) {
   const metadataOverridesRef = useRef({});
   const archivedDeviceIdsRef = useRef(new Set());
   const lastConcernRef = useRef({}); // { deviceId: bool } — concern state at last active reading
+  const promptedSessionRef = useRef(new Set());
+
+  const queueSessionPrompt = (miner) => {
+    const lastSeen = miner.lastSeen?.getTime?.() || Number(miner.lastSeen) || 0;
+    const key = `${miner.id}:${lastSeen}`;
+    if (promptedSessionRef.current.has(key)) return;
+    promptedSessionRef.current.add(key);
+    setSessionPrompts((current) => current.some((prompt) => prompt.key === key)
+      ? current
+      : [...current, { key, deviceId: miner.id, name: miner.name, lastSeen }]);
+  };
+
+  const resolveSessionStatus = async (prompt, sessionStatus) => {
+    setSessionPrompts((current) => current.filter((item) => item.key !== prompt.key));
+    const sessionTimestamp = Number(prompt.lastSeen) || Date.now();
+    const sessionEvent = {
+      id: `session-status-${prompt.deviceId}-${sessionTimestamp}`,
+      deviceId: prompt.deviceId,
+      miner: prompt.name,
+      type: "session_status",
+      status: sessionStatus,
+      severity: sessionStatus === "interrupted" ? "warning" : "info",
+      title: `Session marked ${sessionStatus}`,
+      detail: `${prompt.name} session was marked ${sessionStatus} by the operator after live data stopped.`,
+      timestamp: sessionTimestamp,
+    };
+    // Update the local activity stream immediately. This gives the session log
+    // an exact end-timestamp status before the Firebase subscription refreshes.
+    setActivityLogs((current) => [
+      sessionEvent,
+      ...current.filter((log) => !(log.deviceId === sessionEvent.deviceId && log.type === "session_status" && Number(log.timestamp) === sessionTimestamp)),
+    ].slice(0, MAX_ACTIVITY_LOGS));
+    rawSetMiners((current) => current.map((miner) => (
+      miner.id === prompt.deviceId ? { ...miner, sessionStatus } : miner
+    )));
+    minersRef.current = minersRef.current.map((miner) => (
+      miner.id === prompt.deviceId ? { ...miner, sessionStatus } : miner
+    ));
+
+    await updateDevice(prompt.deviceId, { sessionStatus }).catch(() => {});
+    await writeActivityLog(sessionEvent).catch(() => {});
+  };
 
   useEffect(() => {
     minersRef.current = miners;
@@ -573,6 +623,7 @@ export function useMinerSystem(enabled) {
           const previousStatus = previousStatusRef.current[miner.id];
           if (previousStatus !== expectedStatus) {
             previousStatusRef.current[miner.id] = expectedStatus;
+            if (previousStatus === "online" && expectedStatus === "offline") queueSessionPrompt(miner);
             const statusEvent = buildStatusLog(miner, previousStatus);
             const key = `${statusEvent.type}:${statusEvent.deviceId}:${statusEvent.status}:${Math.floor(statusEvent.timestamp / 60000)}`;
             if (!emittedEventRef.current.has(key)) {
@@ -696,6 +747,7 @@ export function useMinerSystem(enabled) {
         const timestamp = miner.lastSeen?.getTime?.() || Date.now();
         updateDeviceStatus(miner.id, "offline", timestamp).catch(() => {});
         const offlineMiner = { ...miner, active: false, status: "offline", stale: true, offlineConcern: isConcerningState(miner, thresholdsRef.current) };
+        queueSessionPrompt(offlineMiner);
         const event = buildStatusLog(offlineMiner, "online");
         const key = `${event.type}:${event.deviceId}:${event.status}:${Math.floor(event.timestamp / 60000)}`;
         if (!emittedEventRef.current.has(key)) {
@@ -719,6 +771,8 @@ export function useMinerSystem(enabled) {
     pollingInterval,
     setPollingInterval,
     staleSeconds,
+    sessionPrompt: sessionPrompts[0] || null,
+    resolveSessionStatus,
     usingRealtime,
     connectionError,
     clearActivityLogs: async () => {

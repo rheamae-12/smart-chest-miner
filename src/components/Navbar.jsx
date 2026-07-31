@@ -252,6 +252,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
       {notificationsOpen && !clearConfirmOpen && (
         <Modal
           title="Miner Notifications"
+          className="notification-modal-panel"
           onClose={() => setNotificationsOpen(false)}
           actions={
             <>

@@ -334,10 +334,12 @@ function Metric({ label, value, unit, color, range }) {
     <div style={{ ...cardStyle, padding: 14, borderLeft: `3px solid ${color}` }}>
       <div style={{ color: C.textMuted, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
       <div style={{ color, fontSize: 27, fontWeight: 950, marginTop: 8, lineHeight: 1 }}>{value}<span style={{ color: C.textMuted, fontSize: 11, marginLeft: 5 }}>{unit}</span></div>
-      <div style={{ display: "flex", gap: 10, marginTop: 8, color: C.textMuted, fontSize: 9.5, fontWeight: 800, textTransform: "uppercase" }}>
-        <span>Min <b style={{ color }}>{range?.min ?? "--"}</b></span>
-        <span>Max <b style={{ color }}>{range?.max ?? "--"}</b></span>
-      </div>
+      {range && (
+        <div style={{ display: "flex", gap: 10, marginTop: 8, color: C.textMuted, fontSize: 9.5, fontWeight: 800, textTransform: "uppercase" }}>
+          <span>Min <b style={{ color }}>{range.min}</b></span>
+          <span>Max <b style={{ color }}>{range.max}</b></span>
+        </div>
+      )}
     </div>
   );
 }

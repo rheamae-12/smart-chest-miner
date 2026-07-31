@@ -6,7 +6,7 @@ const modalStack = [];
 let savedBodyOverflow = "";
 
 // Accessible, viewport-safe dialog with deterministic stacking and focus handling.
-export default function Modal({ title, children, actions, onClose, width = 560 }) {
+export default function Modal({ title, children, actions, onClose, width = 560, className = "" }) {
   const panelRef = useRef(null);
   const modalId = useRef(Symbol("modal"));
   const closeRef = useRef(onClose);
@@ -98,7 +98,7 @@ export default function Modal({ title, children, actions, onClose, width = 560 }
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="soft-in modal-panel"
+        className={`soft-in modal-panel ${className}`.trim()}
         style={{
           background: `linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02)), ${C.bg2}`,
           border: `1px solid ${C.border}`,
