@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { FilterSearch } from "../components/FilterToolbar";
 import Modal from "../components/Modal";
 import PageHeader from "../components/PageHeader";
 import StatusBadge from "../components/StatusBadge";
@@ -6,6 +7,7 @@ import { useAuth } from "../context/useAuth";
 import { removeWifiConnection, saveWifiConfiguration, subscribeToWifiConfigurations, subscribeToWifiConnectionHistory, writeActivityLog } from "../firebase/database";
 import { C, cardStyle, controlStyle, ghostButtonStyle, moduleLabel, pageStyle, primaryButtonStyle } from "../theme";
 import { formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
+import { compareMinersActiveFirst } from "../utils/minerOrdering";
 
 const EMPTY_FORM = {
   deviceId: "",
@@ -52,14 +54,24 @@ export default function WifiConfigPage({ miners }) {
     () => buildRows(miners, history, configs, search),
     [configs, history, miners, search],
   );
-  const sortedMiners = useMemo(() => [...miners].sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)), [miners]);
+  const sortedMiners = useMemo(() => [...miners].sort(compareMinersActiveFirst), [miners]);
+  const latestMinerId = useMemo(
+    () => sortedMiners.reduce(
+      (latest, miner) => {
+        const timestamp = lastSeenValue(miner);
+        return !latest || timestamp > latest.timestamp ? { id: miner.id, timestamp } : latest;
+      },
+      null,
+    )?.id || "",
+    [sortedMiners],
+  );
 
   // Fix: preserve orphaned device ID when editing a record whose device was removed
   const selectedDeviceId = miners.some((miner) => miner.id === form.deviceId)
     ? form.deviceId
     : editingRecord && form.deviceId
       ? form.deviceId
-      : miners[0]?.id || "";
+      : latestMinerId;
 
   const selectedMiner = miners.find((miner) => miner.id === selectedDeviceId);
 
@@ -68,7 +80,7 @@ export default function WifiConfigPage({ miners }) {
     setConfirm(null);
     setEditingRecord(null);
     setShowPassword(false);
-    setForm({ ...EMPTY_FORM, deviceId: sortedMiners[0]?.id || miners[0]?.id || "" });
+    setForm({ ...EMPTY_FORM, deviceId: latestMinerId });
     setModalOpen(true);
   };
 
@@ -258,12 +270,12 @@ export default function WifiConfigPage({ miners }) {
       )}
       <div
         style={{
-          display: "grid",
-          gridTemplateRows: pageAlert ? "auto auto minmax(0, 1fr)" : "auto minmax(0, 1fr)",
+          display: "flex",
+          flexDirection: "column",
           gap: 12,
           height: "100%",
           minHeight: 0,
-          transition: "grid-template-rows 0.2s ease",
+          overflow: "hidden",
         }}
       >
         {pageAlert && (
@@ -280,18 +292,18 @@ export default function WifiConfigPage({ miners }) {
           right={
             <>
               <StatusPill label={`${rows.filter((row) => row.config).length} connection rows`} color={C.primary} />
-              <StatusPill label={`${miners.filter((miner) => miner.active).length} online`} color={C.green} />
+              <StatusPill label={`${miners.filter((miner) => miner.active && !miner.stale).length} online`} color={C.green} />
               {canManage && <button onClick={openModal} style={{ ...primaryButtonStyle, padding: "9px 13px", fontSize: 12 }}>Assign Connection</button>}
             </>
           }
         />
 
-        <main style={{ display: "grid", minHeight: 0 }}>
-          <section style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
+        <main style={{ display: "grid", gridTemplateRows: "minmax(0, 1fr) auto", gap: 12, flex: 1, minHeight: 0, overflow: "hidden" }}>
+          <section style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
             <div style={{ padding: "13px 15px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <div style={{ color: C.text, fontSize: 15, fontWeight: 950 }}>Device WiFi Queue</div>
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search device, miner, SSID..." style={{ ...controlStyle, width: 260 }} />
+                <FilterSearch value={search} onChange={setSearch} placeholder="Device, miner, or SSID" ariaLabel="Search WiFi queue" />
                 <Indicator label="Pending = queued until the device applies it" color={C.amber} />
               </div>
             </div>
@@ -310,7 +322,7 @@ export default function WifiConfigPage({ miners }) {
                     <div style={{ color: C.text, fontWeight: 900 }}>{miner.name}</div>
                     <div style={{ color: C.textMuted, fontSize: 10, marginTop: 3 }}>{miner.id} / {miner.location}</div>
                   </div>
-                  <StatusBadge active={miner.active} />
+                  <StatusBadge status={miner.stale ? "stale" : miner.active ? "online" : "offline"} detail={`Last seen ${formatSystemTimestamp(lastSeenValue(miner))}`} />
                   <span style={{ color: config?.ssid ? C.primary : C.textMuted, fontWeight: 900 }}>{config?.ssid || "Not configured"}</span>
                   <span style={{ color: C.textDim }}>{config?.security || "--"}</span>
                   <span style={{ color: C.textMuted }}>{config?.updatedAt ? formatSystemTimestamp(config.updatedAt) : "NEVER"}</span>
@@ -338,6 +350,23 @@ export default function WifiConfigPage({ miners }) {
                 </div>
               ))}
               {rows.length === 0 && <div style={{ padding: 42, textAlign: "center", color: C.textMuted, fontSize: 13 }}>No WiFi connections match your search.</div>}
+            </div>
+          </section>
+
+          <section className="wifi-support-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 0.8fr)", gap: 12 }}>
+            <div style={{ ...cardStyle, padding: 15 }}>
+              <div style={{ color: C.text, fontSize: 14, fontWeight: 950 }}>Provisioning workflow</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginTop: 12 }}>
+                <WorkflowStep number="01" title="Queue" text="Assign an SSID and security mode to a registered device." />
+                <WorkflowStep number="02" title="Apply" text="The miner reads the queued configuration on its next boot." />
+                <WorkflowStep number="03" title="Verify" text="Confirm that the device returns online and updates last seen." />
+              </div>
+            </div>
+            <div style={{ ...cardStyle, padding: 15 }}>
+              <div style={{ color: C.text, fontSize: 14, fontWeight: 950 }}>Queue coverage</div>
+              <QueueMetric label="Registered devices" value={miners.length} color={C.primary} />
+              <QueueMetric label="Configured devices" value={new Set(rows.filter((row) => row.config).map((row) => row.miner.id)).size} color={C.green} />
+              <QueueMetric label="Not configured" value={miners.filter((miner) => !rows.some((row) => row.miner.id === miner.id && row.config)).length} color={C.amber} />
             </div>
           </section>
         </main>
@@ -448,7 +477,26 @@ function buildRows(miners, history, configs, search) {
       const text = `${row.miner.name} ${row.miner.id} ${row.miner.location} ${row.config?.ssid || ""} ${row.config?.security || ""}`.toLowerCase();
       return text.includes(needle);
     })
-    .sort((a, b) => wifiRowTime(b) - wifiRowTime(a) || a.miner.id.localeCompare(b.miner.id));
+    .sort((a, b) => compareMinersActiveFirst(a.miner, b.miner) || wifiRowTime(b) - wifiRowTime(a));
+}
+
+function WorkflowStep({ number, title, text }) {
+  return (
+    <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 8, padding: 11, background: "rgba(255,255,255,0.02)" }}>
+      <div style={{ color: C.primary, fontSize: 9.5, fontWeight: 950 }}>{number}</div>
+      <div style={{ color: C.text, fontSize: 11.5, fontWeight: 900, marginTop: 6 }}>{title}</div>
+      <div style={{ color: C.textMuted, fontSize: 10.5, lineHeight: 1.45, marginTop: 4 }}>{text}</div>
+    </div>
+  );
+}
+
+function QueueMetric({ label, value, color }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "9px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
+      <span style={{ color: C.textMuted, fontSize: 11 }}>{label}</span>
+      <strong style={{ color, fontSize: 13, fontVariantNumeric: "tabular-nums" }}>{value}</strong>
+    </div>
+  );
 }
 
 // isSuccessMessage — returns true when the status message indicates a completed operation (green text)

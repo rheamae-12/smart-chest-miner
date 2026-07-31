@@ -94,7 +94,7 @@ function toReading(value) {
 
 // mapRealtimeDevices — maps the raw Firebase /devices snapshot to normalized miner objects
 // Filters archived devices, resolves active/stale/offline status, and normalizes all sensor readings
-function mapRealtimeDevices(value, timeoutMs = ONLINE_TIMEOUT_MS) {
+export function mapRealtimeDevices(value, timeoutMs = ONLINE_TIMEOUT_MS) {
   return Object.entries(value || {})
     .filter(([, device]) => !toBoolean(device?.archived ?? device?.deleted, false))
     .map(([id, device]) => {
@@ -106,8 +106,13 @@ function mapRealtimeDevices(value, timeoutMs = ONLINE_TIMEOUT_MS) {
       const firebaseActive = toBoolean(device?.active, false) || firebaseStatus === "online";
       const hasSensorPayload = live.heartRate !== undefined || live.hr !== undefined || live.spo2 !== undefined;
       const hasValidSensorPayload = toReading(live.heartRate ?? live.hr ?? device?.heartRate) > 0 || toReading(live.spo2 ?? device?.spo2) > 0;
-      const forcedOffline = firebaseStatus === "offline" || String(live.status || "").toLowerCase() === "offline";
-      const active = !forcedOffline && (firebaseActive || hasValidSensorPayload) && fresh;
+      const reportedOffline = firebaseStatus === "offline" || String(live.status || "").toLowerCase() === "offline";
+      // A stale-state sync writes "offline" to Firebase. A later, fresh sensor
+      // payload must be allowed to recover the device even if that old status
+      // value is still present in the same snapshot.
+      const active = fresh
+        && (firebaseActive || hasValidSensorPayload)
+        && (!reportedOffline || hasValidSensorPayload);
       const finger = toBoolean(live.finger ?? live.chestDetected, true);
       const manualAlert = toBoolean(live.manual_alert ?? live.manualAlert, false);
       const buttonPressed = toBoolean(live.button_pressed ?? live.buttonPressed, false);
@@ -383,12 +388,31 @@ function buildStatusLog(miner, previousStatus) {
 }
 
 // buildVitalLogs — generates activity log entries for out-of-range HR, SpO2, body temp, and manual alerts
-function buildVitalLogs(miner, thresholds) {
-  if (!miner.active || miner.finger === false) return [];
+export function buildVitalLogs(miner, thresholds) {
+  if (!miner.active) return [];
+  const rows = [];
+
+  // SOS is independent of optical/chest contact and must still be recorded when
+  // the wearable has lost its sensor signal.
+  if (miner.button_pressed || miner.manual_alert) {
+    rows.push({
+      deviceId: miner.id,
+      miner: miner.name,
+      type: "manual_alert",
+      status: "pressed",
+      severity: "critical",
+      title: "Manual SOS pressed",
+      detail: miner.button_pressed
+        ? `${miner.name} pressed the manual SOS button (${miner.button_press_count || 1} total).`
+        : `${miner.name} activated the manual SOS alert.`,
+      timestamp: miner.lastSeen?.getTime?.() || Date.now(),
+    });
+  }
+
+  if (miner.finger === false) return rows;
   const hrStatus = getVitalStatus(miner.hr, "hr", thresholds);
   const spo2Status = getVitalStatus(miner.spo2, "spo2", thresholds);
   const tempStatus = getVitalStatus(miner.temp, "temp", thresholds);
-  const rows = [];
 
   if (hrStatus === "HIGH" || hrStatus === "LOW") {
     rows.push({
@@ -438,21 +462,6 @@ function buildVitalLogs(miner, thresholds) {
       severity: "warning",
       title: "Body temperature low",
       detail: `${miner.name} recorded body temp ${miner.temp}°C at ${formatSystemTimestamp(miner.lastSeen)}.`,
-      timestamp: miner.lastSeen?.getTime?.() || Date.now(),
-    });
-  }
-
-  if (miner.button_pressed || miner.manual_alert) {
-    rows.push({
-      deviceId: miner.id,
-      miner: miner.name,
-      type: "manual_alert",
-      status: "pressed",
-      severity: "critical",
-      title: "Manual SOS pressed",
-      detail: miner.button_pressed
-        ? `${miner.name} pressed the manual SOS button (${miner.button_press_count || 1} total).`
-        : `${miner.name} activated the manual SOS alert.`,
       timestamp: miner.lastSeen?.getTime?.() || Date.now(),
     });
   }

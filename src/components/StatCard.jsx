@@ -6,7 +6,7 @@ export default function StatCard({ label, value, unit, color, sub, tone = "neutr
   const displayed = useCountUp(value);
 
   return (
-    <div className="card-shimmer" style={{ ...cardStyle, padding: "15px 16px", minWidth: 0, position: "relative", overflow: "hidden" }}>
+    <div className="card-shimmer stat-card" style={{ ...cardStyle, padding: "15px 16px", minWidth: 0, position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", inset: "0 auto 0 0", width: 3, background: `linear-gradient(180deg, ${accent}, ${accent}88)` }} />
       <div style={{ position: "absolute", top: -38, right: -34, width: 92, height: 92, borderRadius: "50%", background: `${accent}18`, pointerEvents: "none" }} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>

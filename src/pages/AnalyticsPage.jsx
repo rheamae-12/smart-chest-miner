@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
 import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import FilterToolbar, { FilterField, FilterTabs } from "../components/FilterToolbar";
 import PageHeader from "../components/PageHeader";
 import { C, cardStyle, controlStyle, pageStyle } from "../theme";
 import { average, compactTimestamp, dedupeConsecutiveLogs, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
+import { compareMinersActiveFirst } from "../utils/minerOrdering";
 
 // AnalyticsPage — trend charts and miner comparison for HR, SpO2, and body temperature analytics
 export default function AnalyticsPage({ miners, analyticsData, liveData = {}, activityLogs = [] }) {
-  const [filter, setFilter] = useState({ miner: "all", range: "24H", bucket: "1" });
+  const [filter, setFilter] = useState({ miner: "all", range: "ALL", bucket: "1" });
   const sortedMiners = useMemo(() => buildMinerOptions(miners, analyticsData, liveData), [analyticsData, liveData, miners]);
   const visibleMiners = useMemo(
     () => (filter.miner === "all" ? sortedMiners : sortedMiners.filter((miner) => miner.id === filter.miner)),
@@ -14,42 +16,58 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
   );
   const rows = useMemo(() => buildRows(visibleMiners, analyticsData, liveData, filter.range), [analyticsData, liveData, filter.range, visibleMiners]);
   const chartData = useMemo(() => bucketRows(rows, Number(filter.bucket)), [filter.bucket, rows]);
-  const logs = useMemo(() => buildActivityLogEntries(activityLogs, filter.miner), [activityLogs, filter.miner]);
+  const logs = useMemo(
+    () => buildActivityLogEntries(activityLogs, filter.miner, filter.range),
+    [activityLogs, filter.miner, filter.range],
+  );
+  const activeFilterCount = Number(filter.miner !== "all") + Number(filter.range !== "ALL") + Number(filter.bucket !== "1");
+  const selectedMinerName = filter.miner === "all" ? "All miners" : visibleMiners[0]?.name || "Selected miner";
+  const rangeLabel = RANGE_OPTIONS.find((option) => option.value === filter.range)?.longLabel || "All recorded data";
+  const detailLabel = filter.bucket === "1" ? "1-minute detail" : `${filter.bucket}-minute averages`;
 
   return (
     <div style={pageStyle}>
-      <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
+      <div style={{ display: "grid", gridTemplateRows: "auto auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
         <PageHeader
           label="Sensor analytics"
           title="Reading Trends"
           titleSize={26}
           subtitle="Filter HR, SpO2, and body temperature readings by miner and interval."
-          right={
-            <>
-              <Select label="Miner" value={filter.miner} onChange={(miner) => setFilter({ ...filter, miner })}>
-                <option value="all">All miners</option>
-                {sortedMiners.map((miner) => (
-                  <option key={miner.id} value={miner.id}>{miner.name} ({miner.id})</option>
-                ))}
-              </Select>
-              <Select label="Range" value={filter.range} onChange={(range) => setFilter({ ...filter, range })}>
-                <option value="30M">Last 30 min</option>
-                <option value="1H">Last 1 hour</option>
-                <option value="24H">Last 24 hours</option>
-                <option value="7D">Last 7 days</option>
-              </Select>
-              <Select label="Readings / min" value={filter.bucket} onChange={(bucket) => setFilter({ ...filter, bucket })}>
-                <option value="1">1 minute</option>
-                <option value="5">5 minutes</option>
-                <option value="15">15 minutes</option>
-              </Select>
-            </>
-          }
         />
+
+        <FilterToolbar
+          summary={`${selectedMinerName} · ${rangeLabel} · ${detailLabel}`}
+          activeCount={activeFilterCount}
+          onReset={() => setFilter({ miner: "all", range: "ALL", bucket: "1" })}
+        >
+          <FilterField label="Miner">
+            <select value={filter.miner} onChange={(event) => setFilter({ ...filter, miner: event.target.value })} style={{ ...controlStyle, minWidth: 190 }}>
+              <option value="all">All miners</option>
+              {sortedMiners.map((miner) => (
+                <option key={miner.id} value={miner.id}>{miner.name} ({miner.id})</option>
+              ))}
+            </select>
+          </FilterField>
+          <FilterField label="Time range">
+            <FilterTabs
+              ariaLabel="Analytics time range"
+              value={filter.range}
+              onChange={(range) => setFilter({ ...filter, range })}
+              options={RANGE_OPTIONS}
+            />
+          </FilterField>
+          <FilterField label="Chart detail">
+            <select value={filter.bucket} onChange={(event) => setFilter({ ...filter, bucket: event.target.value })} style={{ ...controlStyle, minWidth: 158 }}>
+              <option value="1">Every minute</option>
+              <option value="5">5-minute average</option>
+              <option value="15">15-minute average</option>
+            </select>
+          </FilterField>
+        </FilterToolbar>
 
         <section style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <Metric label="Avg Heart Rate" value={formatReading(average(rows.map((row) => row.hr)), 0)} unit="bpm" color={C.red} />
-          <Metric label="Avg SpO2" value={formatReading(average(rows.map((row) => row.spo2)), 0)} unit="%" color={C.primary} />
+          <Metric label="Avg SpO2" value={formatReading(average(rows.map((row) => row.spo2)), 0)} unit="%" color={C.oxygen} />
           <Metric label="Avg Body Temp" value={formatReading(average(rows.map((row) => row.temp)), 1)} unit="°C" color={C.teal} />
           <Metric label="Tracked Miners" value={visibleMiners.length} unit={`/${miners.length}`} color={C.green} />
           <Metric label="Total Readings" value={rows.length} unit="records" color={C.amber} />
@@ -83,7 +101,7 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
                       <YAxis yAxisId="temp" orientation="right" domain={dynamicDomain(chartData, "temp", 0.4)} tick={{ fill: C.teal, fontSize: 10 }} axisLine={false} tickLine={false} width={46} unit="°C" label={{ value: "°C", angle: 90, fill: C.teal, fontSize: 10, position: "insideRight" }} />
                       <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
                       <Area yAxisId="vital" type="monotone" dataKey="hr" name="Heart Rate" stroke={C.red} fill="url(#analyticsHr)" strokeWidth={2.2} dot={false} isAnimationActive={false} />
-                      <Area yAxisId="vital" type="monotone" dataKey="spo2" name="SpO2" stroke={C.primary} fill="transparent" strokeWidth={2} dot={false} isAnimationActive={false} />
+                      <Area yAxisId="vital" type="monotone" dataKey="spo2" name="SpO2" stroke={C.oxygen} fill="transparent" strokeWidth={2} dot={false} isAnimationActive={false} />
                       <Line yAxisId="temp" type="monotone" dataKey="temp" name="Body Temp" stroke={C.teal} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
                     </ComposedChart>
                   </ResponsiveContainer>
@@ -93,7 +111,7 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, color: C.textMuted, fontSize: 10, marginTop: 8 }}>
                 <span>TIME AXIS: {chartData[chartData.length - 1]?.time || "NO TIMESTAMP"}</span>
-                <span><b style={{ color: C.red }}>HR</b> BPM | <b style={{ color: C.primary }}>SpO2</b> % | <b style={{ color: C.teal }}>Temp</b> °C</span>
+                <span><b style={{ color: C.red }}>HR</b> BPM | <b style={{ color: C.oxygen }}>SpO2</b> % | <b style={{ color: C.teal }}>Temp</b> °C</span>
               </div>
             </div>
 
@@ -112,12 +130,12 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
 
           <aside style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
             <div style={{ padding: "13px 15px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-              <div style={{ color: C.text, fontSize: 14, fontWeight: 950 }}>Device Activity</div>
-              <span style={{ color: C.textMuted, fontSize: 11 }}>{logs.length} event{logs.length === 1 ? "" : "s"}</span>
+              <div style={{ color: C.text, fontSize: 14, fontWeight: 950 }}>Signal Anomalies</div>
+              <span style={{ color: C.textMuted, fontSize: 11 }}>{logs.length} finding{logs.length === 1 ? "" : "s"}</span>
             </div>
             <div className="hide-scrollbar" style={{ overflow: "auto", display: "grid", gap: 8, alignContent: "start", padding: 12 }}>
               {logs.length === 0 ? (
-                <div style={{ color: C.textMuted, fontSize: 12, padding: "12px 4px" }}>Activity events will appear here as miners come online and send readings.</div>
+                <div style={{ color: C.textMuted, fontSize: 12, padding: "12px 4px", lineHeight: 1.55 }}>No warning or critical signal events match this filter.</div>
               ) : (
                 logs.map((log) => (
                   <ActivityLog key={`${log.id}-${log.timestamp}`} log={log} />
@@ -149,6 +167,11 @@ function buildRows(miners, analyticsData, liveData, range) {
 }
 
 function buildMinerOptions(miners, analyticsData, liveData) {
+  // Registered devices are the source of truth. Historical keys can outlive a
+  // renamed device and previously produced impossible counts such as 4/3.
+  if (miners.length) {
+    return [...miners].sort(compareMinersActiveFirst);
+  }
   const byId = new Map(miners.map((miner) => [miner.id, miner]));
   [...Object.keys(analyticsData || {}), ...Object.keys(liveData || {})].forEach((id) => {
     if (!id || byId.has(id)) return;
@@ -166,7 +189,7 @@ function buildMinerOptions(miners, analyticsData, liveData) {
       temp: latest.temp || 0,
     });
   });
-  return Array.from(byId.values()).sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id));
+  return Array.from(byId.values()).sort(compareMinersActiveFirst);
 }
 
 function liveRowsForMiner(miner, series) {
@@ -262,8 +285,18 @@ function getRangeStart(range) {
 
 // buildActivityLogEntries — maps raw Firebase activity logs to display-ready objects,
 // filtered by miner and de-duplicated (collapses repeated identical events).
-function buildActivityLogEntries(activityLogs, minerFilter) {
-  return dedupeConsecutiveLogs(activityLogs.filter((log) => minerFilter === "all" || log.deviceId === minerFilter))
+function buildActivityLogEntries(activityLogs, minerFilter, range) {
+  const start = getRangeStart(range);
+  const matchingLogs = activityLogs
+    .filter((log) => {
+      const selected = minerFilter === "all" || log.deviceId === minerFilter;
+      const anomalous = log.severity === "critical" || log.severity === "warning";
+      const withinRange = !start || Number(log.timestamp || 0) >= start;
+      return selected && anomalous && withinRange;
+    })
+    .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+
+  return dedupeConsecutiveLogs(matchingLogs)
     .slice(0, 40)
     .map((log) => ({
       id: log.id,
@@ -277,17 +310,6 @@ function buildActivityLogEntries(activityLogs, minerFilter) {
 }
 
 // Select — labelled select dropdown used for Miner / Range / Bucket filter controls
-function Select({ label, value, onChange, children }) {
-  return (
-    <label style={{ display: "grid", gap: 5 }}>
-      <span style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 900 }}>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)} style={{ ...controlStyle, minWidth: 138 }}>
-        {children}
-      </select>
-    </label>
-  );
-}
-
 // Metric — summary stat card showing an averaged reading over the selected filter range
 function Metric({ label, value, unit, color }) {
   return (
@@ -303,7 +325,7 @@ function Legend() {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "center", color: C.textMuted, fontSize: 11 }}>
       <span><b style={{ color: C.red }}>--</b> HR bpm</span>
-      <span><b style={{ color: C.primary }}>--</b> SpO2 %</span>
+      <span><b style={{ color: C.oxygen }}>--</b> SpO2 %</span>
       <span><b style={{ color: C.teal }}>--</b> Temp °C</span>
     </div>
   );
@@ -321,7 +343,7 @@ function MinerReading({ miner }) {
       <div style={{ color: C.textMuted, fontSize: 10, marginTop: 3 }}>{miner.id}</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginTop: 10 }}>
         <MiniValue label="HR" value={miner.active ? formatReading(miner.hr, 0) : "--"} color={C.red} />
-        <MiniValue label="SpO2" value={miner.active ? formatReading(miner.spo2, 0) : "--"} color={C.primary} />
+        <MiniValue label="SpO2" value={miner.active ? formatReading(miner.spo2, 0) : "--"} color={C.oxygen} />
         <MiniValue label="Temp" value={miner.active ? `${formatReading(miner.temp, 1)}°C` : "--"} color={C.teal} />
       </div>
     </div>
@@ -356,4 +378,12 @@ function ActivityLog({ log }) {
 function EmptyState() {
   return <div style={{ height: "100%", display: "grid", placeItems: "center", color: C.textMuted, fontSize: 13 }}>No valid analytics for this filter yet.</div>;
 }
+
+const RANGE_OPTIONS = [
+  { value: "ALL", label: "All", longLabel: "All recorded data" },
+  { value: "30M", label: "30 min", longLabel: "Last 30 minutes" },
+  { value: "1H", label: "1 hour", longLabel: "Last hour" },
+  { value: "24H", label: "24 hours", longLabel: "Last 24 hours" },
+  { value: "7D", label: "7 days", longLabel: "Last 7 days" },
+];
 

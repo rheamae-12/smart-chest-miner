@@ -7,6 +7,7 @@ import { C, cardStyle, moduleLabel } from "../theme";
 export default function PageHeader({ label, title, subtitle, right, titleSize = 24, padding = 16 }) {
   return (
     <section
+      className="page-header"
       style={{
         ...cardStyle,
         padding,
@@ -17,7 +18,7 @@ export default function PageHeader({ label, title, subtitle, right, titleSize = 
         flexWrap: "wrap",
       }}
     >
-      <div style={{ display: "flex", alignItems: "stretch", gap: 13, minWidth: 0 }}>
+      <div className="page-header-copy" style={{ display: "flex", alignItems: "stretch", gap: 13, minWidth: 0 }}>
         <div
           style={{
             width: 3,
@@ -35,7 +36,7 @@ export default function PageHeader({ label, title, subtitle, right, titleSize = 
         </div>
       </div>
       {right && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
           {right}
         </div>
       )}

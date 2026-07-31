@@ -103,7 +103,7 @@ export default function App() {
         }}
       >
         <Sidebar />
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
+        <div className="app-content" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
           <Navbar
             miners={system.miners}
             user={user}

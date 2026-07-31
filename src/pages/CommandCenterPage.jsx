@@ -4,6 +4,8 @@ import Icon from "../components/Icon";
 import { C, cardStyle, controlStyle, moduleLabel, pageStyle } from "../theme";
 import { buildAlerts, getVitalStatus } from "../utils/alertChecker";
 import { dedupeConsecutiveLogs, formatLastSeen, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
+import { sortMinersActiveFirst } from "../utils/minerOrdering";
+import { mergeSensorSeries } from "../utils/sensorSeries";
 
 const TABS = [
   { key: "overview", label: "Overview", icon: "pulse" },
@@ -11,16 +13,42 @@ const TABS = [
   { key: "signal", label: "Signal", icon: "contact" },
 ];
 
+function latestMinerTimestamp(miner, series = {}) {
+  return ["hr", "spo2", "temp"].reduce(
+    (latest, key) => (series[key] || []).reduce(
+      (seriesLatest, point) => Math.max(seriesLatest, Number(point.timestamp || 0)),
+      latest,
+    ),
+    lastSeenValue(miner),
+  );
+}
+
+function findLatestMinerId(miners, liveData) {
+  return miners.reduce(
+    (latest, miner) => {
+      const timestamp = latestMinerTimestamp(miner, liveData[miner.id]);
+      return !latest || timestamp > latest.timestamp ? { id: miner.id, timestamp } : latest;
+    },
+    null,
+  )?.id || "";
+}
+
 // CommandCenterPage — master/detail operations cockpit. Left rail lists the fleet;
 // the right panel shows the selected miner's live vitals, trend, and detail tabs.
 export default function CommandCenterPage({ miners = [], liveData = {}, activityLogs = [], thresholds, dismissedAlertIds = [], onDismissAlerts }) {
   const sorted = useMemo(
-    () => [...miners].sort((a, b) => Number(b.active) - Number(a.active) || lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)),
+    // Keep the fleet rail stable while live status changes. Reordering an operator's
+    // click target is both visually jarring and error-prone.
+    () => sortMinersActiveFirst(miners),
     [miners],
   );
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(() => findLatestMinerId(miners, liveData));
   const [tab, setTab] = useState("overview");
+  const latestMinerId = useMemo(
+    () => findLatestMinerId(sorted, liveData),
+    [liveData, sorted],
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -28,19 +56,19 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
     return sorted.filter((m) => `${m.name} ${m.id} ${m.location}`.toLowerCase().includes(q));
   }, [sorted, search]);
 
-  const selected = miners.find((m) => m.id === selectedId) || sorted[0] || null;
+  const selected = miners.find((miner) => miner.id === selectedId) || miners.find((miner) => miner.id === latestMinerId) || null;
   const alerts = useMemo(() => buildAlerts(miners, thresholds), [miners, thresholds]);
   const minerAlerts = selected ? alerts.filter((a) => a.deviceId === selected.id && !dismissedAlertIds.includes(a.id)) : [];
 
-  const online = miners.filter((m) => m.active).length;
+  const online = miners.filter((miner) => miner.active && !miner.stale).length;
   const alerting = new Set(alerts.map((a) => a.deviceId)).size;
 
   return (
     <div style={{ ...pageStyle, padding: "14px 16px" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }} className="cc-grid">
+      <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0, 1fr)", gap: 12, alignItems: "stretch", height: "100%", minHeight: 0, overflow: "hidden" }} className="cc-grid">
 
         {/* ── Fleet rail (master) ── */}
-        <aside style={{ ...cardStyle, display: "grid", gridTemplateRows: "auto auto 1fr", minHeight: 0, overflow: "hidden" }}>
+        <aside style={{ ...cardStyle, display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", minHeight: 0, overflow: "hidden" }}>
           <div style={{ padding: "13px 14px", borderBottom: `1px solid ${C.borderSoft}` }}>
             <div style={moduleLabel}>Miners</div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
@@ -80,7 +108,7 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
         </aside>
 
         {/* ── Detail ── */}
-        <section style={{ display: "grid", gridTemplateRows: selected ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
+        <section style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", gap: 12, minWidth: 0, minHeight: 0, overflow: "hidden" }}>
           {!selected ? (
             <div style={{ ...cardStyle, display: "grid", placeItems: "center", padding: 40, color: C.textMuted, fontSize: 13 }}>
               No miners registered yet.
@@ -105,7 +133,7 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
                 <VitalsRow miner={selected} thresholds={thresholds} />
               </div>
 
-              <div style={{ ...cardStyle, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr", overflow: "hidden" }}>
+              <div style={{ ...cardStyle, display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", minHeight: 0, overflow: "hidden" }}>
                 <div style={{ display: "flex", gap: 4, padding: "10px 12px", borderBottom: `1px solid ${C.borderSoft}` }}>
                   {TABS.map((t) => (
                     <button
@@ -125,7 +153,7 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
                     </button>
                   ))}
                 </div>
-                <div className="hide-scrollbar" style={{ minHeight: 0, overflow: "auto", padding: 14 }}>
+                <div className="hide-scrollbar" style={{ padding: 14, minHeight: 0, overflow: "auto" }}>
                   {tab === "overview" && <OverviewTab miner={selected} liveData={liveData} thresholds={thresholds} />}
                   {tab === "logs" && <ActivityTab miner={selected} activityLogs={activityLogs} />}
                   {tab === "signal" && <SignalTab miner={selected} />}
@@ -163,7 +191,7 @@ function FleetRow({ miner, active, hasAlert, onSelect }) {
       <span style={{ textAlign: "right", flexShrink: 0 }}>
         {miner.active ? (
           <>
-            <span style={{ display: "block", color: C.primary, fontSize: 12, fontWeight: 900 }}>{formatReading(miner.spo2, 0)}%</span>
+            <span style={{ display: "block", color: C.oxygen, fontSize: 12, fontWeight: 900 }}>{formatReading(miner.spo2, 0)}%</span>
             <span style={{ display: "block", color: C.textMuted, fontSize: 10 }}>{formatReading(miner.hr, 0)} bpm</span>
           </>
         ) : (
@@ -202,9 +230,9 @@ function MinerHeader({ miner }) {
 function VitalsRow({ miner, thresholds }) {
   const live = miner.active && miner.finger !== false;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 10 }} className="cc-vitals">
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }} className="cc-vitals">
       <VitalTile label="Heart Rate" icon="heart" value={live ? formatReading(miner.hr, 0) : "--"} unit="bpm" color={C.red} status={live ? getVitalStatus(miner.hr, "hr", thresholds) : "OFFLINE"} />
-      <VitalTile label="SpO2" icon="droplet" value={live ? formatReading(miner.spo2, 0) : "--"} unit="%" color={C.primary} status={live ? getVitalStatus(miner.spo2, "spo2", thresholds) : "OFFLINE"} />
+      <VitalTile label="SpO2" icon="droplet" value={live ? formatReading(miner.spo2, 0) : "--"} unit="%" color={C.oxygen} status={live ? getVitalStatus(miner.spo2, "spo2", thresholds) : "OFFLINE"} />
       <VitalTile label="Body Temp" icon="thermometer" value={live ? formatReading(miner.temp, 1) : "--"} unit="°C" color={C.teal} status={live ? getVitalStatus(miner.temp, "temp", thresholds) : "OFFLINE"} />
       <VitalTile label="Chest Contact" icon="contact" value={miner.active ? (miner.finger === false ? "No" : "Yes") : "--"} color={!miner.active ? C.offline : miner.finger === false ? C.amber : C.green} status={!miner.active ? "OFFLINE" : miner.finger === false ? "WARNING" : "NORMAL"} />
       <VitalTile label="Manual SOS" icon="siren" value={miner.active ? (miner.button_pressed || miner.manual_alert ? "Pressed" : "Clear") : "--"} unit={miner.active ? `${miner.button_press_count || 0}x` : ""} color={!miner.active ? C.offline : miner.button_pressed || miner.manual_alert ? C.red : C.green} status={!miner.active ? "OFFLINE" : miner.button_pressed || miner.manual_alert ? "PRESSED" : "NORMAL"} />
@@ -234,13 +262,13 @@ function VitalTile({ label, value, unit, color, status, icon }) {
 // ─── Tabs ───────────────────────────────────────────────────────────────────
 
 function OverviewTab({ miner, liveData, thresholds }) {
-  const chartData = useMemo(() => mergeLiveSeries(liveData[miner.id] || { hr: [], spo2: [], temp: [] }), [liveData, miner.id]);
+  const chartData = useMemo(() => mergeSensorSeries(liveData[miner.id]), [liveData, miner.id]);
   const live = miner.active && miner.finger !== false;
   const hasData = live && chartData.some((d) => d.hr != null || d.spo2 != null || d.temp != null);
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 240px", gap: 14, height: "100%", minHeight: 0 }} className="cc-overview">
-      <div style={{ minHeight: 260 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 260px", gap: 14, alignItems: "start" }} className="cc-overview">
+      <div>
         <div style={{ color: C.text, fontSize: 14, fontWeight: 950, marginBottom: 10 }}>Live Readings</div>
         {hasData ? (
           <ResponsiveContainer width="100%" height={300}>
@@ -248,18 +276,22 @@ function OverviewTab({ miner, liveData, thresholds }) {
               <CartesianGrid stroke={C.borderSoft} strokeDasharray="3 6" vertical={false} />
               <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={28} label={{ value: "Time", fill: C.textMuted, fontSize: 10, position: "insideBottom", offset: -4 }} />
               <YAxis yAxisId="hr" domain={[40, 140]} tick={{ fill: C.red, fontSize: 10 }} axisLine={false} tickLine={false} width={42} label={{ value: "bpm", angle: -90, fill: C.red, fontSize: 10, position: "insideLeft" }} />
-              <YAxis yAxisId="spo2" orientation="right" domain={[80, 100]} tick={{ fill: C.primary, fontSize: 10 }} axisLine={false} tickLine={false} width={38} label={{ value: "%", angle: 90, fill: C.primary, fontSize: 10, position: "insideRight" }} />
+              <YAxis yAxisId="spo2" orientation="right" domain={[80, 100]} tick={{ fill: C.oxygen, fontSize: 10 }} axisLine={false} tickLine={false} width={38} label={{ value: "%", angle: 90, fill: C.oxygen, fontSize: 10, position: "insideRight" }} />
               <YAxis yAxisId="temp" orientation="right" domain={[34, 42]} hide />
               <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
               <ReferenceLine yAxisId="spo2" y={thresholds?.spo2Min ?? 80} stroke={C.amber} strokeDasharray="4 4" strokeOpacity={0.5} />
               <Line yAxisId="hr" type="monotone" dataKey="hr" name="HR" stroke={C.red} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
-              <Line yAxisId="spo2" type="monotone" dataKey="spo2" name="SpO2" stroke={C.primary} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="spo2" type="monotone" dataKey="spo2" name="SpO2" stroke={C.oxygen} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
               <Line yAxisId="temp" type="monotone" dataKey="temp" name="Body Temp" stroke={C.teal} strokeWidth={1.8} dot={false} isAnimationActive={false} connectNulls />
             </LineChart>
           </ResponsiveContainer>
         ) : (
-          <div style={{ height: 300, display: "grid", placeItems: "center", border: `1px dashed ${C.border}`, borderRadius: 10, color: C.textMuted, fontSize: 13, textAlign: "center", padding: 20 }}>
-            {miner.active ? "Waiting for live sensor readings…" : "Device offline — no live readings."}
+          <div style={{ minHeight: 230, display: "grid", placeItems: "center", border: `1px dashed ${C.border}`, borderRadius: 10, color: C.textMuted, fontSize: 13, textAlign: "center", padding: 20 }}>
+            <div>
+              <Icon name={miner.active ? "pulse" : "wifi"} size={24} color={miner.active ? C.amber : C.offline} />
+              <div style={{ color: miner.active ? C.amber : C.offline, fontWeight: 900, marginTop: 10 }}>{miner.active ? "Waiting for valid readings" : "Device offline"}</div>
+              <div style={{ marginTop: 6, maxWidth: 360, lineHeight: 1.5 }}>{miner.active ? "Verify chest contact and allow the sensors a moment to stabilize." : `Last contact ${formatLastSeen(miner.lastSeen)}. Live charts resume automatically when the device reconnects.`}</div>
+            </div>
           </div>
         )}
       </div>
@@ -311,17 +343,33 @@ function SignalTab({ miner }) {
     { label: "Simulation mode", value: miner.sim_mode ? "ON (test data)" : "Off", good: !miner.sim_mode },
     { label: "Last reading", value: formatLastSeen(miner.lastSeen), good: miner.active },
   ];
+  const healthy = rows.filter((row) => row.good).length;
+  const score = Math.round((healthy / rows.length) * 100);
   return (
-    <div style={{ display: "grid", gap: 8, maxWidth: 560 }}>
-      {rows.map((r) => (
-        <div key={r.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "11px 14px", border: `1px solid ${C.borderSoft}`, borderRadius: 9, background: "rgba(255,255,255,0.02)" }}>
-          <span style={{ color: C.textMuted, fontSize: 12 }}>{r.label}</span>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 7, color: r.good ? C.green : C.amber, fontSize: 12, fontWeight: 900 }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: r.good ? C.green : C.amber }} />
-            {r.value}
-          </span>
+    <div className="cc-signal-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.5fr) minmax(250px, 0.75fr)", gap: 14, alignItems: "start" }}>
+      <div style={{ display: "grid", gap: 8 }}>
+        {rows.map((r) => (
+          <div key={r.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "11px 14px", border: `1px solid ${C.borderSoft}`, borderRadius: 9, background: "rgba(255,255,255,0.02)" }}>
+            <span style={{ color: C.textMuted, fontSize: 12 }}>{r.label}</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 7, color: r.good ? C.green : C.amber, fontSize: 12, fontWeight: 900, textAlign: "right" }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: r.good ? C.green : C.amber, flexShrink: 0 }} />
+              {r.value}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 10, padding: 16, background: "rgba(255,255,255,0.02)" }}>
+        <div style={moduleLabel}>Signal readiness</div>
+        <div style={{ color: score === 100 ? C.green : C.amber, fontSize: 34, fontWeight: 950, marginTop: 10, fontVariantNumeric: "tabular-nums" }}>{score}%</div>
+        <div style={{ height: 6, background: C.borderSoft, borderRadius: 999, overflow: "hidden", margin: "12px 0" }}>
+          <div style={{ width: `${score}%`, height: "100%", background: score === 100 ? C.green : C.amber }} />
         </div>
-      ))}
+        <div style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.6 }}>
+          {miner.active
+            ? `${healthy} of ${rows.length} signal checks are healthy. Review amber rows before relying on the live readings.`
+            : "The last known state is preserved here. Confirm power and queued WiFi settings before restarting the device."}
+        </div>
+      </div>
     </div>
   );
 }
@@ -333,22 +381,4 @@ function Indicator({ color, label }) {
       <span style={{ color: C.textDim, fontSize: 12 }}>{label}</span>
     </div>
   );
-}
-
-// mergeLiveSeries — zips hr/spo2/temp point arrays into combined chart rows
-function mergeLiveSeries(series) {
-  const length = Math.max(series.hr?.length || 0, series.spo2?.length || 0, series.temp?.length || 0);
-  const rows = [];
-  for (let i = 0; i < length; i++) {
-    const hrPoint = series.hr?.[i];
-    const spo2Point = series.spo2?.[i];
-    const tempPoint = series.temp?.[i];
-    rows.push({
-      time: hrPoint?.time || spo2Point?.time || tempPoint?.time || "",
-      hr: Number.isFinite(Number(hrPoint?.hr)) ? Number(hrPoint.hr) : null,
-      spo2: Number.isFinite(Number(spo2Point?.spo2)) ? Number(spo2Point.spo2) : null,
-      temp: Number.isFinite(Number(tempPoint?.temp)) ? Number(tempPoint.temp) : null,
-    });
-  }
-  return rows.slice(-30);
 }

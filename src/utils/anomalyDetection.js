@@ -9,6 +9,7 @@ export function analyzeSpo2Trend(points, { minSamples = 5, dropThreshold = 3, sl
   const series = (points || [])
     .map((p) => ({ t: Number(p.timestamp) || 0, v: Number(p.spo2) || 0 }))
     .filter((p) => p.v > 0)
+    .sort((a, b) => a.t - b.t)
     .slice(-8);
 
   if (series.length < minSamples) {

@@ -14,8 +14,8 @@ export default function SettingsPage({ miners, staleSeconds, setStaleSeconds }) 
   const [error, setError] = useState("");
   const [pushEnabled, setPushEnabled] = useState(() => localStorage.getItem(PUSH_ENABLED_KEY) !== "false");
 
-  const online = miners.filter((m) => m.active).length;
-  const offline = miners.filter((m) => !m.active).length;
+  const online = miners.filter((miner) => miner.active && !miner.stale).length;
+  const offline = miners.filter((miner) => !miner.active || miner.stale).length;
   const warnings = miners.filter((m) => m.finger === false || m.manual_alert || m.button_pressed).length;
 
   const handlePushToggle = (enabled) => {
@@ -63,7 +63,7 @@ export default function SettingsPage({ miners, staleSeconds, setStaleSeconds }) 
         </Modal>
       )}
 
-      <div style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gap: 10, height: "100%", minHeight: 0 }}>
+      <div style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 10, height: "100%", minHeight: 0, overflow: "hidden" }}>
         <PageHeader
           label="Configuration"
           title="System Settings"
@@ -79,7 +79,7 @@ export default function SettingsPage({ miners, staleSeconds, setStaleSeconds }) 
           }
         />
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, alignContent: "start", minHeight: 0 }}>
+        <div className="settings-grid hide-scrollbar" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, alignContent: "start", minHeight: 0, overflow: "auto" }}>
           <SettingsCard
             number="01"
             title="Monitoring Timing"
@@ -126,9 +126,20 @@ export default function SettingsPage({ miners, staleSeconds, setStaleSeconds }) 
               <AlertRow label="Device Offline" description="A miner stops sending data past the offline timeout" color={C.offline} />
             </div>
           </SettingsCard>
+
+          <SettingsCard
+            number="03"
+            title="State Lifecycle"
+            description="A compact preview of how live device state changes under this configuration."
+          >
+            <LifecycleRow label="Receiving data" value="Online" color={C.green} text="Vitals and contact state update in real time." />
+            <LifecycleRow label={`No data for ${localStaleSeconds}s`} value="Offline" color={C.offline} text="The device is removed from active averages." />
+            <LifecycleRow label="Stream resumes" value="Recovered" color={C.oxygen} text="The existing row updates in place without reordering." />
+            <LifecycleRow label="Simulation enabled" value="Flagged" color={C.amber} text="Test data stays identifiable in diagnostics." />
+          </SettingsCard>
         </div>
 
-        <footer style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingTop: 2 }}>
+        <footer style={{ ...cardStyle, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "11px 12px" }}>
           <button
             onClick={requestSave}
             disabled={!canManage}
@@ -236,6 +247,18 @@ function AlertRow({ label, description, color }) {
         <div style={{ color: C.text, fontSize: 13, fontWeight: 900 }}>{label}</div>
         <div style={{ color: C.textMuted, fontSize: 11, marginTop: 2 }}>{description}</div>
       </div>
+    </div>
+  );
+}
+
+function LifecycleRow({ label, value, color, text }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, padding: "8px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
+      <div>
+        <div style={{ color: C.text, fontSize: 11.5, fontWeight: 900 }}>{label}</div>
+        <div style={{ color: C.textMuted, fontSize: 10, marginTop: 3, lineHeight: 1.4 }}>{text}</div>
+      </div>
+      <span style={{ color, fontSize: 10, fontWeight: 950, textTransform: "uppercase" }}>{value}</span>
     </div>
   );
 }

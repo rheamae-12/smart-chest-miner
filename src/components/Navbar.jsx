@@ -36,7 +36,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
   const [clearedNotifications, setClearedNotifications] = useState(() => readStoredStringArray(CLEARED_NOTIFICATIONS_STORAGE_KEY));
   const [hiddenNotifications, setHiddenNotifications] = useState(() => readStoredStringArray(HIDDEN_NOTIFICATIONS_STORAGE_KEY));
   const { pathname } = useLocation();
-  const onlineCount = miners.filter((miner) => miner.active).length;
+  const onlineCount = miners.filter((miner) => miner.active && !miner.stale).length;
   const alerts = buildAlerts(miners, thresholds).filter((alert) => !dismissedAlertIds.includes(alert.id));
   const sortedLogs = [...activityLogs].sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
   const dedupedLogs = sortedLogs.filter((log, index) => {
@@ -249,7 +249,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
         </Modal>
       )}
 
-      {notificationsOpen && (
+      {notificationsOpen && !clearConfirmOpen && (
         <Modal
           title="Miner Notifications"
           onClose={() => setNotificationsOpen(false)}
@@ -592,7 +592,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
         }}
       >
         {/* Title with accent rail */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+        <div className="navbar-title" style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
           <div style={{ width: 3, height: 32, borderRadius: 3, background: C.primaryGradient, boxShadow: "0 0 14px rgba(255,106,0,0.45)", flexShrink: 0 }} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 9.5, color: C.primary, letterSpacing: "0.16em", textTransform: "uppercase", fontWeight: 900 }}>Smart Chest Miner</div>
@@ -600,10 +600,8 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
           </div>
         </div>
 
-        <div style={{ flex: 1 }} />
-
         {/* Live status cluster */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="navbar-status" style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Pill tone={usingRealtime ? "good" : "warn"}>{usingRealtime ? "Firebase live" : connectionError ? "Firebase notice" : "Awaiting data"}</Pill>
           <Pill tone={onlineCount > 0 ? "good" : "danger"}>{onlineCount}/{miners.length} online</Pill>
         </div>
@@ -611,7 +609,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
         <NavDivider />
 
         {/* Clock */}
-        <div style={{ display: "flex", alignItems: "center", gap: 7, color: C.primary, fontSize: 11, fontWeight: 900, whiteSpace: "nowrap" }}>
+        <div className="navbar-clock" style={{ display: "flex", alignItems: "center", gap: 7, color: C.primary, fontSize: 11, fontWeight: 900, whiteSpace: "nowrap" }}>
           <ClockIcon />
           <span style={{ minWidth: 148, textAlign: "right" }}>{formatSystemTimestamp(time)}</span>
         </div>
@@ -619,7 +617,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
         <NavDivider />
 
         {/* Actions */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="navbar-actions" style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
             onClick={() => { setClearConfirmOpen(false); setNotificationsOpen(true); }}
             title="Miner notifications"
@@ -636,7 +634,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
               </span>
             )}
           </button>
-          <button onClick={() => setSecurityOpen(true)} className="nav-action-btn" style={{ ...ghostButtonStyle, padding: "8px 12px", fontSize: 12, fontWeight: 800, height: 36 }}>
+          <button onClick={() => setSecurityOpen(true)} className="nav-action-btn navbar-security" style={{ ...ghostButtonStyle, padding: "8px 12px", fontSize: 12, fontWeight: 800, height: 36 }}>
             Security
           </button>
           <button
@@ -660,8 +658,9 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
               : (initials || "AD")
             }
           </button>
-          <button onClick={onLogout} className="nav-action-btn nav-action-danger" style={{ ...ghostButtonStyle, padding: "8px 12px", fontSize: 12, fontWeight: 800, height: 36 }}>
-            Logout
+          <button onClick={onLogout} className="nav-action-btn nav-action-danger navbar-logout" style={{ ...ghostButtonStyle, padding: "8px 12px", fontSize: 12, fontWeight: 800, height: 36 }}>
+            <span className="navbar-logout-label">Logout</span>
+            <span className="navbar-logout-icon" aria-hidden="true">↪</span>
           </button>
         </div>
       </header>
@@ -864,7 +863,7 @@ function NotificationRow({ event, read, onOpen, onToggleRead, onClear }) {
 
 // NavDivider — thin vertical separator between navbar clusters
 function NavDivider() {
-  return <div style={{ width: 1, height: 26, background: C.borderSoft, flexShrink: 0 }} aria-hidden="true" />;
+  return <div className="navbar-divider" style={{ width: 1, height: 26, background: C.borderSoft, flexShrink: 0 }} aria-hidden="true" />;
 }
 
 

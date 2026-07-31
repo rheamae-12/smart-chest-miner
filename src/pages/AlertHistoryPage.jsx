@@ -1,13 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import FilterToolbar, { FilterField, FilterTabs } from "../components/FilterToolbar";
 import Modal from "../components/Modal";
 import PageHeader from "../components/PageHeader";
 import { useAuth } from "../context/useAuth";
 import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
 import { dedupeConsecutiveLogs, formatSystemTimestamp } from "../utils/formatters";
+import { DATE_RANGE_OPTIONS, isWithinDateRange, matchesAlertType, matchesSearch, resolveDateRange } from "../utils/filtering";
 
 const ALERT_STATUS_KEY = "smart-chest-miner-alert-statuses";
 const PAGE_SIZE = 15;
+const ALERT_FILTERS = [
+  { value: "all", label: "All", longLabel: "All alert types" },
+  { value: "critical", label: "Critical", longLabel: "Critical alerts" },
+  { value: "warning", label: "Warning", longLabel: "Warning alerts" },
+  { value: "offline", label: "Offline", longLabel: "Device offline alerts" },
+  { value: "high-hr", label: "High HR", longLabel: "High heart-rate alerts" },
+  { value: "low-spo2", label: "Low SpO2", longLabel: "Low SpO2 alerts" },
+];
 
 const tableHeader = {
   display: "grid",
@@ -93,6 +103,7 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
   const [clearLogsOpen, setClearLogsOpen] = useState(false);
   const [clearLogsError, setClearLogsError] = useState("");
   const [clearingLogs, setClearingLogs] = useState(false);
+  const [rangePreset, setRangePreset] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -104,7 +115,14 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
     localStorage.setItem(ALERT_STATUS_KEY, JSON.stringify(alertStatuses));
   }, [alertStatuses]);
 
-  const alertLogs = useMemo(() => dedupeConsecutiveLogs(activityLogs.filter(isAlertEntry)), [activityLogs]);
+  const alertLogs = useMemo(
+    () => dedupeConsecutiveLogs(
+      activityLogs
+        .filter(isAlertEntry)
+        .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0)),
+    ),
+    [activityLogs],
+  );
 
   const confirmClearLogs = async () => {
     setClearingLogs(true);
@@ -119,27 +137,34 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
     }
   };
 
+  const dateRange = useMemo(
+    () => resolveDateRange(rangePreset, { from: dateFrom, to: dateTo }),
+    [dateFrom, dateTo, rangePreset],
+  );
+
   const filtered = useMemo(() => {
     return alertLogs.filter((log) => {
-      if (dateFrom && log.timestamp < new Date(dateFrom).getTime()) return false;
-      if (dateTo && log.timestamp > new Date(dateTo).getTime() + 86399999) return false;
-      if (typeFilter === "critical" && log.severity !== "critical") return false;
-      if (typeFilter === "warning" && log.severity !== "warning") return false;
-      if (typeFilter === "offline" && !(log.type === "status" && log.status === "offline")) return false;
-      if (typeFilter === "high-hr" && !(log.type === "vital" && log.status === "high" && (log.title || "").toLowerCase().includes("heart"))) return false;
-      if (typeFilter === "low-spo2" && !(log.type === "vital" && (log.title || "").toLowerCase().includes("spo2"))) return false;
-      if (minerSearch.trim() && !(log.miner || "").toLowerCase().includes(minerSearch.trim().toLowerCase())) return false;
+      if ((dateRange.start || dateRange.end) && !isWithinDateRange(log.timestamp, dateRange)) return false;
+      if (!matchesAlertType(log, typeFilter)) return false;
+      if (!matchesSearch(minerSearch, log.miner, log.deviceId, log.title, log.detail)) return false;
       return true;
     });
-  }, [alertLogs, dateFrom, dateTo, typeFilter, minerSearch]);
+  }, [alertLogs, dateRange, typeFilter, minerSearch]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const activeFilterCount = Number(rangePreset !== "all") + Number(typeFilter !== "all") + Number(Boolean(minerSearch.trim()));
+  const filterTypeLabel = ALERT_FILTERS.find((option) => option.value === typeFilter)?.longLabel || "All alert types";
+  const dateLabel = DATE_RANGE_OPTIONS.find((option) => option.value === rangePreset)?.label || "All time";
 
   const unresolvedCount = alertLogs.filter((log) => (alertStatuses[log.id] || "unresolved") === "unresolved").length;
   const resolvedCount = alertLogs.filter((log) => alertStatuses[log.id] === "resolved").length;
   const acknowledgedCount = alertLogs.filter((log) => alertStatuses[log.id] === "acknowledged").length;
+  const resolutionRate = alertLogs.length ? Math.round((resolvedCount / alertLogs.length) * 100) : 0;
+  const oldestUnresolved = alertLogs
+    .filter((log) => (alertStatuses[log.id] || "unresolved") === "unresolved")
+    .reduce((oldest, log) => (!oldest || Number(log.timestamp || 0) < Number(oldest.timestamp || 0) ? log : oldest), null);
 
   const avgResponseMs = useMemo(() => {
     const times = alertLogs
@@ -233,27 +258,30 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
         />
 
         {/* Filters */}
-        <section style={{ ...cardStyle, padding: "12px 16px", display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
-          <label style={{ display: "grid", gap: 5 }}>
-            <span style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 900 }}>From</span>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
-              style={{ ...controlStyle, width: 148, padding: "8px 10px" }}
+        <FilterToolbar
+          summary={`${filterTypeLabel} · ${dateLabel} · ${filtered.length} result${filtered.length === 1 ? "" : "s"}`}
+          activeCount={activeFilterCount}
+          onReset={() => { setRangePreset("all"); setDateFrom(""); setDateTo(""); setTypeFilter("all"); setMinerSearch(""); setPage(1); }}
+        >
+          <FilterField label="Date range">
+            <FilterTabs
+              ariaLabel="Alert date range"
+              value={rangePreset}
+              onChange={(value) => { setRangePreset(value); setPage(1); }}
+              options={DATE_RANGE_OPTIONS}
             />
-          </label>
-          <label style={{ display: "grid", gap: 5 }}>
-            <span style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 900 }}>To</span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
-              style={{ ...controlStyle, width: 148, padding: "8px 10px" }}
-            />
-          </label>
-          <label style={{ display: "grid", gap: 5 }}>
-            <span style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 900 }}>Alert Type</span>
+          </FilterField>
+          {rangePreset === "custom" && (
+            <>
+              <FilterField label="Start date">
+                <input type="date" value={dateFrom} max={dateTo || undefined} onChange={(event) => { setDateFrom(event.target.value); setPage(1); }} style={{ ...controlStyle, width: 148, padding: "8px 10px" }} />
+              </FilterField>
+              <FilterField label="End date">
+                <input type="date" value={dateTo} min={dateFrom || undefined} onChange={(event) => { setDateTo(event.target.value); setPage(1); }} style={{ ...controlStyle, width: 148, padding: "8px 10px" }} />
+              </FilterField>
+            </>
+          )}
+          <FilterField label="Alert type">
             <select
               value={typeFilter}
               onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
@@ -266,32 +294,23 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
               <option value="low-spo2">Low SpO2</option>
               <option value="offline">Device Offline</option>
             </select>
-          </label>
-          <label style={{ display: "grid", gap: 5, flex: 1, minWidth: 160 }}>
-            <span style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 900 }}>Miner Name</span>
+          </FilterField>
+          <FilterField label="Search" wide>
             <input
               type="text"
-              placeholder="Search miner…"
+              placeholder="Miner, device, or alert…"
               value={minerSearch}
               onChange={(e) => { setMinerSearch(e.target.value); setPage(1); }}
               style={{ ...controlStyle }}
             />
-          </label>
-          {(dateFrom || dateTo || typeFilter !== "all" || minerSearch) && (
-            <button
-              onClick={() => { setDateFrom(""); setDateTo(""); setTypeFilter("all"); setMinerSearch(""); setPage(1); }}
-              style={{ ...ghostButtonStyle, padding: "9px 13px", fontSize: 11, alignSelf: "end" }}
-            >
-              Clear Filters
-            </button>
-          )}
-        </section>
+          </FilterField>
+        </FilterToolbar>
 
         {/* Main + Aside */}
-        <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 300px", gap: 12, minHeight: 0 }}>
+        <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 300px", gap: 12, alignItems: "stretch", minHeight: 0, overflow: "hidden" }}>
 
           {/* Table */}
-          <div style={{ ...cardStyle, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr auto" }}>
+          <div style={{ ...cardStyle, display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr) auto", minHeight: 0, overflow: "hidden" }}>
             <div style={{ padding: "14px 16px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
               <div>
                 <div style={{ color: C.text, fontSize: 14, fontWeight: 900 }}>Alert Records</div>
@@ -347,19 +366,22 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
           </div>
 
           {/* Aside */}
-          <aside style={{ display: "grid", gridTemplateRows: "auto auto 1fr", gap: 12, minHeight: 0 }}>
+          <aside style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", gap: 12, minHeight: 0, overflow: "hidden" }}>
 
-            <InfoCard title="Alert Summary">
-              <SummaryMetric label="Critical alerts" value={alertLogs.filter((l) => l.severity === "critical").length} color={C.red} />
-              <SummaryMetric label="Warning alerts" value={alertLogs.filter((l) => l.severity === "warning").length} color={C.amber} />
-              <SummaryMetric label="Device offline" value={alertLogs.filter((l) => l.type === "status").length} color={C.offline} />
-              <SummaryMetric label="Manual SOS" value={alertLogs.filter((l) => l.type === "manual_alert").length} color={C.primary} />
-            </InfoCard>
-
-            <InfoCard title="Status Overview">
-              <SummaryMetric label="Unresolved" value={unresolvedCount} color={unresolvedCount > 0 ? C.red : C.green} />
+            <InfoCard title="Resolution Workflow">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end", gap: 12, paddingBottom: 11 }}>
+                <div>
+                  <div style={{ color: C.textMuted, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Completion rate</div>
+                  <div style={{ color: resolutionRate === 100 ? C.green : C.amber, fontSize: 28, fontWeight: 950, marginTop: 5 }}>{resolutionRate}%</div>
+                </div>
+                <div style={{ color: C.textMuted, fontSize: 10 }}>{resolvedCount}/{alertLogs.length} alerts</div>
+              </div>
+              <div style={{ height: 5, borderRadius: 999, background: C.borderSoft, overflow: "hidden", marginBottom: 8 }}>
+                <div style={{ width: `${resolutionRate}%`, height: "100%", background: resolutionRate === 100 ? C.green : C.amber }} />
+              </div>
               <SummaryMetric label="Acknowledged" value={acknowledgedCount} color={C.amber} />
               <SummaryMetric label="Resolved" value={resolvedCount} color={C.green} />
+              <SummaryMetric label="Oldest open" value={oldestUnresolved ? timeAgo(oldestUnresolved.timestamp) : "None"} color={oldestUnresolved ? C.red : C.green} />
             </InfoCard>
 
             <InfoCard title="Recent Critical Alerts">

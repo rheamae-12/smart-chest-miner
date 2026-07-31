@@ -76,12 +76,13 @@ const char* MINER_LOCATION = "Masara Shaft-3";
 #define WIFI_RECONNECT_INTERVAL  10000
 #define WIFI_CONFIG_POLL_MS      30000
 #define RED_LED_BLINK_INTERVAL   200
-#define BUZZER_BEEP_INTERVAL     100
+#define NETWORK_TASK_POLL_MS     50
 
 // ---- Contact detection ----
-#define FINGER_THRESHOLD     20000
-#define FINGER_ON_COUNT      1
-#define FINGER_OFF_COUNT     3
+#define FINGER_ON_THRESHOLD  30000
+#define FINGER_OFF_THRESHOLD 15000
+#define FINGER_ON_COUNT      3
+#define FINGER_OFF_COUNT     6
 #define CONTACT_LOST_TIMEOUT_MS 5000
 
 // ---- Maxim sample buffer ----
@@ -93,14 +94,12 @@ const char* MINER_LOCATION = "Masara Shaft-3";
 #define HR_MAX_VALID         180
 #define HR_MAX_JUMP          25
 #define HR_SMOOTH_ALPHA      0.25f
-#define HR_DOUBLE_ARTIFACT   130
-#define HR_HALF_MIN          55
-#define HR_HALF_MAX          95
-#define HR_HIGH_CONFIRM      4
-#define SPO2_MIN_VALID       80
+#define HR_JUMP_CONFIRM      4
+#define SPO2_MIN_VALID       50
 #define SPO2_MAX_VALID       100
 #define SPO2_MAX_JUMP        5
 #define SPO2_SMOOTH_ALPHA    0.35f
+#define SPO2_JUMP_CONFIRM    4
 
 // ---- Old working HR/SpO2 simulation profile ----
 #define SIM_UPDATE_INTERVAL  2000
@@ -111,23 +110,23 @@ const char* MINER_LOCATION = "Masara Shaft-3";
 #define SIM_SPO2_MIN         96.0
 #define SIM_SPO2_MAX         99.0
 
-// ---- Buzzer tones (passive buzzers) ----
-#define BUZZER_HR_FREQ       1200
-#define BUZZER_SPO2_FREQ     1800
-#define BUZZER_TEMP_FREQ     650
+// ---- Buzzer tones and patterns (passive buzzers) ----
+#define BUZZER_HR_FREQ           1000
+#define BUZZER_SPO2_FREQ         1600
+#define BUZZER_TEMP_FREQ         2200
+#define BUZZER_HR_INTERVAL_MS     450
+#define BUZZER_SPO2_INTERVAL_MS   250
+#define BUZZER_TEMP_INTERVAL_MS   650
 
-// ---- Device-local safety thresholds (drive the buzzers without the network) ----
-#define HR_HIGH_WARNING      105
-#define HR_HIGH_CRITICAL     120
-#define HR_LOW_WARNING       55
-#define HR_LOW_CRITICAL      45
-#define SPO2_WARNING         80
-#define SPO2_CRITICAL        75
-#define TEMP_HIGH_WARNING    38.0
-#define TEMP_HIGH_CRITICAL   39.0
-#define TEMP_LOW_WARNING     30.0
-#define TEMP_LOW_CRITICAL    28.0
-enum HealthState { HEALTH_NO_FINGER, HEALTH_NORMAL, HEALTH_WARNING, HEALTH_CRITICAL, HEALTH_MANUAL_ALERT };
+// ---- Device-local normal ranges (inclusive) ----
+#define HR_NORMAL_MIN        70.0f
+#define HR_NORMAL_MAX       130.0f
+#define SPO2_NORMAL_MIN      80.0f
+#define SPO2_NORMAL_MAX     110.0f
+#define TEMP_NORMAL_MIN      25.0f
+#define TEMP_NORMAL_MAX      37.0f
+
+enum HealthState { HEALTH_NO_FINGER, HEALTH_STABILIZING, HEALTH_NORMAL, HEALTH_WARNING, HEALTH_CRITICAL, HEALTH_MANUAL_ALERT };
 
 MAX30105 particleSensor;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
@@ -143,12 +142,14 @@ bool alertHR = false, alertSpO2 = false, alertTemp = false;  // per-vital (criti
 float currentBPM    = 0.0;
 float currentSpO2   = 0.0;
 float currentTemp   = 0.0;   // °C
-int hrHighCandidateCount = 0;
+int hrJumpCandidateCount = 0, spO2JumpCandidateCount = 0;
+float hrJumpCandidate = 0.0, spO2JumpCandidate = 0.0;
 
 unsigned long lastLiveUploadTime = 0, lastAnalyticsUploadTime = 0;
 unsigned long lastSensorRead = 0, lastTempRead = 0, lastDisplay = 0;
 unsigned long lastWiFiReconnect = 0, lastWiFiConfigPoll = 0, lastRedLedToggle = 0, lastGreenLedToggle = 0;
-unsigned long lastPrintTime = 0, lastBuzzerToggle = 0, lastSimUpdate = 0;
+unsigned long lastPrintTime = 0, lastSimUpdate = 0;
+unsigned long lastHrBuzzerToggle = 0, lastSpO2BuzzerToggle = 0, lastTempBuzzerToggle = 0;
 
 float analyticsBpmSum = 0, analyticsSpo2Sum = 0, analyticsTempSum = 0;
 int   analyticsSampleCount = 0, analyticsTempCount = 0;
@@ -157,9 +158,11 @@ bool  forceUpload = false;
 bool manualAlertActive = false;
 unsigned long lastButtonPress = 0;
 bool buttonPressedDisplay = false;
+bool wasButtonPressed = false;
 unsigned long buttonPressCount = 0;
 
-bool redLedState = false, greenLedState = false, buzzerPhase = false;
+bool redLedState = false, greenLedState = false;
+bool hrBuzzerPhase = false, spO2BuzzerPhase = false, tempBuzzerPhase = false;
 
 bool fingerDetected = false, wasFingerDetected = false, noFingerStateUploaded = false;
 int  fingerOnCounter = 0, fingerOffCounter = 0;
@@ -172,6 +175,8 @@ int rawIndex = 0;
 
 typedef struct { char method[8]; char path[96]; char payload[448]; } FirebaseJob;
 QueueHandle_t firebaseQueue;
+
+void drawBootScreen(const char* status, const char* detail);
 
 // =================================================================
 // Setup
@@ -206,7 +211,6 @@ void setup() {
 
   connectWiFi();
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-  waitForTimeSync(10000);
   randomSeed(analogRead(0));
   registerDeviceInfo();
 }
@@ -238,28 +242,39 @@ void initSensors() {
 
   if (hasDisplay) {
     if (display.begin(SSD1306_SWITCHCAPVCC, ADDR_OLED)) {
-      display.clearDisplay();
-      display.setTextColor(SSD1306_WHITE);
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.println("Smart Chest Miner");
-      display.println("Booting...");
-      display.display();
+      drawBootScreen("BOOTING", "Checking sensors");
+      delay(900);
     } else {
       hasDisplay = false;
     }
   }
 }
 
+void drawBootScreen(const char* status, const char* detail) {
+  if (!hasDisplay) return;
+
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(9, 0);
+  display.print("SMART CHEST MINER");
+  display.drawLine(0, 11, 127, 11, SSD1306_WHITE);
+  display.setTextSize(2);
+  display.setCursor(18, 21);
+  display.print(status);
+  display.setTextSize(1);
+  display.setCursor(14, 47);
+  display.print(detail);
+  display.setCursor(19, 56);
+  display.print("HR  SpO2  TEMP");
+  display.display();
+}
+
 void connectWiFi() {
-  Serial.printf("[INIT] WiFi: %s ", WIFI_SSID);
+  Serial.printf("[INIT] Starting WiFi: %s (non-blocking)\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - start) < 20000) { delay(500); Serial.print("."); }
-  Serial.println();
-  if (WiFi.status() == WL_CONNECTED) Serial.printf("[INIT] WiFi OK: %s\n", WiFi.localIP().toString().c_str());
-  else Serial.println("[WARN] WiFi failed; will retry in loop.");
 }
 
 void connectWiFiWithCredentials(const char* ssid, const char* password) {
@@ -271,24 +286,11 @@ void connectWiFiWithCredentials(const char* ssid, const char* password) {
   WiFi.begin(ssid, password);
 }
 
-void waitForTimeSync(unsigned long timeoutMs) {
-  Serial.print("[INIT] NTP sync ");
-  unsigned long start = millis();
-  time_t now = 0;
-  while ((millis() - start) < timeoutMs) {
-    time(&now);
-    if (now > 1000000000) { Serial.printf("\n[INIT] Time: %lu\n", (unsigned long)now); return; }
-    delay(250); Serial.print(".");
-  }
-  Serial.println("\n[WARN] NTP not synced; uploads pause until the clock is valid.");
-}
-
 // =================================================================
 // Main loop (core 1)
 // =================================================================
 void loop() {
   unsigned long now = millis();
-  handleWiFiReconnect(now);
   handleButton(now);
   handleMonitoring(now);
 }
@@ -346,7 +348,8 @@ void handleMonitoring(unsigned long now) {
       manualAlertActive ? "YES" : "NO");
   }
 
-  if (forceUpload || (now - lastLiveUploadTime >= LIVE_UPLOAD_INTERVAL_MS)) {
+  if (WiFi.status() == WL_CONNECTED &&
+      (forceUpload || (now - lastLiveUploadTime >= LIVE_UPLOAD_INTERVAL_MS))) {
     lastLiveUploadTime = now;
     enqueueLiveUpload();
     if (!fingerDetected && !manualAlertActive) noFingerStateUploaded = true;
@@ -361,7 +364,11 @@ void handleMonitoring(unsigned long now) {
     float avgTemp = analyticsTempCount ? (analyticsTempSum / analyticsTempCount) : 0;
     analyticsBpmSum = analyticsSpo2Sum = analyticsTempSum = 0;
     analyticsSampleCount = analyticsTempCount = 0;
-    enqueueAnalyticsUpload(avgBPM, avgSpO2, avgTemp);
+    if (WiFi.status() == WL_CONNECTED) {
+      enqueueAnalyticsUpload(avgBPM, avgSpO2, avgTemp);
+    } else {
+      Serial.println("[ANALYTICS] Offline; local monitoring continues, upload skipped.");
+    }
   }
 }
 
@@ -370,28 +377,33 @@ void handleMonitoring(unsigned long now) {
 // =================================================================
 void readPulseOx() {
   particleSensor.check();
-  bool gotSample = false, anyDetected = false;
+  bool gotSample = false, contactDetected = false;
   while (particleSensor.available()) {
     uint32_t ir = particleSensor.getFIFOIR();
     uint32_t red = particleSensor.getFIFORed();
     particleSensor.nextSample();
     latestIrValue = ir; gotSample = true;
     lastPulseSampleTime = millis();
-    if (ir >= FINGER_THRESHOLD) anyDetected = true;
+    contactDetected = fingerDetected ? (ir > FINGER_OFF_THRESHOLD)
+                                     : (ir >= FINGER_ON_THRESHOLD);
 
 #if !USE_SIMULATION
-    if (rawIndex < RAW_BUFFER_LEN) { irBuffer[rawIndex] = ir; redBuffer[rawIndex] = red; rawIndex++; }
-    if (rawIndex >= RAW_BUFFER_LEN) {
-      computeVitals();
-      for (int i = RAW_SLIDE; i < RAW_BUFFER_LEN; i++) {
-        irBuffer[i - RAW_SLIDE] = irBuffer[i]; redBuffer[i - RAW_SLIDE] = redBuffer[i];
+    if (contactDetected) {
+      if (rawIndex < RAW_BUFFER_LEN) { irBuffer[rawIndex] = ir; redBuffer[rawIndex] = red; rawIndex++; }
+      if (rawIndex >= RAW_BUFFER_LEN) {
+        computeVitals();
+        for (int i = RAW_SLIDE; i < RAW_BUFFER_LEN; i++) {
+          irBuffer[i - RAW_SLIDE] = irBuffer[i]; redBuffer[i - RAW_SLIDE] = redBuffer[i];
+        }
+        rawIndex = RAW_BUFFER_LEN - RAW_SLIDE;
       }
-      rawIndex = RAW_BUFFER_LEN - RAW_SLIDE;
+    } else if (fingerDetected || rawIndex > 0) {
+      clearContactReadings();
     }
 #endif
   }
   if (!gotSample) return;
-  updateFingerState(anyDetected);
+  updateFingerState(contactDetected);
 }
 
 void updateFingerState(bool anyDetected) {
@@ -400,7 +412,11 @@ void updateFingerState(bool anyDetected) {
     if (fingerOnCounter >= FINGER_ON_COUNT) { fingerDetected = true; fingerOnCounter = FINGER_ON_COUNT; }
   } else {
     fingerOffCounter++; fingerOnCounter = 0;
-    if (fingerOffCounter >= FINGER_OFF_COUNT) { fingerDetected = false; fingerOffCounter = FINGER_OFF_COUNT; }
+    if (fingerOffCounter >= FINGER_OFF_COUNT) {
+      fingerDetected = false;
+      fingerOffCounter = FINGER_OFF_COUNT;
+      clearContactReadings();
+    }
   }
 }
 
@@ -408,7 +424,14 @@ void clearContactReadings() {
   currentBPM = 0;
   currentSpO2 = 0;
   rawIndex = 0;
-  hrHighCandidateCount = 0;
+  hrJumpCandidateCount = spO2JumpCandidateCount = 0;
+  hrJumpCandidate = spO2JumpCandidate = 0;
+  alertHR = alertSpO2 = false;
+  hrBuzzerPhase = spO2BuzzerPhase = false;
+  noTone(BUZZER_HR_PIN);
+  noTone(BUZZER_SPO2_PIN);
+  digitalWrite(BUZZER_HR_PIN, LOW);
+  digitalWrite(BUZZER_SPO2_PIN, LOW);
 }
 
 #if !USE_SIMULATION
@@ -425,26 +448,29 @@ void computeVitals() {
 void acceptHeartRate(float bpm) {
   if (bpm < HR_MIN_VALID || bpm > HR_MAX_VALID) return;
 
-  if (bpm >= HR_DOUBLE_ARTIFACT) {
-    float halfBpm = bpm * 0.5f;
-    bool halfLooksHuman = halfBpm >= HR_HALF_MIN && halfBpm <= HR_HALF_MAX;
-    bool halfMatchesCurrent = currentBPM <= 0 || fabsf(halfBpm - currentBPM) <= HR_MAX_JUMP;
-    if (halfLooksHuman && halfMatchesCurrent) {
-      bpm = halfBpm;
-      hrHighCandidateCount = 0;
-    } else {
-      hrHighCandidateCount++;
-      if (hrHighCandidateCount < HR_HIGH_CONFIRM) return;
-    }
-  } else {
-    hrHighCandidateCount = 0;
-  }
-
   if (currentBPM <= 0) {
     currentBPM = bpm;
+    hrJumpCandidateCount = 0;
     return;
   }
-  if (fabsf(bpm - currentBPM) > HR_MAX_JUMP) return;
+
+  if (fabsf(bpm - currentBPM) > HR_MAX_JUMP) {
+    if (hrJumpCandidateCount == 0 || fabsf(bpm - hrJumpCandidate) > 10.0f) {
+      hrJumpCandidate = bpm;
+      hrJumpCandidateCount = 1;
+    } else {
+      hrJumpCandidate = (hrJumpCandidate * 0.5f) + (bpm * 0.5f);
+      hrJumpCandidateCount++;
+    }
+
+    if (hrJumpCandidateCount < HR_JUMP_CONFIRM) return;
+
+    currentBPM = hrJumpCandidate;
+    hrJumpCandidateCount = 0;
+    return;
+  }
+
+  hrJumpCandidateCount = 0;
   currentBPM = (currentBPM * (1.0f - HR_SMOOTH_ALPHA)) + (bpm * HR_SMOOTH_ALPHA);
 }
 
@@ -452,9 +478,28 @@ void acceptSpO2(float spo2) {
   if (spo2 < SPO2_MIN_VALID || spo2 > SPO2_MAX_VALID) return;
   if (currentSpO2 <= 0) {
     currentSpO2 = spo2;
+    spO2JumpCandidateCount = 0;
     return;
   }
-  if (fabsf(spo2 - currentSpO2) > SPO2_MAX_JUMP) return;
+
+  if (fabsf(spo2 - currentSpO2) > SPO2_MAX_JUMP) {
+    if (spO2JumpCandidateCount == 0 ||
+        fabsf(spo2 - spO2JumpCandidate) > 3.0f) {
+      spO2JumpCandidate = spo2;
+      spO2JumpCandidateCount = 1;
+    } else {
+      spO2JumpCandidate = (spO2JumpCandidate * 0.5f) + (spo2 * 0.5f);
+      spO2JumpCandidateCount++;
+    }
+
+    if (spO2JumpCandidateCount < SPO2_JUMP_CONFIRM) return;
+
+    currentSpO2 = spO2JumpCandidate;
+    spO2JumpCandidateCount = 0;
+    return;
+  }
+
+  spO2JumpCandidateCount = 0;
   currentSpO2 = (currentSpO2 * (1.0f - SPO2_SMOOTH_ALPHA)) + (spo2 * SPO2_SMOOTH_ALPHA);
 }
 #endif
@@ -483,20 +528,31 @@ void evaluateHealth() {
 
   if (manualAlertActive) { healthState = HEALTH_MANUAL_ALERT; return; }
   if (!fingerDetected)   { healthState = HEALTH_NO_FINGER;    return; }
-  if (currentBPM <= 0 || currentSpO2 <= 0) { healthState = HEALTH_NORMAL; return; }
 
-  bool hrCrit  = currentBPM >= HR_HIGH_CRITICAL || currentBPM <= HR_LOW_CRITICAL;
-  bool hrWarn  = currentBPM >= HR_HIGH_WARNING  || currentBPM <= HR_LOW_WARNING;
-  bool spoCrit = currentSpO2 <  SPO2_CRITICAL;
-  bool spoWarn = currentSpO2 <  SPO2_WARNING;
-  bool tCrit = hasTemp && currentTemp > 0 && (currentTemp >= TEMP_HIGH_CRITICAL || currentTemp <= TEMP_LOW_CRITICAL);
-  bool tWarn = hasTemp && currentTemp > 0 && (currentTemp >= TEMP_HIGH_WARNING  || currentTemp <= TEMP_LOW_WARNING);
+  bool hrReady = currentBPM > 0;
+  bool spO2Ready = currentSpO2 > 0;
+  bool tempReady = hasTemp && currentTemp > 0;
 
-  alertHR = hrCrit; alertSpO2 = spoCrit; alertTemp = tCrit;
+  alertHR = hrReady &&
+    (currentBPM < HR_NORMAL_MIN || currentBPM > HR_NORMAL_MAX);
+  alertSpO2 = spO2Ready &&
+    (currentSpO2 < SPO2_NORMAL_MIN || currentSpO2 > SPO2_NORMAL_MAX);
+  alertTemp = tempReady &&
+    (currentTemp < TEMP_NORMAL_MIN || currentTemp > TEMP_NORMAL_MAX);
 
-  if (hrCrit || spoCrit || tCrit)      healthState = HEALTH_CRITICAL;
-  else if (hrWarn || spoWarn || tWarn) healthState = HEALTH_WARNING;
-  else                                 healthState = HEALTH_NORMAL;
+  int abnormalCount = (alertHR ? 1 : 0) +
+                      (alertSpO2 ? 1 : 0) +
+                      (alertTemp ? 1 : 0);
+
+  if (abnormalCount >= 2) {
+    healthState = HEALTH_CRITICAL;
+  } else if (abnormalCount == 1) {
+    healthState = HEALTH_WARNING;
+  } else if (!hrReady || !spO2Ready) {
+    healthState = HEALTH_STABILIZING;
+  } else {
+    healthState = HEALTH_NORMAL;
+  }
 }
 
 void updateIndicators(unsigned long now) {
@@ -507,6 +563,9 @@ void updateIndicators(unsigned long now) {
     case HEALTH_NO_FINGER:
       if (now - lastGreenLedToggle >= 1000) { lastGreenLedToggle = now; greenLedState = !greenLedState; digitalWrite(GREEN_LED_PIN, greenLedState); }
       digitalWrite(RED_LED_PIN, LOW);
+      break;
+    case HEALTH_STABILIZING:
+      digitalWrite(GREEN_LED_PIN, LOW); digitalWrite(RED_LED_PIN, LOW);
       break;
     case HEALTH_NORMAL:
       digitalWrite(GREEN_LED_PIN, HIGH); digitalWrite(RED_LED_PIN, LOW);
@@ -522,10 +581,15 @@ void updateIndicators(unsigned long now) {
   }
 
   // Buzzers — beep in unison; each sounds only for its own critical vital (or SOS).
-  if (now - lastBuzzerToggle >= BUZZER_BEEP_INTERVAL) { lastBuzzerToggle = now; buzzerPhase = !buzzerPhase; }
-  playBuzzerTone(BUZZER_HR_PIN,   (manual || alertHR)   && buzzerPhase, BUZZER_HR_FREQ);
-  playBuzzerTone(BUZZER_SPO2_PIN, (manual || alertSpO2) && buzzerPhase, BUZZER_SPO2_FREQ);
-  playBuzzerTone(BUZZER_TEMP_PIN, (manual || alertTemp) && buzzerPhase, BUZZER_TEMP_FREQ);
+  updateBuzzerTone(BUZZER_HR_PIN, manual || alertHR,
+    BUZZER_HR_FREQ, BUZZER_HR_INTERVAL_MS, now,
+    lastHrBuzzerToggle, hrBuzzerPhase);
+  updateBuzzerTone(BUZZER_SPO2_PIN, manual || alertSpO2,
+    BUZZER_SPO2_FREQ, BUZZER_SPO2_INTERVAL_MS, now,
+    lastSpO2BuzzerToggle, spO2BuzzerPhase);
+  updateBuzzerTone(BUZZER_TEMP_PIN, manual || alertTemp,
+    BUZZER_TEMP_FREQ, BUZZER_TEMP_INTERVAL_MS, now,
+    lastTempBuzzerToggle, tempBuzzerPhase);
 }
 
 void allBuzzers(uint8_t level) {
@@ -539,53 +603,96 @@ void allBuzzers(uint8_t level) {
   digitalWrite(BUZZER_TEMP_PIN, level);
 }
 
-void playBuzzerTone(uint8_t pin, bool active, int frequency) {
-  if (active) tone(pin, frequency);
-  else {
+void updateBuzzerTone(uint8_t pin, bool active, int frequency,
+                      unsigned long interval, unsigned long now,
+                      unsigned long &lastToggle, bool &phase) {
+  if (!active) {
+    phase = false;
     noTone(pin);
     digitalWrite(pin, LOW);
+    return;
+  }
+
+  if (now - lastToggle >= interval) {
+    lastToggle = now;
+    phase = !phase;
+    if (phase) tone(pin, frequency);
+    else {
+      noTone(pin);
+      digitalWrite(pin, LOW);
+    }
   }
 }
 
 void drawDisplay() {
+  bool online = WiFi.status() == WL_CONNECTED;
+  const char* contactText = fingerDetected ? "CONTACT" : "NO CONTACT";
+  const char* netText = online ? "ONLINE" : "OFFLINE";
+  const char* footerText = healthStateToString(healthState);
+
+  if (buttonPressedDisplay) footerText = "BUTTON PRESSED";
+  else if (manualAlertActive) footerText = "SOS ACTIVE";
+  else if (!fingerDetected) footerText = "PLACE CHEST/FINGER";
+
   display.clearDisplay();
-  display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
 
+  // Header
+  display.fillRect(0, 0, 128, 12, SSD1306_WHITE);
+  display.setTextColor(SSD1306_BLACK);
   display.setCursor(0, 0);
   display.print(DEVICE_ID);
-  display.setCursor(54, 0);
-  display.print(fingerDetected ? "CONTACT" : "NO FINGER");
-  display.setCursor(110, 0);
-  display.print(WiFi.status() == WL_CONNECTED ? "W" : "-");
-  display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
+  display.setCursor(78, 0);
+  display.print(netText);
 
-  display.setCursor(0, 14);
-  display.print("HR  ");
-  display.setCursor(32, 14);
-  if (!fingerDetected) display.print("NO FINGER");
-  else if (currentBPM > 0) { display.print(String(currentBPM, 0)); display.print(" bpm"); }
-  else display.print("STABILIZING");
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 15);
+  display.print(contactText);
 
-  display.setCursor(0, 26);
-  display.print("SpO2");
-  display.setCursor(32, 26);
-  if (!fingerDetected) display.print("NO FINGER");
-  else if (currentSpO2 > 0) { display.print(String(currentSpO2, 0)); display.print("%"); }
-  else display.print("STABILIZING");
+  display.setCursor(82, 15);
+  if (healthState == HEALTH_NORMAL) display.print("OK");
+  else if (healthState == HEALTH_STABILIZING) display.print("WAIT");
+  else if (healthState == HEALTH_WARNING) display.print("WARN");
+  else if (healthState == HEALTH_CRITICAL) display.print("ALERT");
+  else if (healthState == HEALTH_MANUAL_ALERT) display.print("SOS");
+  else display.print("READY");
 
-  display.setCursor(0, 38);
-  display.print("Temp");
-  display.setCursor(32, 38);
-  if (hasTemp && currentTemp > 0) { display.print(String(currentTemp, 1)); display.print(" C"); }
+  display.drawLine(0, 25, 127, 25, SSD1306_WHITE);
+
+  // Vitals
+  display.setTextSize(1);
+  display.setCursor(0, 30);
+  display.print("HR");
+  display.setCursor(16, 28);
+  display.setTextSize(2);
+  if (fingerDetected && currentBPM > 0) display.print(String(currentBPM, 0));
+  else display.print("--");
+  display.setTextSize(1);
+  display.setCursor(54, 35);
+  display.print("bpm");
+
+  display.setCursor(76, 30);
+  display.print("O2");
+  display.setCursor(92, 28);
+  display.setTextSize(2);
+  if (fingerDetected && currentSpO2 > 0) display.print(String(currentSpO2, 0));
   else display.print("--");
 
-  display.drawLine(0, 50, 127, 50, SSD1306_WHITE);
-  display.setCursor(0, 54);
-  if (buttonPressedDisplay) display.print("BUTTON PRESSED");
-  else if (manualAlertActive) display.print("SOS ACTIVE");
-  else if (!fingerDetected) display.print("Place finger/chest");
-  else display.print(healthStateToString(healthState));
+  display.setTextSize(1);
+  display.setCursor(0, 48);
+  display.print("TEMP");
+  display.setCursor(34, 48);
+  if (hasTemp && currentTemp > 0) {
+    display.print(String(currentTemp, 1));
+    display.print(" C");
+  } else {
+    display.print("--.- C");
+  }
+
+  display.drawLine(0, 56, 127, 56, SSD1306_WHITE);
+  display.setCursor(0, 57);
+  display.print(footerText);
   display.display();
 }
 
@@ -593,15 +700,18 @@ void handleButton(unsigned long now) {
   bool pressed = digitalRead(BUTTON_PIN) == LOW;
   buttonPressedDisplay = pressed;
 
-  if (pressed && now - lastButtonPress >= DEBOUNCE_DELAY_MS) {
+  if (pressed && !wasButtonPressed &&
+      now - lastButtonPress >= DEBOUNCE_DELAY_MS) {
     lastButtonPress = now;
     buttonPressCount++;
     manualAlertActive = !manualAlertActive;
     buttonPressedDisplay = true;
     forceUpload = true;
-    enqueueButtonAnalyticsUpload();
+    if (WiFi.status() == WL_CONNECTED) enqueueButtonAnalyticsUpload();
     Serial.println(manualAlertActive ? "[ALERT] MANUAL ALERT ON" : "[ALERT] Manual alert OFF");
   }
+
+  wasButtonPressed = pressed;
 }
 
 void handleWiFiReconnect(unsigned long now) {
@@ -692,7 +802,10 @@ void enqueueJob(const char* method, String path, String payload) {
 void networkTask(void* param) {
   FirebaseJob job;
   for (;;) {
-    if (xQueueReceive(firebaseQueue, &job, portMAX_DELAY) == pdTRUE) {
+    handleWiFiReconnect(millis());
+
+    if (xQueueReceive(firebaseQueue, &job,
+                      pdMS_TO_TICKS(NETWORK_TASK_POLL_MS)) == pdTRUE) {
       if (WiFi.status() == WL_CONNECTED) firebaseWrite(job.method, job.path, job.payload);
       else Serial.println("[NET] WiFi down, skip queued upload.");
     }
@@ -714,6 +827,7 @@ bool firebaseWrite(const char* method, const char* path, const char* payload) {
   String url = baseUrl + cleanPath + ".json?auth=" + String(FIREBASE_DATABASE_SECRET);
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
+  http.setConnectTimeout(1000);
   http.setTimeout(4000);
   int code = http.sendRequest(method, (uint8_t*)payload, strlen(payload));
   Serial.printf("[FIREBASE] %s %s -> HTTP %d\n", method, path, code);
@@ -733,6 +847,7 @@ bool firebaseRead(const String& path, String& body) {
   if (!cleanPath.startsWith("/")) cleanPath = "/" + cleanPath;
   String url = baseUrl + cleanPath + ".json?auth=" + String(FIREBASE_DATABASE_SECRET);
   http.begin(url);
+  http.setConnectTimeout(1000);
   http.setTimeout(4000);
   int code = http.GET();
   if (code >= 200 && code < 300) body = http.getString();
@@ -786,6 +901,7 @@ String timestampJson(double timestampMs) {
 const char* healthStateToString(HealthState state) {
   switch (state) {
     case HEALTH_NO_FINGER:    return "NO_FINGER";
+    case HEALTH_STABILIZING:   return "STABILIZING";
     case HEALTH_NORMAL:       return "NORMAL";
     case HEALTH_WARNING:      return "WARNING";
     case HEALTH_CRITICAL:     return "CRITICAL";

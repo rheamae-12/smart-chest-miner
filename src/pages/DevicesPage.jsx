@@ -1,13 +1,23 @@
 import { useMemo, useState } from "react";
+import FilterToolbar, { FilterField, FilterSearch, FilterTabs } from "../components/FilterToolbar";
 import Modal from "../components/Modal";
 import PageHeader from "../components/PageHeader";
 import StatusBadge from "../components/StatusBadge";
 import { useAuth } from "../context/useAuth";
 import { registerDevice, removeDevice, updateDevice, writeActivityLog } from "../firebase/database";
 import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
-import { formatLastSeen, formatReading, lastSeenValue } from "../utils/formatters";
+import { formatLastSeen, formatReading } from "../utils/formatters";
+import { matchesSearch } from "../utils/filtering";
+import { compareMinersActiveFirst } from "../utils/minerOrdering";
 
 const EMPTY_FORM = { id: "", name: "", location: "" };
+
+const STATUS_FILTERS = [
+  { value: "all", label: "All", countKey: "total" },
+  { value: "online", label: "Online", countKey: "online" },
+  { value: "offline", label: "Offline", countKey: "offline" },
+  { value: "attention", label: "Attention", countKey: "attention" },
+];
 
 // DevicesPage — device registry: register, edit, and remove miners; shows live vitals per row
 export default function DevicesPage({ miners, setMiners }) {
@@ -25,20 +35,23 @@ export default function DevicesPage({ miners, setMiners }) {
     () =>
       miners
         .filter((miner) => {
-          const matchText = `${miner.name} ${miner.id} ${miner.location}`.toLowerCase().includes(search.toLowerCase());
-          const matchStatus = status === "all" || (status === "online" && miner.active) || (status === "offline" && !miner.active) || (status === "attention" && (miner.stale || miner.manual_alert || miner.finger === false));
+          const online = miner.active && !miner.stale;
+          const matchText = matchesSearch(search, miner.name, miner.id, miner.location);
+          const matchStatus = status === "all" || (status === "online" && online) || (status === "offline" && !online) || (status === "attention" && (miner.stale || miner.manual_alert || miner.button_pressed || miner.finger === false));
           return matchText && matchStatus;
         })
-        .sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id)),
+        .sort(compareMinersActiveFirst),
     [miners, search, status],
   );
 
   const stats = {
     total: miners.length,
-    online: miners.filter((miner) => miner.active).length,
-    offline: miners.filter((miner) => !miner.active).length,
-    attention: miners.filter((miner) => miner.stale || miner.manual_alert || miner.finger === false).length,
+    online: miners.filter((miner) => miner.active && !miner.stale).length,
+    offline: miners.filter((miner) => !miner.active || miner.stale).length,
+    attention: miners.filter((miner) => miner.stale || miner.manual_alert || miner.button_pressed || miner.finger === false).length,
   };
+  const activeFilterCount = Number(Boolean(search.trim())) + Number(status !== "all");
+  const statusLabel = STATUS_FILTERS.find((option) => option.value === status)?.label || "All devices";
 
   const openRegister = () => {
     setFormError("");
@@ -188,25 +201,39 @@ export default function DevicesPage({ miners, setMiners }) {
         </Modal>
       )}
 
-      <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%", minHeight: 0, overflow: "hidden" }}>
         <PageHeader
           label="Device registry"
           title="Miner Device Management"
           titleSize={26}
           subtitle="Register devices, review latest vitals, and manage miner location assignments."
           right={
-            <>
-              <input placeholder="Search miner, device ID, or location..." value={search} onChange={(event) => setSearch(event.target.value)} style={{ ...controlStyle, width: 280 }} />
-              <select value={status} onChange={(event) => setStatus(event.target.value)} style={{ ...controlStyle, width: 138 }}>
-                <option value="all">All Status</option>
-                <option value="online">Online</option>
-                <option value="offline">Offline</option>
-                <option value="attention">Needs Attention</option>
-              </select>
-              {canManage && <Button primary onClick={openRegister}>Register Device</Button>}
-            </>
+            canManage ? <Button primary onClick={openRegister}>Register Device</Button> : null
           }
         />
+
+        <FilterToolbar
+          summary={`${statusLabel} · ${filtered.length} of ${miners.length} shown${search.trim() ? ` · “${search.trim()}”` : ""}`}
+          activeCount={activeFilterCount}
+          onReset={() => { setSearch(""); setStatus("all"); }}
+        >
+          <FilterField label="Status">
+            <FilterTabs
+              ariaLabel="Device status"
+              value={status}
+              onChange={setStatus}
+              options={STATUS_FILTERS.map((option) => ({ ...option, count: stats[option.countKey] }))}
+            />
+          </FilterField>
+          <FilterField label="Search" wide>
+            <FilterSearch
+              value={search}
+              onChange={setSearch}
+              placeholder="Miner, device ID, or location"
+              ariaLabel="Search registered devices"
+            />
+          </FilterField>
+        </FilterToolbar>
 
         {notice && (
           <div style={{ padding: "9px 14px", background: `${C.green}0F`, border: `1px solid ${C.green}2A`, borderRadius: 8, color: C.green, fontSize: 12, fontWeight: 700 }}>
@@ -214,8 +241,8 @@ export default function DevicesPage({ miners, setMiners }) {
           </div>
         )}
 
-        <section style={{ display: "grid", gridTemplateColumns: "210px minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
-          <aside style={{ display: "grid", gridTemplateRows: "auto auto", gap: 12, alignContent: "start", minHeight: 0 }}>
+        <section style={{ display: "grid", gridTemplateColumns: "210px minmax(0, 1fr)", gap: 12, alignItems: "stretch", flex: 1, minHeight: 0, overflow: "hidden" }}>
+          <aside className="hide-scrollbar" style={{ display: "grid", gridTemplateRows: "auto auto", gap: 12, alignContent: "start", minHeight: 0, overflow: "auto" }}>
             <div style={{ ...cardStyle, padding: 14 }}>
               <div style={{ color: C.text, fontSize: 14, fontWeight: 950, paddingBottom: 11, marginBottom: 6, borderBottom: `1px solid ${C.borderSoft}` }}>Miners Health</div>
               <RegistryMetric label="Total devices" value={stats.total} color={C.primary} />
@@ -229,12 +256,13 @@ export default function DevicesPage({ miners, setMiners }) {
             </div>
           </aside>
 
-          <div style={{ ...cardStyle, minWidth: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
-            <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateRows: "minmax(0, 1fr) auto", gap: 12, minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+            <div style={{ ...cardStyle, minWidth: 0, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
+              <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", gap: 10 }}>
               <div style={{ color: C.text, fontSize: 14, fontWeight: 900 }}>Registered Miners</div>
               <div style={{ color: C.textMuted, fontSize: 11 }}>{filtered.length} shown</div>
             </div>
-            <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
+              <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
               <div className="table-header-sticky" style={tableHeader}>
                 <span>Device</span>
                 <span>Miner</span>
@@ -251,7 +279,7 @@ export default function DevicesPage({ miners, setMiners }) {
                   </div>
                   <div>
                     <div style={{ color: C.text, fontWeight: 900 }}>{miner.name}</div>
-                    <StatusBadge active={miner.active} />
+                    <StatusBadge status={miner.stale ? "stale" : miner.active ? "online" : "offline"} detail={`Last seen ${formatLastSeen(miner.lastSeen)}`} />
                   </div>
                   <div style={{ display: "grid", gap: 4 }}>
                     <span style={{ color: C.red, fontWeight: 900 }}>HR {miner.active ? formatReading(miner.hr, 0) : "--"} bpm</span>
@@ -287,7 +315,24 @@ export default function DevicesPage({ miners, setMiners }) {
                   </span>
                 </div>
               ))}
-              {filtered.length === 0 && <div style={{ padding: 42, textAlign: "center", color: C.textMuted, fontSize: 13 }}>No matching device found.</div>}
+                {filtered.length === 0 && <div style={{ padding: 42, textAlign: "center", color: C.textMuted, fontSize: 13 }}>No matching device found.</div>}
+              </div>
+            </div>
+            <div className="registry-support-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.35fr) minmax(250px, 0.65fr)", gap: 12 }}>
+              <div style={{ ...cardStyle, padding: 14 }}>
+                <div style={{ color: C.text, fontSize: 13, fontWeight: 950 }}>Deployment workflow</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 10 }}>
+                  <RegistryStep number="01" title="Register" text="Create a stable device identity and location." />
+                  <RegistryStep number="02" title="Provision" text="Assign network credentials in WiFi Config." />
+                  <RegistryStep number="03" title="Verify" text="Confirm the first telemetry and chest contact." />
+                </div>
+              </div>
+              <div style={{ ...cardStyle, padding: 14 }}>
+                <div style={{ color: C.text, fontSize: 13, fontWeight: 950 }}>Registry quality</div>
+                <RegistryMetric label="Locations assigned" value={miners.filter((miner) => miner.location?.trim()).length} color={C.green} />
+                <RegistryMetric label="First data received" value={miners.filter((miner) => miner.lastSeen).length} color={C.oxygen} />
+                <RegistryMetric label="Awaiting first data" value={miners.filter((miner) => !miner.lastSeen).length} color={C.amber} />
+              </div>
             </div>
           </div>
         </section>
@@ -397,6 +442,16 @@ function IconButton({ children, danger, title, onClick }) {
 }
 
 // RegistryMetric — fleet health stat row (label + large number) in the Fleet Health sidebar card
+function RegistryStep({ number, title, text }) {
+  return (
+    <div style={{ border: `1px solid ${C.borderSoft}`, borderRadius: 8, padding: 10, background: "rgba(255,255,255,0.02)" }}>
+      <div style={{ color: C.primary, fontSize: 9.5, fontWeight: 950 }}>{number}</div>
+      <div style={{ color: C.text, fontSize: 11.5, fontWeight: 900, marginTop: 5 }}>{title}</div>
+      <div style={{ color: C.textMuted, fontSize: 10, lineHeight: 1.4, marginTop: 3 }}>{text}</div>
+    </div>
+  );
+}
+
 function RegistryMetric({ label, value, color }) {
   return (
     <div style={{ padding: "9px 0", borderBottom: `1px solid ${C.borderSoft}` }}>

@@ -1,30 +1,40 @@
 import { useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import FilterToolbar, { FilterField, FilterTabs } from "../components/FilterToolbar";
 import Modal from "../components/Modal";
 import PageHeader from "../components/PageHeader";
 import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
 import { DEFAULT_THRESHOLDS } from "../utils/alertChecker";
+import { DATE_RANGE_OPTIONS, isWithinDateRange, resolveDateRange } from "../utils/filtering";
 import { average, compactTimestamp, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
+import { compareMinersActiveFirst } from "../utils/minerOrdering";
 
 const SESSION_GAP_MS = 3 * 60 * 1000;
 
 export default function HealthLogsPage({ miners, analyticsData, liveData = {}, activityLogs = [], thresholds = DEFAULT_THRESHOLDS, onClearHealthLogs }) {
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(() => findLatestMinerId(miners, analyticsData, liveData));
+  const [minerChanged, setMinerChanged] = useState(false);
+  const [rangePreset, setRangePreset] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [clearOpen, setClearOpen] = useState(false);
   const [clearError, setClearError] = useState("");
   const [clearing, setClearing] = useState(false);
   const sortedMiners = useMemo(() => buildMinerOptions(miners, analyticsData, liveData), [analyticsData, liveData, miners]);
-  // One miner is always selected (defaults to the first) — no "all" aggregate view.
-  const selectedId = sortedMiners.some((miner) => miner.id === selected) ? selected : (sortedMiners[0]?.id || "");
+  const latestMinerId = useMemo(
+    () => findLatestMinerId(sortedMiners, analyticsData, liveData),
+    [analyticsData, liveData, sortedMiners],
+  );
+
+  // One miner is always selected, defaulting to the device with the latest data.
+  const selectedId = sortedMiners.some((miner) => miner.id === selected) ? selected : latestMinerId;
   const visibleMiners = useMemo(() => sortedMiners.filter((miner) => miner.id === selectedId), [sortedMiners, selectedId]);
 
   // Date + time range filter — narrow the stored readings to a From / To window.
-  const dateRange = useMemo(() => ({
-    start: dateFrom ? new Date(dateFrom).getTime() : null,
-    end: dateTo ? new Date(dateTo).getTime() : null,
-  }), [dateFrom, dateTo]);
+  const dateRange = useMemo(
+    () => resolveDateRange(rangePreset, { from: dateFrom, to: dateTo }),
+    [dateFrom, dateTo, rangePreset],
+  );
   const combinedAnalytics = useMemo(() => mergeAnalyticsWithLive(sortedMiners, analyticsData, liveData), [analyticsData, liveData, sortedMiners]);
   const scopedAnalytics = useMemo(() => {
     if (!dateRange.start && !dateRange.end) return combinedAnalytics;
@@ -32,9 +42,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
     Object.entries(combinedAnalytics || {}).forEach(([id, rows]) => {
       out[id] = (rows || []).filter((row) => {
         const t = Number(row.timestamp || 0);
-        if (dateRange.start && t < dateRange.start) return false;
-        if (dateRange.end && t > dateRange.end) return false;
-        return true;
+        return isWithinDateRange(t, dateRange);
       });
     });
     return out;
@@ -44,6 +52,9 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
   const chartData = useMemo(() => buildChartData(visibleMiners, scopedAnalytics), [scopedAnalytics, visibleMiners]);
   const manualAlerts = sessions.reduce((sum, session) => sum + session.manualPressCount, 0);
   const unhealthy = visibleMiners.filter((miner) => !miner.active || miner.stale || miner.finger === false || miner.manual_alert).length;
+  const activeFilterCount = Number(minerChanged) + Number(rangePreset !== "all");
+  const selectedMinerName = visibleMiners[0]?.name || "No miner selected";
+  const rangeLabel = DATE_RANGE_OPTIONS.find((option) => option.value === rangePreset)?.label || "All time";
 
   const confirmClear = async () => {
     setClearing(true);
@@ -80,36 +91,50 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
           {clearError && <div style={{ color: C.amber, fontSize: 12, marginTop: 10 }}>{clearError}</div>}
         </Modal>
       )}
-      <div style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
+      <div style={{ display: "grid", gridTemplateRows: "auto auto auto minmax(0, 1fr)", gap: 12, height: "100%", minHeight: 0 }}>
         <PageHeader
           label="Miner health records"
           title="Health Logs"
           titleSize={26}
           subtitle="Session history, start and end time, readings, status, and manual SOS events."
-          right={
-            <>
-              <FilterLabel text="Miner">
-                <select value={selectedId} onChange={(event) => setSelected(event.target.value)} style={{ ...controlStyle, width: 184 }}>
-                  {sortedMiners.length === 0 && <option value="">No miners</option>}
-                  {sortedMiners.map((miner) => (
-                    <option key={miner.id} value={miner.id}>{miner.name} ({miner.id})</option>
-                  ))}
-                </select>
-              </FilterLabel>
-              <FilterLabel text="From (date &amp; time)">
-                <input type="datetime-local" value={dateFrom} max={dateTo || undefined} onChange={(event) => setDateFrom(event.target.value)} style={{ ...controlStyle, width: 196, padding: "8px 10px" }} />
-              </FilterLabel>
-              <FilterLabel text="To (date &amp; time)">
-                <input type="datetime-local" value={dateTo} min={dateFrom || undefined} onChange={(event) => setDateTo(event.target.value)} style={{ ...controlStyle, width: 196, padding: "8px 10px" }} />
-              </FilterLabel>
-              {(dateFrom || dateTo) && (
-                <button onClick={() => { setDateFrom(""); setDateTo(""); }} style={{ ...ghostButtonStyle, padding: "9px 13px", fontSize: 11, alignSelf: "end" }}>
-                  Clear dates
-                </button>
-              )}
-            </>
-          }
         />
+
+        <FilterToolbar
+          summary={`${selectedMinerName} · ${rangeLabel}`}
+          activeCount={activeFilterCount}
+          onReset={() => { setSelected(latestMinerId); setMinerChanged(false); setRangePreset("all"); setDateFrom(""); setDateTo(""); }}
+        >
+          <FilterField label="Miner">
+            <select
+              value={selectedId}
+              onChange={(event) => {
+                setSelected(event.target.value);
+                setMinerChanged(true);
+              }}
+              style={{ ...controlStyle, minWidth: 220 }}
+            >
+              {sortedMiners.length === 0 && <option value="">No miners</option>}
+              {sortedMiners.map((miner) => (
+                <option key={miner.id} value={miner.id}>
+                  {miner.name} ({miner.id}){miner.id === latestMinerId ? " · latest" : ""}
+                </option>
+              ))}
+            </select>
+          </FilterField>
+          <FilterField label="Date range">
+            <FilterTabs ariaLabel="Health log date range" value={rangePreset} onChange={setRangePreset} options={DATE_RANGE_OPTIONS} />
+          </FilterField>
+          {rangePreset === "custom" && (
+            <>
+              <FilterField label="Start date">
+                <input type="date" value={dateFrom} max={dateTo || undefined} onChange={(event) => setDateFrom(event.target.value)} style={{ ...controlStyle, width: 158, padding: "8px 10px" }} />
+              </FilterField>
+              <FilterField label="End date">
+                <input type="date" value={dateTo} min={dateFrom || undefined} onChange={(event) => setDateTo(event.target.value)} style={{ ...controlStyle, width: 158, padding: "8px 10px" }} />
+              </FilterField>
+            </>
+          )}
+        </FilterToolbar>
 
         <section style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <Summary label="Sessions" value={sessions.length} color={C.primary} />
@@ -122,7 +147,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
         <section style={{ display: "grid", gridTemplateRows: "220px minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
             <div className="cc-vitals" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, minHeight: 0 }}>
               <SensorChart data={chartData} dataKey="hr" name="Heart Rate" unit="bpm" color={C.red} digits={0} yLabel="bpm" />
-              <SensorChart data={chartData} dataKey="spo2" name="SpO2" unit="%" color={C.primary} domain={[80, 100]} digits={0} yLabel="%" />
+              <SensorChart data={chartData} dataKey="spo2" name="SpO2" unit="%" color={C.oxygen} domain={[80, 100]} digits={0} yLabel="%" />
               <SensorChart data={chartData} dataKey="temp" name="Body Temp" unit="°C" color={C.teal} domain={dynamicDomain(chartData, "temp", 0.4)} digits={1} yLabel="°C" />
             </div>
 
@@ -162,7 +187,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
                     <span style={{ color: C.textDim }}>{session.end}</span>
                     <div style={{ display: "grid", gap: 3 }}>
                       <span style={{ color: C.red, fontWeight: 900 }}>HR {session.avgHr} bpm</span>
-                      <span style={{ color: C.primary, fontWeight: 900 }}>SpO2 {session.avgSpo2}%</span>
+                      <span style={{ color: C.oxygen, fontWeight: 900 }}>SpO2 {session.avgSpo2}%</span>
                     </div>
                     <span style={{ color: C.teal, fontWeight: 900 }}>{session.avgTemp ? `${session.avgTemp}°C` : "--"}</span>
                     <StatusText session={session} />
@@ -283,6 +308,9 @@ function uniquePressCounts(rows) {
 }
 
 function buildMinerOptions(miners, analyticsData, liveData) {
+  if (miners.length) {
+    return [...miners].sort(compareMinersActiveFirst);
+  }
   const byId = new Map(miners.map((miner) => [miner.id, miner]));
   [...Object.keys(analyticsData || {}), ...Object.keys(liveData || {})].forEach((id) => {
     if (!id || byId.has(id)) return;
@@ -304,7 +332,32 @@ function buildMinerOptions(miners, analyticsData, liveData) {
       button_press_count: latest.button_press_count ?? 0,
     });
   });
-  return Array.from(byId.values()).sort((a, b) => lastSeenValue(b) - lastSeenValue(a) || a.id.localeCompare(b.id));
+  return Array.from(byId.values()).sort(compareMinersActiveFirst);
+}
+
+function latestDataTimestamp(miner, analyticsData, liveData) {
+  const storedLatest = (analyticsData?.[miner.id] || []).reduce(
+    (latest, row) => Math.max(latest, Number(row.timestamp || 0)),
+    0,
+  );
+  const liveLatest = ["hr", "spo2", "temp"].reduce(
+    (latest, key) => (liveData?.[miner.id]?.[key] || []).reduce(
+      (seriesLatest, point) => Math.max(seriesLatest, Number(point.timestamp || 0)),
+      latest,
+    ),
+    0,
+  );
+  return Math.max(lastSeenValue(miner), storedLatest, liveLatest);
+}
+
+function findLatestMinerId(miners, analyticsData, liveData) {
+  return miners.reduce(
+    (latest, miner) => {
+      const timestamp = latestDataTimestamp(miner, analyticsData, liveData);
+      return !latest || timestamp > latest.timestamp ? { id: miner.id, timestamp } : latest;
+    },
+    null,
+  )?.id || "";
 }
 
 function mergeAnalyticsWithLive(miners, analyticsData, liveData) {
@@ -413,15 +466,6 @@ function Summary({ label, value, unit, color }) {
 }
 
 // FilterLabel — uppercase label above a filter control, used in the page header
-function FilterLabel({ text, children }) {
-  return (
-    <label style={{ display: "grid", gap: 5 }}>
-      <span style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 900 }}>{text}</span>
-      {children}
-    </label>
-  );
-}
-
 function PanelHeader({ title, meta }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>

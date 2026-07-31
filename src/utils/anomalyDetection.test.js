@@ -34,6 +34,11 @@ describe("analyzeSpo2Trend", () => {
     const result = analyzeSpo2Trend(series([0, 0, 99, 98, 97, 96, 95, 94]));
     expect(result.declining).toBe(true);
   });
+
+  it("orders out-of-order samples before calculating the slope", () => {
+    const shuffled = series([99, 98, 97, 96, 95, 94]).reverse();
+    expect(analyzeSpo2Trend(shuffled).declining).toBe(true);
+  });
 });
 
 describe("buildTrendWatch", () => {

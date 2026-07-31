@@ -34,6 +34,7 @@ export default function Sidebar() {
   return (
     <aside
       className="app-sidebar"
+      data-collapsed={collapsed}
       style={{
         width: collapsed ? 66 : 192,
         minHeight: "100vh",
@@ -51,7 +52,7 @@ export default function Sidebar() {
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "linear-gradient(90deg, transparent, rgba(255,106,0,0.75), transparent)" }} />
 
       {/* Brand */}
-      <div style={{ padding: collapsed ? "15px 9px" : "16px 14px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", alignItems: "center", gap: 11 }}>
+      <div className="sidebar-brand" style={{ padding: collapsed ? "15px 9px" : "16px 14px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", alignItems: "center", gap: 11 }}>
         <LogoMark compact={collapsed} />
         {!collapsed && (
           <div style={{ minWidth: 0 }}>
@@ -65,13 +66,13 @@ export default function Sidebar() {
       </div>
 
       {/* Grouped nav */}
-      <nav className="hide-scrollbar" style={{ flex: 1, padding: collapsed ? "12px 9px" : "12px 11px", overflow: "auto" }}>
+      <nav className="hide-scrollbar sidebar-nav" aria-label="Primary navigation" style={{ flex: 1, padding: collapsed ? "12px 9px" : "12px 11px", overflow: "auto" }}>
         {navGroups.map((group, gi) => (
-          <div key={group.label} style={{ marginTop: gi === 0 ? 0 : collapsed ? 6 : 16 }}>
+          <div className="sidebar-group" key={group.label} style={{ marginTop: gi === 0 ? 0 : collapsed ? 6 : 16 }}>
             {!collapsed ? (
-              <div style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", fontWeight: 900, padding: "0 9px 8px", opacity: 0.55 }}>{group.label}</div>
+              <div className="sidebar-group-label" style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", fontWeight: 900, padding: "0 9px 8px", opacity: 0.55 }}>{group.label}</div>
             ) : (
-              gi > 0 && <div style={{ height: 1, background: C.borderSoft, margin: "2px 7px 9px" }} />
+              gi > 0 && <div className="sidebar-group-divider" style={{ height: 1, background: C.borderSoft, margin: "2px 7px 9px" }} />
             )}
             {group.items.map((item) => (
               <NavItem key={item.to} item={item} collapsed={collapsed} />
@@ -81,7 +82,7 @@ export default function Sidebar() {
       </nav>
 
       {/* Collapse */}
-      <div style={{ padding: collapsed ? "12px 9px" : "12px 11px", borderTop: `1px solid ${C.borderSoft}` }}>
+      <div className="sidebar-collapse" style={{ padding: collapsed ? "12px 9px" : "12px 11px", borderTop: `1px solid ${C.borderSoft}` }}>
         <button
           onClick={() => setCollapsed((value) => !value)}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -159,7 +160,7 @@ function NavItem({ item, collapsed }) {
         <Icon name={item.icon} size={16} />
       </span>
       {!collapsed && (
-        <span style={{ fontSize: 13, fontWeight: isActive ? 800 : 600, whiteSpace: "nowrap", letterSpacing: "0.01em", textTransform: "none", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
+        <span className="sidebar-item-label" style={{ fontSize: 13, fontWeight: isActive ? 800 : 600, whiteSpace: "nowrap", letterSpacing: "0.01em", textTransform: "none", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
           {item.label}
         </span>
       )}
