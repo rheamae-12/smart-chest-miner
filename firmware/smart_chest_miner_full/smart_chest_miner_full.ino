@@ -18,10 +18,7 @@
  *   - Adafruit SSD1306  +  Adafruit GFX               (OLED)
  *   (MAX30205 is read directly over I2C — no extra library.)
  *
- * SECURITY: device credentials are loaded from the local, ignored secrets.h
- * file. Do not commit that file. The legacy database token is supported only
- * for backwards compatibility; migrate the device to Firebase Auth/short-lived
- * tokens before deploying it outside a controlled network.
+ * Firebase requests use the configured database URL without embedded credentials.
  *
  * HARDWARE: add 470-1000uF on the 5V rail at the ESP32 and 100uF+100nF on the
  * 3.3V sensor rail or WiFi spikes will brown-out the board. See docs/HARDWARE_NOTES.md.
@@ -37,32 +34,11 @@
 
 #define USE_SIMULATION 0
 
-// Create secrets.h beside this sketch for a real device. The fallback values
-// intentionally do not contain working credentials.
-#if defined(__has_include)
-  #if __has_include("secrets.h")
-    #include "secrets.h"
-  #endif
-#endif
+const char* WIFI_SSID     = "Converge_2.4GHz_42BD";
+const char* WIFI_PASSWORD = "bordersnigerald2025";
 
-#ifndef SCM_WIFI_SSID
-  #define SCM_WIFI_SSID "CONFIGURE_IN_secrets.h"
-#endif
-#ifndef SCM_WIFI_PASSWORD
-  #define SCM_WIFI_PASSWORD "CONFIGURE_IN_secrets.h"
-#endif
-#ifndef SCM_FIREBASE_DATABASE_URL
-  #define SCM_FIREBASE_DATABASE_URL ""
-#endif
-#ifndef SCM_FIREBASE_DATABASE_SECRET
-  #define SCM_FIREBASE_DATABASE_SECRET ""
-#endif
-
-const char* WIFI_SSID     = SCM_WIFI_SSID;
-const char* WIFI_PASSWORD = SCM_WIFI_PASSWORD;
-
-#define FIREBASE_DATABASE_URL    SCM_FIREBASE_DATABASE_URL
-#define FIREBASE_DATABASE_SECRET SCM_FIREBASE_DATABASE_SECRET
+#define FIREBASE_DATABASE_URL    "https://smart-chest-miner-default-rtdb.firebaseio.com/"
+#define FIREBASE_DATABASE_SECRET "GJY8fpUA211duwUw7o92ks0EXlYOFdqWYz5rK6N5"
 
 const char* DEVICE_ID      = "SCM-003";
 const char* MINER_NAME     = "Acuzar Great Miner";
@@ -297,10 +273,6 @@ void drawBootScreen(const char* status, const char* detail) {
 }
 
 void connectWiFi() {
-  if (String(WIFI_SSID).startsWith("CONFIGURE_IN_") || String(WIFI_PASSWORD).startsWith("CONFIGURE_IN_")) {
-    Serial.println("[WIFI] Missing secrets.h credentials; WiFi disabled.");
-    return;
-  }
   Serial.printf("[INIT] Starting WiFi: %s (non-blocking)\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
@@ -868,7 +840,7 @@ void networkTask(void* param) {
 
 bool firebaseWrite(const char* method, const char* path, const char* payload) {
   if (!firebaseConfigured()) {
-    Serial.println("[FIREBASE] Missing FIREBASE_DATABASE_URL or FIREBASE_DATABASE_SECRET.");
+    Serial.println("[FIREBASE] Missing FIREBASE_DATABASE_URL.");
     return false;
   }
 
@@ -878,7 +850,7 @@ bool firebaseWrite(const char* method, const char* path, const char* payload) {
   if (baseUrl.endsWith("/")) baseUrl.remove(baseUrl.length() - 1);
   String cleanPath = String(path);
   if (!cleanPath.startsWith("/")) cleanPath = "/" + cleanPath;
-  String url = baseUrl + cleanPath + ".json?auth=" + String(FIREBASE_DATABASE_SECRET);
+  String url = baseUrl + cleanPath + ".json";
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
   http.setConnectTimeout(1000);
@@ -899,7 +871,7 @@ bool firebaseRead(const String& path, String& body) {
   if (baseUrl.endsWith("/")) baseUrl.remove(baseUrl.length() - 1);
   String cleanPath = path;
   if (!cleanPath.startsWith("/")) cleanPath = "/" + cleanPath;
-  String url = baseUrl + cleanPath + ".json?auth=" + String(FIREBASE_DATABASE_SECRET);
+  String url = baseUrl + cleanPath + ".json";
   http.begin(url);
   http.setConnectTimeout(1000);
   http.setTimeout(4000);
@@ -932,13 +904,9 @@ void applyQueuedWifiConfig() {
 
 bool firebaseConfigured() {
   String databaseUrl = String(FIREBASE_DATABASE_URL);
-  String databaseSecret = String(FIREBASE_DATABASE_SECRET);
   databaseUrl.trim();
-  databaseSecret.trim();
   return databaseUrl.length() > 0 &&
-         databaseSecret.length() > 0 &&
-         databaseUrl != "placeholder" &&
-         databaseSecret != "placeholder";
+         databaseUrl != "placeholder";
 }
 
 double currentTimestampMs() {
