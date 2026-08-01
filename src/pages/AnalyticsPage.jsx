@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import FilterToolbar, { FilterField, FilterTabs } from "../components/FilterToolbar";
 import { C, cardStyle, controlStyle, pageStyle } from "../theme";
+import { countMinuteReadings } from "../utils/analyticsReadings";
 import { average, compactTimestamp, dedupeConsecutiveLogs, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 import { compareMinersActiveFirst } from "../utils/minerOrdering";
 
@@ -73,7 +74,7 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
           <Metric label="Avg SpO2" value={formatReading(average(rows.map((row) => row.spo2)), 0)} unit="%" color={C.oxygen} range={readingRange(rows, "spo2", 0)} />
           <Metric label="Avg Temperature" value={formatReading(average(rows.map((row) => row.temp)), 1)} unit="°C" color={C.teal} range={readingRange(rows, "temp", 1)} />
           <Metric label="Tracked Miners" value={visibleMiners.length} unit={`/${miners.length}`} color={C.green} />
-          <Metric label="Total Readings" value={rows.length} unit="records" color={C.amber} />
+          <Metric label="Total Readings" value={countMinuteReadings(rows)} unit="minute records" color={C.amber} />
         </section>
 
         <section className="analytics-content-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 12, minHeight: 0 }}>

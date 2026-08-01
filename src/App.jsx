@@ -151,7 +151,7 @@ export default function App() {
                 />
                 <Route
                   path="/health-logs"
-                  element={<HealthLogsPage miners={system.miners} analyticsData={system.analyticsData} liveData={system.liveData} activityLogs={system.activityLogs} thresholds={system.thresholds} onClearHealthLogs={canManage ? system.clearHealthLogs : undefined} />}
+                  element={<HealthLogsPage miners={system.miners} analyticsData={system.analyticsData} liveData={system.liveData} sessionData={system.sessionData} activityLogs={system.activityLogs} thresholds={system.thresholds} onClearHealthLogs={canManage ? system.clearHealthLogs : undefined} />}
                 />
                 <Route
                   path="/sensor-status"

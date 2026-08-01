@@ -16,7 +16,7 @@ describe("filtering utilities", () => {
   });
 
   it("searches across every supplied display field", () => {
-    expect(matchesSearch("mcm-003", "Acuzar Great Miner", "MCM-003", "Masara Shaft-3")).toBe(true);
-    expect(matchesSearch("shaft-2", "Acuzar Great Miner", "MCM-003", "Masara Shaft-3")).toBe(false);
+    expect(matchesSearch("scm-003", "Acuzar Great Miner", "SCM-003", "Masara Shaft-3")).toBe(true);
+    expect(matchesSearch("shaft-2", "Acuzar Great Miner", "SCM-003", "Masara Shaft-3")).toBe(false);
   });
 });

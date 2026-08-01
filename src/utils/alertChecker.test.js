@@ -32,7 +32,7 @@ describe("getVitalStatus", () => {
 });
 
 describe("buildAlerts", () => {
-  const base = { id: "MCM-1", name: "Miner 1", active: true, finger: true, hr: 80, spo2: 99, temp: 36, manual_alert: false, stale: false };
+  const base = { id: "SCM-1", name: "Miner 1", active: true, finger: true, hr: 80, spo2: 99, temp: 36, manual_alert: false, stale: false };
 
   it("returns no alerts for a healthy active miner", () => {
     expect(buildAlerts([base], DEFAULT_THRESHOLDS)).toHaveLength(0);
@@ -45,7 +45,7 @@ describe("buildAlerts", () => {
   it("raises a critical 'lost during alert' when a device drops while concerning", () => {
     const alerts = buildAlerts([{ ...base, stale: true, offlineConcern: true }], DEFAULT_THRESHOLDS);
     expect(alerts).toHaveLength(1);
-    expect(alerts[0].id).toBe("MCM-1-offline");
+    expect(alerts[0].id).toBe("SCM-1-offline");
     expect(alerts[0].severity).toBe("critical");
   });
 
@@ -55,19 +55,19 @@ describe("buildAlerts", () => {
 
   it("raises a critical alert for dangerously low SpO2", () => {
     const alerts = buildAlerts([{ ...base, spo2: 59 }], DEFAULT_THRESHOLDS);
-    expect(alerts.some((a) => a.id === "MCM-1-spo2" && a.severity === "critical")).toBe(true);
+    expect(alerts.some((a) => a.id === "SCM-1-spo2" && a.severity === "critical")).toBe(true);
   });
 
   it("raises manual-alert and stops vital checks when chest contact is lost", () => {
     const alerts = buildAlerts([{ ...base, manual_alert: true, finger: false, hr: 200 }], DEFAULT_THRESHOLDS);
-    expect(alerts.some((a) => a.id === "MCM-1-manual")).toBe(true);
-    expect(alerts.some((a) => a.id === "MCM-1-contact")).toBe(true);
+    expect(alerts.some((a) => a.id === "SCM-1-manual")).toBe(true);
+    expect(alerts.some((a) => a.id === "SCM-1-contact")).toBe(true);
     // HR alert is skipped because contact (and therefore the reading) is unreliable
-    expect(alerts.some((a) => a.id === "MCM-1-hr")).toBe(false);
+    expect(alerts.some((a) => a.id === "SCM-1-hr")).toBe(false);
   });
 
   it("flags high temperature as critical", () => {
     const alerts = buildAlerts([{ ...base, temp: 38 }], DEFAULT_THRESHOLDS);
-    expect(alerts.some((a) => a.id === "MCM-1-temp-high" && a.severity === "critical")).toBe(true);
+    expect(alerts.some((a) => a.id === "SCM-1-temp-high" && a.severity === "critical")).toBe(true);
   });
 });

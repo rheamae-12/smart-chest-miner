@@ -219,9 +219,13 @@ shutdown write `status: "offline"` to end the session cleanly.
 3. Add brownout caps → connect WiFi → confirm **no random reboots** under load.
 4. NTP + ms-timestamp + Firebase write → device flips to **online** in Command
    Center within seconds.
-5. **Register the device** in Device Registry with the *same* `deviceId` the
-   firmware uses; the device must authenticate (DB rules require `auth != null`).
-6. Set real **thresholds** in System Config for actual conditions (defaults are
+5. **Register the device first** in the website Device Registry using the exact
+   `DEVICE_ID` from the firmware. The firmware will not create a new registry
+   record, and it will not overwrite the website's miner name or location.
+6. Flash and run the firmware. Confirm the serial log says `Registry entry
+   found` before expecting live uploads. A typo or different ID remains paused
+   instead of creating a duplicate device.
+7. Set real **thresholds** in System Config for actual conditions (defaults are
    placeholders).
 
 ### "It's wired but shows offline" — check in this order

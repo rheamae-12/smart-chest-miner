@@ -24,7 +24,7 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
   );
   const [search, setSearch] = useState("");
   const [connectionFilter, setConnectionFilter] = useState("all");
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(() => sorted.find((miner) => miner.active && !miner.stale)?.id || sorted[0]?.id || "");
   const [tab, setTab] = useState("overview");
 
   const filtered = useMemo(() => {
@@ -38,7 +38,14 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
     });
   }, [sorted, search, connectionFilter]);
 
-  const selected = miners.find((miner) => miner.id === selectedId) || null;
+  const selectedMiner = sorted.find((miner) => miner.id === selectedId);
+  const onlineMiner = sorted.find((miner) => miner.active && !miner.stale);
+  // Entering the live monitor immediately shows the first online device. Keep
+  // an operator's explicit selection stable, including when it is offline.
+  const effectiveSelectedId = !selectedMiner
+    ? onlineMiner?.id || sorted[0]?.id || ""
+    : selectedId;
+  const selected = sorted.find((miner) => miner.id === effectiveSelectedId) || null;
   const alerts = useMemo(() => buildAlerts(miners, thresholds), [miners, thresholds]);
   const minerAlerts = selected ? alerts.filter((a) => a.deviceId === selected.id && !dismissedAlertIds.includes(a.id)) : [];
 
@@ -299,7 +306,7 @@ function VitalsRow({ miner, thresholds }) {
       <VitalTile label="SpO2" icon="droplet" value={live ? formatReading(miner.spo2, 0) : "--"} unit="%" color={C.oxygen} status={live ? getVitalStatus(miner.spo2, "spo2", thresholds) : "OFFLINE"} />
       <VitalTile label="Temperature" icon="thermometer" value={live ? formatReading(miner.temp, 1) : "--"} unit="°C" color={C.teal} status={live ? getVitalStatus(miner.temp, "temp", thresholds) : "OFFLINE"} />
       <VitalTile label="Chest Contact" icon="contact" value={miner.active ? (miner.finger === false ? "No" : "Yes") : "--"} color={!miner.active ? C.offline : miner.finger === false ? C.amber : C.green} status={!miner.active ? "OFFLINE" : miner.finger === false ? "WARNING" : "NORMAL"} />
-      <VitalTile label="Manual SOS" icon="siren" value={miner.active ? (miner.manual_alert ? "Pressed" : "Clear") : "--"} unit={miner.active ? `${miner.button_press_count || 0}x` : ""} color={!miner.active ? C.offline : miner.manual_alert ? C.red : C.green} status={!miner.active ? "OFFLINE" : miner.manual_alert ? "PRESSED" : "NORMAL"} />
+      <VitalTile label="Manual SOS" icon="siren" value={miner.active ? (miner.manual_alert ? "Pressed" : "Clear") : "--"} color={!miner.active ? C.offline : miner.manual_alert ? C.red : C.green} status={!miner.active ? "OFFLINE" : miner.manual_alert ? "PRESSED" : "NORMAL"} />
     </div>
   );
 }
@@ -381,8 +388,8 @@ function OverviewTab({ miner, liveData, thresholds }) {
         />
         <Indicator
           color={!miner.active ? C.offline : miner.manual_alert ? C.red : C.green}
-          label={!miner.active ? "Manual SOS offline" : miner.manual_alert ? `Manual SOS pressed (${miner.button_press_count || 0} total)` : `Manual SOS clear (${miner.button_press_count || 0} total)`}
-          detail={miner.active ? `${miner.button_press_count || 0} activation${Number(miner.button_press_count || 0) === 1 ? "" : "s"} recorded` : "SOS state unavailable while offline"}
+          label={!miner.active ? "Manual SOS offline" : miner.manual_alert ? "Manual SOS pressed" : "Manual SOS clear"}
+          detail={miner.active ? "Current latched SOS state" : "SOS state unavailable while offline"}
         />
         <Indicator
           color={!miner.active ? C.offline : miner.temp > 0 ? C.teal : C.amber}

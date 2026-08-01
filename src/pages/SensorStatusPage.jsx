@@ -14,6 +14,8 @@ export default function SensorStatusPage({ miners = [] }) {
   const isOnline = (miner) => miner.active && !miner.stale;
   const active = miners.filter(isOnline).length;
   const maintenance = fleet.map(buildMaintenanceItem);
+  const futureSlots = fleet.length < 2 ? 1 : 0;
+  const nodeColumns = Math.min(Math.max(fleet.length + futureSlots, 2), 3);
 
   return (
     <div style={pageStyle}>
@@ -31,8 +33,9 @@ export default function SensorStatusPage({ miners = [] }) {
             <div style={{ color: C.text, fontSize: 15, fontWeight: 950 }}>Sensor nodes</div>
             <Indicator color={active ? C.green : C.offline} label="Diagnostics update automatically" />
           </div>
-          <div className="sensor-nodes-grid hide-scrollbar" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(310px, 1fr))", gridTemplateRows: "auto", gridAutoFlow: "column", gridAutoColumns: "minmax(310px, 1fr)", gap: 10, overflowX: "auto", overflowY: "hidden", minWidth: 0 }}>
+          <div className="sensor-nodes-grid hide-scrollbar" style={{ display: "grid", gridTemplateColumns: `repeat(${nodeColumns}, minmax(310px, 1fr))`, gridTemplateRows: "auto", gap: 10, overflowX: "auto", overflowY: "hidden", minWidth: 0 }}>
             {fleet.map((miner) => <SensorNode key={miner.id} miner={miner} />)}
+            {futureSlots > 0 && <FutureSensorNode />}
           </div>
         </section>
 
@@ -101,6 +104,18 @@ function SensorNode({ miner }) {
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, color: C.textMuted, fontSize: 11 }}>
         <span>Contact: <b style={{ color: miner.finger === false ? C.amber : online ? C.green : C.offline }}>{miner.finger === false ? "Missing" : online ? "Valid" : "Offline"}</b></span>
         <span>{formatLastSeen(miner.lastSeen)}</span>
+      </div>
+    </article>
+  );
+}
+
+function FutureSensorNode() {
+  return (
+    <article className="sensor-future-node" style={{ ...cardStyle, padding: 13, border: `1px dashed ${C.border}`, background: "rgba(255,255,255,0.012)", display: "grid", alignContent: "center", minHeight: 174 }}>
+      <div style={{ display: "grid", placeItems: "center", gap: 8, textAlign: "center" }}>
+        <div style={{ width: 34, height: 34, display: "grid", placeItems: "center", border: `1px solid ${C.border}`, borderRadius: 10, color: C.textMuted, fontSize: 22, lineHeight: 1 }}>+</div>
+        <div style={{ color: C.text, fontSize: 13, fontWeight: 900 }}>Future device slot</div>
+        <div style={{ maxWidth: 220, color: C.textMuted, fontSize: 10.5, lineHeight: 1.45 }}>Register another miner to activate this sensor node.</div>
       </div>
     </article>
   );

@@ -55,7 +55,7 @@ export default function DevicesPage({ miners, setMiners, onActivityLog }) {
 
   const openRegister = () => {
     setFormError("");
-    setForm(EMPTY_FORM);
+    setForm({ id: nextDeviceId(miners), name: "", location: "" });
     setFormModal("register");
   };
 
@@ -162,7 +162,7 @@ export default function DevicesPage({ miners, setMiners, onActivityLog }) {
             </>
           }
         >
-          <DeviceForm form={form} setForm={setForm} lockId={formModal === "edit"} />
+          <DeviceForm form={form} setForm={setForm} lockId />
           {formError && <div style={{ marginTop: 12, color: C.amber, fontSize: 12 }}>{formError}</div>}
         </Modal>
       )}
@@ -206,7 +206,7 @@ export default function DevicesPage({ miners, setMiners, onActivityLog }) {
           label="Device registry"
           title="Miner Device Management"
           titleSize={26}
-          subtitle="Register devices, review latest vitals, and manage miner location assignments."
+            subtitle="Register the exact firmware Device ID before flashing, then review vitals and manage location assignments."
           right={
             canManage ? <Button primary onClick={openRegister}>Register Device</Button> : null
           }
@@ -345,11 +345,25 @@ function ConfirmBody({ modal }) {
 function DeviceForm({ form, setForm, lockId }) {
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      <Field label="Device ID" value={form.id} disabled={lockId} placeholder="MCM-001" onChange={(id) => setForm({ ...form, id })} />
+      <Field label="Device ID" value={form.id} disabled={lockId} placeholder="SCM-001" onChange={(id) => setForm({ ...form, id })} />
+      <div style={{ color: C.textMuted, fontSize: 10.5, lineHeight: 1.45, marginTop: -8 }}>
+        This ID is generated automatically. Copy it into the firmware <code style={{ color: C.primary }}>DEVICE_ID</code> before flashing the device.
+      </div>
       <Field label="Miner Name" value={form.name} placeholder="Miner 1" onChange={(name) => setForm({ ...form, name })} />
       <Field label="Location" value={form.location} placeholder="Shaft A - Level 3" onChange={(location) => setForm({ ...form, location })} />
     </div>
   );
+}
+
+function nextDeviceId(miners = []) {
+  const used = new Set(miners.map((miner) => String(miner.id || "").trim().toUpperCase()));
+  let number = 1;
+  let candidate = `SCM-${String(number).padStart(3, "0")}`;
+  while (used.has(candidate)) {
+    number += 1;
+    candidate = `SCM-${String(number).padStart(3, "0")}`;
+  }
+  return candidate;
 }
 
 // Field — labelled text input used inside DeviceForm

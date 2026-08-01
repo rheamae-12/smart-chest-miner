@@ -67,8 +67,8 @@ export default function SettingsPage({ miners, staleSeconds }) {
             <SettingField
               label="Offline Timeout"
               unit="seconds"
-              value={staleSeconds ?? 75}
-              hint="Fixed monitoring timeout used to identify devices that stop sending data."
+              value={staleSeconds ?? 30}
+              hint="Fixed 30-second monitoring timeout used to identify devices that stop sending data."
             />
             <InfoRow
               label="Status"
@@ -125,7 +125,7 @@ export default function SettingsPage({ miners, staleSeconds }) {
             description="A compact preview of how live device state changes under this configuration."
           >
             <LifecycleRow label="Receiving data" value="Online" color={C.green} text="Vitals and contact state update in real time." />
-            <LifecycleRow label={`No data for ${staleSeconds ?? 75}s`} value="Offline" color={C.offline} text="The device is removed from active averages." />
+            <LifecycleRow label={`No data for ${staleSeconds ?? 30}s`} value="Offline" color={C.offline} text="The device is removed from active averages." />
             <LifecycleRow label="Stream resumes" value="Recovered" color={C.oxygen} text="The existing row updates in place without reordering." />
           </SettingsCard>
         </div>

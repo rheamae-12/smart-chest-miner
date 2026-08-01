@@ -10,6 +10,7 @@ import {
   saveSessionSummaries,
   saveWifiHistoryRecord,
   subscribeToHistoricalReadings as subscribeToFirestoreReadings,
+  subscribeToStoredSessionSummaries as subscribeToFirestoreSessionSummaries,
   subscribeToStoredActivityLogs,
   subscribeToWifiHistory,
   updateSessionStatus as updateFirestoreSessionStatus,
@@ -53,7 +54,7 @@ export function subscribeToDevices(onData, onError) {
 export async function testFirebaseConnection() {
   if (db) {
     const snapshot = await get(ref(db, "devices"));
-    const devices = snapshot.val() || {};
+    const devices = filterRetiredDevices(snapshot.val());
     return {
       connected: true,
       source: "Realtime Database SDK",
@@ -69,8 +70,21 @@ export async function testFirebaseConnection() {
   return {
     connected: true,
     source: "Realtime Database REST",
-    devices: (await response.json()) || {},
+    devices: filterRetiredDevices(await response.json()),
   };
+}
+
+function filterRetiredDevices(value) {
+  return Object.fromEntries(
+    Object.entries(value || {}).filter(([, device]) => !isRetiredDevice(device)),
+  );
+}
+
+function isRetiredDevice(device) {
+  return [device?.archived, device?.deleted].some((value) => {
+    if (value === true || value === 1) return true;
+    return ["true", "1", "yes"].includes(String(value || "").trim().toLowerCase());
+  });
 }
 
 export function subscribeToAllAnalytics(onData, onError) {
@@ -116,6 +130,17 @@ export function subscribeToActivityLogs(onData, onError) {
     unsubscribeSdk();
     stopRestPolling?.();
   };
+}
+
+export function subscribeToSessionSummaries(deviceIds, onData, onError) {
+  if (firestoreDb) return subscribeToFirestoreSessionSummaries(deviceIds, onData, onError);
+  if (!db) return pollFirebasePath("miningSessions", onData, onError, 3000);
+
+  return onValue(
+    ref(db, "miningSessions"),
+    (snapshot) => onData(snapshot.val() || {}),
+    (error) => onError?.(`SDK session summary read failed: ${error.message}`),
+  );
 }
 
 export function subscribeToWifiConfigurations(onData, onError) {
@@ -189,15 +214,15 @@ function pollFirebasePath(path, onData, onError, intervalMs = 2000) {
 }
 
 function subscribeToDevicesRest(onData, onError) {
-  return pollFirebasePath("devices", onData, onError);
+  return pollFirebasePath("devices", onData, onError, 750);
 }
 
 function subscribeToAnalyticsRest(onData, onError) {
-  return pollFirebasePath("analytics", onData, onError);
+  return pollFirebasePath("analytics", onData, onError, 1000);
 }
 
 function subscribeToActivityLogsRest(onData, onError) {
-  return pollFirebasePath("activityLogs", onData, onError, 3000);
+  return pollFirebasePath("activityLogs", onData, onError, 1000);
 }
 
 async function migrateLegacyActivityLogs() {
@@ -457,7 +482,18 @@ export async function clearActivityLogs() {
 }
 
 export async function clearHealthLogs(deviceIds = []) {
-  if (firestoreDb) return clearHistoricalData(deviceIds);
+  if (firestoreDb) {
+    // Health Logs has a Firestore source of truth, but older firmware and the
+    // realtime fallback still write /analytics. Clear both stores or the
+    // realtime subscription will immediately resurrect deleted sessions.
+    await clearHistoricalData(deviceIds);
+    if (db) await updateMultiPath({
+      analytics: null,
+      healthLogs: null,
+      miningSessions: null,
+    });
+    return true;
+  }
   return updateMultiPath({
     analytics: null,
     healthLogs: null,

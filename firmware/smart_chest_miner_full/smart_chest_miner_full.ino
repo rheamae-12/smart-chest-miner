@@ -18,7 +18,7 @@
  *   - Adafruit SSD1306  +  Adafruit GFX               (OLED)
  *   (MAX30205 is read directly over I2C — no extra library.)
  *
- * Firebase requests use the configured database URL without embedded credentials.
+ * Firebase requests use the configured database URL and device credential.
  *
  * HARDWARE: add 470-1000uF on the 5V rail at the ESP32 and 100uF+100nF on the
  * 3.3V sensor rail or WiFi spikes will brown-out the board. See docs/HARDWARE_NOTES.md.
@@ -40,9 +40,9 @@ const char* WIFI_PASSWORD = "bordersnigerald2025";
 #define FIREBASE_DATABASE_URL    "https://smart-chest-miner-default-rtdb.firebaseio.com/"
 #define FIREBASE_DATABASE_SECRET "GJY8fpUA211duwUw7o92ks0EXlYOFdqWYz5rK6N5"
 
-const char* DEVICE_ID      = "SCM-003";
-const char* MINER_NAME     = "Acuzar Great Miner";
-const char* MINER_LOCATION = "Masara Shaft-3";
+// This ID must already exist in the website Device Registry. The website owns
+// the miner name and location; firmware only publishes live state and history.
+const char* DEVICE_ID = "SCM-003";
 
 // ---- Pins (schematic / final board) ----
 #define SDA_PIN          21
@@ -72,6 +72,7 @@ const char* MINER_LOCATION = "Masara Shaft-3";
 #define DISPLAY_INTERVAL         500
 #define DEBOUNCE_DELAY_MS        80
 #define WIFI_RECONNECT_INTERVAL  10000
+#define DEVICE_REGISTRATION_RETRY_MS 10000
 #define WIFI_CONFIG_POLL_MS      30000
 #define RED_LED_BLINK_INTERVAL   200
 #define NETWORK_TASK_POLL_MS     50
@@ -149,6 +150,7 @@ float hrJumpCandidate = 0.0, spO2JumpCandidate = 0.0;
 unsigned long lastLiveUploadTime = 0, lastAnalyticsUploadTime = 0;
 unsigned long lastSensorRead = 0, lastTempRead = 0, lastDisplay = 0;
 unsigned long lastWiFiReconnect = 0, lastWiFiConfigPoll = 0, lastRedLedToggle = 0, lastGreenLedToggle = 0;
+unsigned long lastDeviceRegistrationCheck = 0;
 unsigned long lastPrintTime = 0, lastSimUpdate = 0;
 unsigned long lastHrBuzzerToggle = 0, lastSpO2BuzzerToggle = 0, lastTempBuzzerToggle = 0;
 
@@ -157,13 +159,15 @@ int   analyticsSampleCount = 0, analyticsTempCount = 0;
 bool  forceUpload = false;
 
 bool manualAlertActive = false;
-unsigned long lastButtonPress = 0;
+unsigned long lastButtonStateChange = 0;
 bool buttonPressedDisplay = false;
-bool wasButtonPressed = false;
+bool rawButtonPressed = false;
+bool stableButtonPressed = false;
 unsigned long buttonPressCount = 0; // SOS activation count; OFF toggles do not increment
 
 bool redLedState = false, greenLedState = false;
 bool hrBuzzerPhase = false, spO2BuzzerPhase = false, tempBuzzerPhase = false;
+bool deviceRegistrationChecked = false, deviceRegistered = false;
 
 bool fingerDetected = false, wasFingerDetected = false, noFingerStateUploaded = false;
 int  fingerOnCounter = 0, fingerOffCounter = 0;
@@ -176,9 +180,11 @@ int rawIndex = 0;
 
 typedef struct { char method[8]; char path[96]; char payload[448]; } FirebaseJob;
 QueueHandle_t firebaseQueue;
+QueueHandle_t liveQueue;
 
 void drawBootScreen(const char* status, const char* detail);
 bool flushAnalyticsUpload();
+void enqueueLatestLiveJob(const char* method, String path, String payload);
 
 // =================================================================
 // Setup
@@ -209,6 +215,9 @@ void setup() {
   initSensors();
 
   firebaseQueue = xQueueCreate(8, sizeof(FirebaseJob));
+  // Live state must never wait behind an old live sample or an analytics
+  // write. A length-one queue lets the newest live payload replace stale data.
+  liveQueue = xQueueCreate(1, sizeof(FirebaseJob));
   xTaskCreatePinnedToCore(networkTask, "networkTask", 8192, NULL, 1, NULL, 0);
 
   connectWiFi();
@@ -705,21 +714,30 @@ void drawDisplay() {
 }
 
 void handleButton(unsigned long now) {
-  bool pressed = digitalRead(BUTTON_PIN) == LOW;
-  buttonPressedDisplay = pressed;
+  const bool pressed = digitalRead(BUTTON_PIN) == LOW;
 
-  if (pressed && !wasButtonPressed &&
-      now - lastButtonPress >= DEBOUNCE_DELAY_MS) {
-    lastButtonPress = now;
-    manualAlertActive = !manualAlertActive;
-    if (manualAlertActive) buttonPressCount++;
-    buttonPressedDisplay = true;
-    forceUpload = true;
-    if (WiFi.status() == WL_CONNECTED) enqueueButtonAnalyticsUpload();
-    Serial.println(manualAlertActive ? "[ALERT] MANUAL ALERT ON" : "[ALERT] Manual alert OFF");
+  // Debounce the physical input before changing the latched SOS state. The
+  // previous edge check could see switch bounce as a second press and turn
+  // SOS off shortly after it was activated.
+  if (pressed != rawButtonPressed) {
+    rawButtonPressed = pressed;
+    lastButtonStateChange = now;
   }
 
-  wasButtonPressed = pressed;
+  if (rawButtonPressed != stableButtonPressed && now - lastButtonStateChange >= DEBOUNCE_DELAY_MS) {
+    stableButtonPressed = rawButtonPressed;
+    buttonPressedDisplay = stableButtonPressed;
+
+    if (stableButtonPressed) {
+      manualAlertActive = !manualAlertActive;
+      if (manualAlertActive) buttonPressCount++;
+      forceUpload = true;
+      if (WiFi.status() == WL_CONNECTED) enqueueButtonAnalyticsUpload();
+      Serial.println(manualAlertActive ? "[ALERT] MANUAL ALERT ON" : "[ALERT] Manual alert OFF");
+    }
+  }
+
+  buttonPressedDisplay = stableButtonPressed;
 }
 
 void handleWiFiReconnect(unsigned long now) {
@@ -743,12 +761,10 @@ void enqueueLiveUpload() {
   String live = buildReadingPayload(currentBPM, currentSpO2, currentTemp, tsText, fingerDetected);
 
   String dev = "{";
-  dev += "\"name\":\"" + String(MINER_NAME) + "\",";
-  dev += "\"location\":\"" + String(MINER_LOCATION) + "\",";
   dev += "\"active\":true,\"status\":\"online\",";
   dev += "\"lastSeen\":" + tsText + ",";
   dev += "\"live\":" + live + "}";
-  enqueueJob("PATCH", "/devices/" + String(DEVICE_ID), dev);
+  enqueueLatestLiveJob("PATCH", "/devices/" + String(DEVICE_ID), dev);
 }
 
 bool flushAnalyticsUpload() {
@@ -806,14 +822,7 @@ String buildReadingPayload(float bpm, float spo2, float temp, String tsText, boo
 }
 
 void registerDeviceInfo() {
-  double ts = currentTimestampMs();
-  String tsText = timestampJson(ts);
-  String payload = "{";
-  payload += "\"name\":\"" + String(MINER_NAME) + "\",";
-  payload += "\"location\":\"" + String(MINER_LOCATION) + "\",";
-  payload += "\"active\":true,\"status\":\"online\",";
-  payload += "\"lastSeen\":" + tsText + "}";
-  enqueueJob("PATCH", "/devices/" + String(DEVICE_ID), payload);
+  Serial.printf("[FIREBASE] Waiting for registry entry for %s.\n", DEVICE_ID);
 }
 
 void enqueueJob(const char* method, String path, String payload) {
@@ -825,14 +834,66 @@ void enqueueJob(const char* method, String path, String payload) {
   if (xQueueSend(firebaseQueue, &job, 0) != pdTRUE) Serial.println("[NET] Queue full, dropped upload.");
 }
 
+void enqueueLatestLiveJob(const char* method, String path, String payload) {
+  if (liveQueue == NULL) return;
+  FirebaseJob job;
+  strlcpy(job.method, method, sizeof(job.method));
+  strlcpy(job.path, path.c_str(), sizeof(job.path));
+  strlcpy(job.payload, payload.c_str(), sizeof(job.payload));
+  xQueueOverwrite(liveQueue, &job);
+}
+
 void networkTask(void* param) {
   FirebaseJob job;
+  uint8_t liveBurst = 0;
   for (;;) {
-    handleWiFiReconnect(millis());
+    unsigned long now = millis();
+    handleWiFiReconnect(now);
 
-    if (xQueueReceive(firebaseQueue, &job,
-                      pdMS_TO_TICKS(NETWORK_TASK_POLL_MS)) == pdTRUE) {
-      if (WiFi.status() == WL_CONNECTED) firebaseWrite(job.method, job.path, job.payload);
+    if (WiFi.status() != WL_CONNECTED) {
+      deviceRegistrationChecked = false;
+      deviceRegistered = false;
+    } else if (!deviceRegistrationChecked && now - lastDeviceRegistrationCheck >= DEVICE_REGISTRATION_RETRY_MS) {
+      lastDeviceRegistrationCheck = now;
+      String body;
+      if (firebaseRead("/devices/" + String(DEVICE_ID), body)) {
+        bool retired = body.indexOf("\"archived\":true") >= 0 ||
+                       body.indexOf("\"archived\": true") >= 0 ||
+                       body.indexOf("\"deleted\":true") >= 0 ||
+                       body.indexOf("\"deleted\": true") >= 0;
+        deviceRegistered = body != "null" && body.length() > 0 && !retired;
+        deviceRegistrationChecked = deviceRegistered;
+        if (deviceRegistered) {
+          Serial.printf("[FIREBASE] Registry entry found for %s. Uploads enabled.\n", DEVICE_ID);
+        } else {
+          Serial.printf("[FIREBASE] %s is not registered. Register this exact ID in the website before uploading.\n", DEVICE_ID);
+        }
+      } else {
+        Serial.println("[FIREBASE] Registry check failed; uploads remain paused.");
+      }
+    }
+
+    // Live state is frequent, but analytics, SOS, and other regular writes
+    // must never starve behind it. After a short live burst, service one
+    // regular job before accepting another live update.
+    bool gotLive = false;
+    bool gotRegular = false;
+    if (liveBurst >= 4 && firebaseQueue != NULL) {
+      gotRegular = xQueueReceive(firebaseQueue, &job, 0) == pdTRUE;
+      if (gotRegular) liveBurst = 0;
+    }
+    if (!gotRegular && liveQueue != NULL) {
+      gotLive = xQueueReceive(liveQueue, &job, 0) == pdTRUE;
+      if (gotLive) liveBurst++;
+    }
+    if (!gotRegular && !gotLive && firebaseQueue != NULL) {
+      gotRegular = xQueueReceive(firebaseQueue, &job,
+        pdMS_TO_TICKS(NETWORK_TASK_POLL_MS)) == pdTRUE;
+      if (gotRegular) liveBurst = 0;
+    }
+    if (gotLive || gotRegular) {
+      if (WiFi.status() == WL_CONNECTED && deviceRegistered) firebaseWrite(job.method, job.path, job.payload);
+      else if (WiFi.status() == WL_CONNECTED) Serial.println("[NET] Device is not registered; upload skipped.");
       else Serial.println("[NET] WiFi down, skip queued upload.");
     }
   }
@@ -840,7 +901,7 @@ void networkTask(void* param) {
 
 bool firebaseWrite(const char* method, const char* path, const char* payload) {
   if (!firebaseConfigured()) {
-    Serial.println("[FIREBASE] Missing FIREBASE_DATABASE_URL.");
+    Serial.println("[FIREBASE] Missing database URL or device credential.");
     return false;
   }
 
@@ -850,11 +911,13 @@ bool firebaseWrite(const char* method, const char* path, const char* payload) {
   if (baseUrl.endsWith("/")) baseUrl.remove(baseUrl.length() - 1);
   String cleanPath = String(path);
   if (!cleanPath.startsWith("/")) cleanPath = "/" + cleanPath;
-  String url = baseUrl + cleanPath + ".json";
+  String url = baseUrl + cleanPath + ".json?auth=" + String(FIREBASE_DATABASE_SECRET);
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
   http.setConnectTimeout(1000);
-  http.setTimeout(4000);
+  // Do not block the live-upload task for several seconds on a dead socket;
+  // the next latest live sample will replace this one when connectivity returns.
+  http.setTimeout(2000);
   int code = http.sendRequest(method, (uint8_t*)payload, strlen(payload));
   Serial.printf("[FIREBASE] %s %s -> HTTP %d\n", method, path, code);
   if (code < 200 || code >= 300) { Serial.println(http.getString()); http.end(); return false; }
@@ -871,7 +934,7 @@ bool firebaseRead(const String& path, String& body) {
   if (baseUrl.endsWith("/")) baseUrl.remove(baseUrl.length() - 1);
   String cleanPath = path;
   if (!cleanPath.startsWith("/")) cleanPath = "/" + cleanPath;
-  String url = baseUrl + cleanPath + ".json";
+  String url = baseUrl + cleanPath + ".json?auth=" + String(FIREBASE_DATABASE_SECRET);
   http.begin(url);
   http.setConnectTimeout(1000);
   http.setTimeout(4000);
@@ -904,9 +967,13 @@ void applyQueuedWifiConfig() {
 
 bool firebaseConfigured() {
   String databaseUrl = String(FIREBASE_DATABASE_URL);
+  String databaseSecret = String(FIREBASE_DATABASE_SECRET);
   databaseUrl.trim();
+  databaseSecret.trim();
   return databaseUrl.length() > 0 &&
-         databaseUrl != "placeholder";
+         databaseUrl != "placeholder" &&
+         databaseSecret.length() > 0 &&
+         databaseSecret != "placeholder";
 }
 
 double currentTimestampMs() {

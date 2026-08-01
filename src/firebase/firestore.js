@@ -146,6 +146,25 @@ export function subscribeToHistoricalReadings(deviceIds, onData, onError) {
   return () => unsubscribe.forEach((stop) => stop());
 }
 
+export function subscribeToStoredSessionSummaries(deviceIds, onData, onError) {
+  if (!firestoreDb) return () => {};
+
+  const ids = [...new Set((deviceIds || []).filter(Boolean))];
+  const rowsByDevice = {};
+  const unsubscribe = ids.map((deviceId) => onSnapshot(
+    collection(firestoreDb, "miners", deviceId, "sessions"),
+    (snapshot) => {
+      rowsByDevice[deviceId] = snapshot.docs
+        .map((item) => ({ id: item.id, ...item.data() }))
+        .sort((a, b) => Number(a.startTimestamp || 0) - Number(b.startTimestamp || 0));
+      onData({ ...rowsByDevice });
+    },
+    (error) => onError?.(`Firestore session summary read failed: ${error.message}`),
+  ));
+
+  return () => unsubscribe.forEach((stop) => stop());
+}
+
 export async function saveSessionSummaries(deviceId, healthLogs = {}, miningSessions = {}) {
   if (!firestoreDb || !deviceId) return false;
 

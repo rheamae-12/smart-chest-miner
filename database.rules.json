@@ -17,6 +17,16 @@
       }
     },
 
+    "healthLogs": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "miningSessions": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
     "activityLogs": {
       ".read": "auth != null",
       ".write": "auth != null",

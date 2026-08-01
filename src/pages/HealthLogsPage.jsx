@@ -4,13 +4,14 @@ import FilterToolbar, { FilterField, FilterTabs } from "../components/FilterTool
 import Modal from "../components/Modal";
 import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
 import { DEFAULT_THRESHOLDS, getVitalStatus } from "../utils/alertChecker";
+import { countMinuteReadings } from "../utils/analyticsReadings";
 import { DATE_RANGE_OPTIONS, isWithinDateRange, resolveDateRange } from "../utils/filtering";
 import { average, compactTimestamp, formatReading, formatSystemTimestamp, lastSeenValue, uniqueChartLabels } from "../utils/formatters";
 import { compareMinersActiveFirst } from "../utils/minerOrdering";
 
 const SESSION_GAP_MS = 3 * 60 * 1000;
 
-export default function HealthLogsPage({ miners, analyticsData, liveData = {}, activityLogs = [], thresholds = DEFAULT_THRESHOLDS, onClearHealthLogs }) {
+export default function HealthLogsPage({ miners, analyticsData, liveData = {}, sessionData = {}, activityLogs = [], thresholds = DEFAULT_THRESHOLDS, onClearHealthLogs }) {
   const [selected, setSelected] = useState(() => findLatestMinerId(miners, analyticsData, liveData));
   const [minerChanged, setMinerChanged] = useState(false);
   const [rangePreset, setRangePreset] = useState("all");
@@ -47,8 +48,12 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
     return out;
   }, [combinedAnalytics, dateRange]);
 
-  const sessions = useMemo(() => buildSessions(visibleMiners, scopedAnalytics, activityLogs, thresholds), [activityLogs, scopedAnalytics, thresholds, visibleMiners]);
+  const sessions = useMemo(() => buildSessions(visibleMiners, scopedAnalytics, activityLogs, thresholds, sessionData, dateRange), [activityLogs, dateRange, scopedAnalytics, sessionData, thresholds, visibleMiners]);
   const chartData = useMemo(() => buildChartData(visibleMiners, scopedAnalytics), [scopedAnalytics, visibleMiners]);
+  const readingCount = useMemo(
+    () => countMinuteReadings(visibleMiners.flatMap((miner) => (scopedAnalytics[miner.id] || []).map((row) => ({ ...row, minerId: miner.id })))),
+    [scopedAnalytics, visibleMiners],
+  );
   const manualAlerts = sessions.reduce((sum, session) => sum + session.manualPressCount, 0);
   const activeFilterCount = Number(minerChanged) + Number(rangePreset !== "all");
   const selectedMinerName = visibleMiners[0]?.name || "No miner selected";
@@ -84,7 +89,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
           }
         >
           <div style={{ color: C.textMuted, fontSize: 13, lineHeight: 1.55 }}>
-            Clear all stored analytics used by Mining Session Logs? New device analytics will create new session rows again.
+            Permanently delete all mining readings and session summaries from Firebase? This also removes legacy realtime analytics and cannot be undone. New device readings will create new session rows again.
           </div>
           {clearError && <div style={{ color: C.amber, fontSize: 12, marginTop: 10 }}>{clearError}</div>}
         </Modal>
@@ -130,7 +135,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
         <section className="health-summary-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
           <Summary label="Sessions" value={sessions.length} color={C.primary} />
           <Summary label="Manual SOS" value={manualAlerts} color={manualAlerts ? C.red : C.green} />
-          <Summary label="Readings Logged" value={chartData.length} color={C.amber} />
+          <Summary label="Readings Logged" value={readingCount} unit="minute records" color={C.amber} />
         </section>
 
         <section className="health-content-grid" style={{ display: "grid", gridTemplateRows: "minmax(0, 220px) minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
@@ -142,7 +147,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
 
             <div style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
               <div style={{ padding: "14px 16px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                <PanelHeader title="Mining Session Logs" meta="Session time, duration, vital ranges, alerts, SOS, status" />
+                <PanelHeader title="Mining Session Logs" meta="Session time, duration, vital ranges, SOS, status" />
                 <button
                   disabled={!sessions.length || !onClearHealthLogs}
                   onClick={() => {
@@ -162,7 +167,6 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
                   <span>Heart Rate</span>
                   <span>SpO₂</span>
                   <span>Temperature</span>
-                  <span>Alerts</span>
                   <span>SOS Presses</span>
                   <span>Session Status</span>
                 </div>
@@ -180,7 +184,6 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
                     <div data-label="Heart rate"><ReadingRange value={session.hr} color={C.red} unit="bpm" /></div>
                     <div data-label="SpO2"><ReadingRange value={session.spo2} color={C.oxygen} unit="%" /></div>
                     <div data-label="Temperature"><ReadingRange value={session.temp} color={C.teal} unit="°C" /></div>
-                    <div data-label="Alerts"><AlertsText alerts={session.alerts} /></div>
                     <span data-label="SOS presses" style={{ color: session.manualPressCount ? C.red : C.textMuted, fontWeight: 900 }}>{session.manualPressCount}</span>
                     <span data-label="Session status"><StatusText session={session} /></span>
                   </div>
@@ -194,8 +197,18 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
   );
 }
 
-function buildSessions(miners, analyticsData, activityLogs, thresholds) {
+// eslint-disable-next-line react-refresh/only-export-components
+export function buildSessions(miners, analyticsData, activityLogs, thresholds, storedSessionData = {}, dateRange = {}) {
   return miners.flatMap((miner) => {
+    const storedRows = (storedSessionData[miner.id] || [])
+      .filter((session) => isSessionInDateRange(session, dateRange));
+    const storedSessions = storedRows.length > 0
+      ? buildStoredSessions(miner, storedRows, activityLogs, thresholds, analyticsData[miner.id] || [])
+      : [];
+    if (storedSessions.length > 0) {
+      return storedSessions;
+    }
+
     const rows = [...(analyticsData[miner.id] || [])]
       .filter((row) => Number(row.timestamp) > 0)
       .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
@@ -207,8 +220,21 @@ function buildSessions(miners, analyticsData, activityLogs, thresholds) {
       const timestamp = Number(row.timestamp || 0);
       const current = sessions[sessions.length - 1];
       const previous = current?.[current.length - 1];
+      const currentSessionId = current?.[0]?.sessionId || "";
+      const rowSessionId = row.sessionId || "";
+      // Older persisted readings could receive a synthetic session ID based
+      // on their own timestamp. Treat those as legacy row IDs, not as a new
+      // mining session, or one real session appears as many table rows.
+      const legacyRowSessionIds = isPerReadingSessionId(miner.id, current?.[0]) && isPerReadingSessionId(miner.id, row);
+      const sessionChanged = Boolean(current && currentSessionId && rowSessionId && currentSessionId !== rowSessionId && !legacyRowSessionIds);
+      const sessionRestarted = Boolean(current && previous && hasSessionRestart(
+        activityLogs,
+        miner.id,
+        Number(previous.timestamp || 0),
+        timestamp,
+      ));
 
-      if (!current || timestamp - Number(previous?.timestamp || 0) > SESSION_GAP_MS) {
+      if (!current || sessionChanged || sessionRestarted || timestamp - Number(previous?.timestamp || 0) > SESSION_GAP_MS) {
         sessions.push([row]);
       } else {
         current.push(row);
@@ -244,7 +270,7 @@ function buildSessions(miners, analyticsData, activityLogs, thresholds) {
         const manualPressCount = countManualPresses(miner, sessionRows, activityLogs, Number(first.timestamp), Number(last.timestamp), active);
         const alerts = detectSessionAlerts(miner, sessionRows, thresholds);
         const sessionStatus = active
-          ? "active"
+          ? "ongoing"
           : ["completed", "interrupted", "offline"].includes(recordedStatus)
             ? recordedStatus
             : isCurrentSession && miner.offlineConcern
@@ -272,6 +298,273 @@ function buildSessions(miners, analyticsData, activityLogs, thresholds) {
       })
       .sort((a, b) => sessionSortValue(b) - sessionSortValue(a));
   }).sort((a, b) => sessionSortValue(b) - sessionSortValue(a));
+}
+
+function buildStoredSessions(miner, storedRows, activityLogs, thresholds, analyticsRows = []) {
+  const summariesWithReadings = hydrateStoredSummaries(storedRows, analyticsRows)
+    .filter(hasStoredVitalReading);
+  return coalesceStoredSessionSummaries(miner.id, summariesWithReadings, activityLogs).map((summary) => {
+    const provisionalEnd = Number(summary.endTimestamp || summary.statusTimestamp || summary.updatedAt || summary.startTimestamp || summary.timestamp || 0);
+    const statusLog = findSessionStatusLog(activityLogs, miner.id, provisionalEnd, 0, summary.sessionId);
+    const sessionStart = sessionStartFromId(summary.sessionId);
+    const startTimestamp = Number(sessionStart || summary.startTimestamp || summary.timestamp || summary.statusTimestamp || 0);
+    const endTimestamp = Number(statusLog?.timestamp || summary.endTimestamp || summary.statusTimestamp || summary.updatedAt || startTimestamp);
+    // The operator's timestamped status event is authoritative. A stale
+    // summary status must never overwrite a newer Interrupted/Completed choice.
+    const explicitStatus = String(statusLog?.status || summary.status || summary.sessionStatus || "").toLowerCase();
+    const active = !explicitStatus && miner.active && Date.now() - endTimestamp < SESSION_GAP_MS * 2;
+    const sessionStatus = ["completed", "interrupted", "offline", "ongoing"].includes(explicitStatus)
+      ? explicitStatus
+      : active ? "ongoing" : "completed";
+    const manualPressCount = countLoggedSosPresses(activityLogs, miner.id, startTimestamp, endTimestamp)
+      || Number(summary.manualPressCount || 0);
+    const avgHr = Number(summary.avgHr || 0);
+    const avgSpo2 = Number(summary.avgSpo2 || 0);
+    const avgTemp = Number(summary.avgTemp || 0);
+
+    return {
+      id: `${miner.id}-${summary.sessionId || startTimestamp}`,
+      deviceId: miner.id,
+      name: miner.name,
+      active,
+      sessionStatus,
+      manualPressCount,
+      alerts: summary.alerts || detectSummaryAlerts(summary, thresholds),
+      sortTimestamp: endTimestamp,
+      start: formatSystemTimestamp(startTimestamp),
+      end: active ? "Now" : formatSystemTimestamp(endTimestamp),
+      duration: formatDuration(startTimestamp, active ? Math.max(endTimestamp, lastSeenValue(miner)) : endTimestamp),
+      hr: storedRange(summary, "hr", avgHr, 0),
+      spo2: storedRange(summary, "spo2", avgSpo2, 0),
+      temp: storedRange(summary, "temp", avgTemp, 1),
+    };
+  }).sort((a, b) => sessionSortValue(b) - sessionSortValue(a));
+}
+
+function hydrateStoredSummaries(summaries, analyticsRows) {
+  const rows = (analyticsRows || []).filter((row) => Number(row.timestamp || 0) > 0);
+  return (summaries || []).map((summary) => {
+    const start = Number(summary.startTimestamp || summary.timestamp || 0);
+    const end = Number(summary.endTimestamp || summary.statusTimestamp || summary.updatedAt || start);
+    const sessionStart = sessionStartFromId(summary.sessionId);
+    const windowStart = sessionStart || start;
+    const matchingRows = rows.filter((row) => {
+      const timestamp = Number(row.timestamp || 0);
+      const exactSession = summary.sessionId && row.sessionId && row.sessionId === summary.sessionId;
+      const inWindow = windowStart > 0 && timestamp >= windowStart && (!end || timestamp <= end);
+      return exactSession || inWindow;
+    });
+    if (matchingRows.length === 0) return summary;
+
+    const values = (key) => matchingRows.map((row) => Number(row[key] || 0)).filter((value) => value > 0);
+    const avg = (key, digits) => {
+      const list = values(key);
+      return list.length ? Number((list.reduce((sum, value) => sum + value, 0) / list.length).toFixed(digits)) : 0;
+    };
+    const range = (key) => {
+      const list = values(key);
+      return { min: list.length ? Math.min(...list) : 0, max: list.length ? Math.max(...list) : 0 };
+    };
+    const hr = range("hr");
+    const spo2 = range("spo2");
+    const temp = range("temp");
+    return {
+      ...summary,
+      startTimestamp: Math.min(...matchingRows.map((row) => Number(row.timestamp)), start || Number.MAX_SAFE_INTEGER),
+      endTimestamp: Math.max(...matchingRows.map((row) => Number(row.timestamp)), end || 0),
+      readingCount: matchingRows.length,
+      avgHr: avg("hr", 0),
+      avgSpo2: avg("spo2", 0),
+      avgTemp: avg("temp", 1),
+      hrMin: hr.min,
+      hrMax: hr.max,
+      spo2Min: spo2.min,
+      spo2Max: spo2.max,
+      tempMin: temp.min,
+      tempMax: temp.max,
+      manualPressCount: Math.max(Number(summary.manualPressCount || 0), ...matchingRows.map((row) => Number(row.button_press_count || 0))),
+    };
+  });
+}
+
+function sessionStartFromId(sessionId) {
+  const match = String(sessionId || "").match(/-session-(\d+)-/);
+  return match ? Number(match[1]) : 0;
+}
+
+function coalesceStoredSessionSummaries(deviceId, rows, activityLogs = []) {
+  const groups = [];
+  [...rows]
+    .sort((a, b) => Number(a.startTimestamp || a.timestamp || 0) - Number(b.startTimestamp || b.timestamp || 0))
+    .forEach((row) => {
+      const current = groups[groups.length - 1];
+      const currentEnd = Number(current?.endTimestamp || current?.timestamp || 0);
+      const rowStart = Number(row.startTimestamp || row.timestamp || 0);
+      const sameSession = current && current.sessionId && row.sessionId && current.sessionId === row.sessionId;
+      const legacyPerReading = current && isPerReadingSessionId(deviceId, {
+        timestamp: current.startTimestamp || current.timestamp,
+        sessionId: current.sessionId,
+      }) && isPerReadingSessionId(deviceId, {
+        timestamp: row.startTimestamp || row.timestamp,
+        sessionId: row.sessionId,
+      });
+      // A summary written before the lifecycle ID was attached can remain in
+      // Firestore beside the newer summary for the same session. They have
+      // different document IDs, but the same start and sensor fingerprint.
+      // Collapse only this well-defined alias case; distinct sessions keep
+      // their immutable IDs and remain separate rows.
+      const duplicateAlias = current && areDuplicateStoredSessionAliases(deviceId, current, row);
+      const terminal = ["completed", "interrupted", "offline"].includes(String(current?.status || "").toLowerCase());
+      const lifecycleBoundary = current && hasStoredSessionBoundary(activityLogs, deviceId, currentEnd, rowStart);
+
+      if (!current || lifecycleBoundary || (!sameSession && !duplicateAlias && !(legacyPerReading && rowStart - currentEnd <= SESSION_GAP_MS && !terminal))) {
+        groups.push({ ...row });
+        return;
+      }
+
+      groups[groups.length - 1] = mergeStoredSessionSummaries(current, row, deviceId);
+    });
+  return groups;
+}
+
+function hasStoredSessionBoundary(activityLogs, deviceId, previousTimestamp, currentTimestamp) {
+  if (currentTimestamp < previousTimestamp) return false;
+  return (activityLogs || []).some((log) => {
+    if (log.deviceId !== deviceId) return false;
+    const timestamp = Number(log.timestamp || 0);
+    if (timestamp < previousTimestamp || timestamp > currentTimestamp) return false;
+    if (log.type === "session_status") return ["completed", "interrupted", "offline"].includes(String(log.status || "").toLowerCase());
+    return log.type === "status" && String(log.status || "").toLowerCase() === "online";
+  });
+}
+
+function mergeStoredSessionSummaries(first, next, deviceId = "") {
+  const firstCount = Number(first.readingCount || 0);
+  const nextCount = Number(next.readingCount || 0);
+  const totalCount = firstCount + nextCount;
+  const weightedAverage = (key) => {
+    const firstValue = Number(first[key] || 0);
+    const nextValue = Number(next[key] || 0);
+    if (!firstValue) return nextValue;
+    if (!nextValue) return firstValue;
+    return totalCount > 0
+      ? Number(((firstValue * firstCount + nextValue * nextCount) / totalCount).toFixed(key === "avgTemp" ? 1 : 0))
+      : nextValue;
+  };
+  return {
+    ...first,
+    ...next,
+    sessionId: canonicalStoredSessionId(deviceId, first, next),
+    startTimestamp: Math.min(Number(first.startTimestamp || first.timestamp || 0), Number(next.startTimestamp || next.timestamp || 0)),
+    endTimestamp: Math.max(Number(first.endTimestamp || first.timestamp || 0), Number(next.endTimestamp || next.timestamp || 0)),
+    readingCount: Math.max(firstCount, nextCount),
+    avgHr: weightedAverage("avgHr"),
+    avgSpo2: weightedAverage("avgSpo2"),
+    avgTemp: weightedAverage("avgTemp"),
+    hrMin: minPositive(first.hrMin, next.hrMin),
+    hrMax: Math.max(Number(first.hrMax || 0), Number(next.hrMax || 0)),
+    spo2Min: minPositive(first.spo2Min, next.spo2Min),
+    spo2Max: Math.max(Number(first.spo2Max || 0), Number(next.spo2Max || 0)),
+    tempMin: minPositive(first.tempMin, next.tempMin),
+    tempMax: Math.max(Number(first.tempMax || 0), Number(next.tempMax || 0)),
+    manualPressCount: Math.max(Number(first.manualPressCount || 0), Number(next.manualPressCount || 0)),
+    status: next.status || first.status || "",
+    alerts: [...new Map([...(first.alerts || []), ...(next.alerts || [])].map((alert) => [alert.key, alert])).values()],
+  };
+}
+
+function canonicalStoredSessionId(deviceId, first, next) {
+  const firstId = first.sessionId || "";
+  const nextId = next.sessionId || "";
+  if (deviceId && isPerReadingSessionId(deviceId, { timestamp: first.startTimestamp || first.timestamp, sessionId: firstId })) return nextId || firstId;
+  if (deviceId && isPerReadingSessionId(deviceId, { timestamp: next.startTimestamp || next.timestamp, sessionId: nextId })) return firstId || nextId;
+  return firstId || nextId;
+}
+
+function areDuplicateStoredSessionAliases(deviceId, first, next) {
+  const firstId = first.sessionId || "";
+  const nextId = next.sessionId || "";
+  if (!firstId || !nextId || firstId === nextId) return false;
+
+  const firstStart = Number(first.startTimestamp || first.timestamp || 0);
+  const nextStart = Number(next.startTimestamp || next.timestamp || 0);
+  if (!firstStart || firstStart !== nextStart) return false;
+
+  const firstEnd = Number(first.endTimestamp || first.statusTimestamp || firstStart);
+  const nextEnd = Number(next.endTimestamp || next.statusTimestamp || nextStart);
+  if (Math.abs(firstEnd - nextEnd) > SESSION_GAP_MS) return false;
+
+  const fields = ["avgHr", "avgSpo2", "avgTemp", "hrMin", "hrMax", "spo2Min", "spo2Max", "tempMin", "tempMax"];
+  const comparable = fields.filter((field) => Number(first[field] || 0) > 0 && Number(next[field] || 0) > 0);
+  if (comparable.length < 2) return false;
+  return comparable.every((field) => {
+    const tolerance = field === "avgTemp" || field.startsWith("temp") ? 0.1 : 1;
+    return Math.abs(Number(first[field]) - Number(next[field])) <= tolerance;
+  });
+}
+
+function minPositive(first, next) {
+  const values = [Number(first || 0), Number(next || 0)].filter((value) => value > 0);
+  return values.length ? Math.min(...values) : 0;
+}
+
+function isSessionInDateRange(session, dateRange = {}) {
+  const start = Number(session.startTimestamp || session.timestamp || session.statusTimestamp || 0);
+  const end = Number(session.endTimestamp || session.statusTimestamp || start);
+  if (dateRange.start && end < dateRange.start) return false;
+  if (dateRange.end && start > dateRange.end) return false;
+  return true;
+}
+
+function storedRange(summary, key, fallback, digits) {
+  const averageValue = Number(summary[`avg${key[0].toUpperCase()}${key.slice(1)}`] || fallback);
+  const min = Number(summary[`${key}Min`] || averageValue);
+  const max = Number(summary[`${key}Max`] || averageValue);
+  if (!(averageValue > 0) && !(min > 0) && !(max > 0)) return { avg: "--", min: "--", max: "--" };
+  return {
+    avg: formatReading(averageValue || (min + max) / 2, digits),
+    min: formatReading(min, digits),
+    max: formatReading(max, digits),
+  };
+}
+
+function hasStoredVitalReading(summary) {
+  return [
+    summary.avgHr, summary.hrMin, summary.hrMax,
+    summary.avgSpo2, summary.spo2Min, summary.spo2Max,
+    summary.avgTemp, summary.tempMin, summary.tempMax,
+  ].some((value) => Number(value) > 0);
+}
+
+function detectSummaryAlerts(summary, thresholds) {
+  const alerts = [];
+  // Zero means that no valid sensor value was recorded; it is not a
+  // threshold violation. Do not show false alerts for status-only sessions.
+  const hasReading = [
+    summary.avgHr, summary.hrMin, summary.hrMax,
+    summary.avgSpo2, summary.spo2Min, summary.spo2Max,
+    summary.avgTemp, summary.tempMin, summary.tempMax,
+  ].some((value) => Number(value) > 0);
+  if (!hasReading) return alerts;
+  if (getVitalStatus(Number(summary.avgHr || 0), "hr", thresholds) !== "NORMAL") alerts.push({ key: "hr-summary", label: "Heart rate threshold", color: C.amber });
+  if (getVitalStatus(Number(summary.avgSpo2 || 0), "spo2", thresholds) !== "NORMAL") alerts.push({ key: "spo2-summary", label: "SpO₂ threshold", color: C.amber });
+  if (getVitalStatus(Number(summary.avgTemp || 0), "temp", thresholds) !== "NORMAL") alerts.push({ key: "temp-summary", label: "Temperature threshold", color: C.amber });
+  return alerts;
+}
+
+function isPerReadingSessionId(deviceId, row) {
+  const timestamp = Number(row?.timestamp || 0);
+  return Boolean(timestamp && row?.sessionId && row.sessionId === `${deviceId}-${timestamp}`);
+}
+
+function hasSessionRestart(activityLogs, deviceId, previousTimestamp, currentTimestamp) {
+  return (activityLogs || []).some((log) => {
+    if (log.deviceId !== deviceId) return false;
+    const timestamp = Number(log.timestamp || 0);
+    if (timestamp <= previousTimestamp || timestamp > currentTimestamp + SESSION_GAP_MS) return false;
+    if (log.type === "session_status" && ["completed", "interrupted", "offline"].includes(String(log.status || "").toLowerCase())) return true;
+    return log.type === "status" && String(log.status || "").toLowerCase() === "online";
+  });
 }
 
 function findSessionStatusLog(activityLogs, deviceId, endTimestamp, nextSessionStart = 0, sessionId = "") {
@@ -472,6 +765,18 @@ function formatDuration(startTimestamp, endTimestamp) {
   return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
+function countLoggedSosPresses(activityLogs, deviceId, startTimestamp, endTimestamp) {
+  const matchingLogs = (activityLogs || []).filter((log) => {
+    const timestamp = Number(log.timestamp || 0);
+    const isManual = log.type === "manual_alert" || /manual alert|button pressed|sos/i.test(`${log.title} ${log.detail}`);
+    return log.deviceId === deviceId && isManual && timestamp >= startTimestamp && timestamp <= endTimestamp;
+  });
+  return new Set(matchingLogs.map((log) => {
+    const count = Number(log.buttonPressCount || log.button_press_count || 0);
+    return count > 0 ? `count-${count}` : `time-${Math.floor(Number(log.timestamp || 0) / 60000)}`;
+  })).size;
+}
+
 function detectSessionAlerts(miner, rows, thresholds) {
   const alerts = [];
   const add = (key, label, color) => {
@@ -627,7 +932,8 @@ function dynamicDomain(data, key, padding = 1) {
 
 function StatusText({ session }) {
   const tones = {
-    active: [C.green, "Active"],
+    ongoing: [C.green, "Ongoing"],
+    active: [C.green, "Ongoing"],
     completed: [C.primary, "Completed"],
     offline: [C.offline, "Offline"],
     interrupted: [C.red, "Interrupted"],
@@ -645,21 +951,9 @@ function ReadingRange({ value, color, unit }) {
   );
 }
 
-function AlertsText({ alerts }) {
-  if (!alerts.length) return <span style={{ color: C.green, fontWeight: 900 }}>None</span>;
-  return (
-    <div style={{ display: "grid", gap: 3 }}>
-      {alerts.slice(0, 3).map((alert) => (
-        <span key={alert.key} style={{ color: alert.color, fontSize: 10, fontWeight: 900 }}>{alert.label}</span>
-      ))}
-      {alerts.length > 3 && <span style={{ color: C.textMuted, fontSize: 10 }}>+{alerts.length - 3} more</span>}
-    </div>
-  );
-}
-
 const tableHeader = {
   display: "grid",
-  gridTemplateColumns: "minmax(130px, 1.05fr) minmax(150px, 1.2fr) minmax(64px, 0.65fr) minmax(84px, 1fr) minmax(74px, 1fr) minmax(100px, 1.15fr) minmax(120px, 1.5fr) minmax(58px, 0.7fr) minmax(82px, 0.85fr)",
+  gridTemplateColumns: "minmax(130px, 1.05fr) minmax(150px, 1.2fr) minmax(64px, 0.65fr) minmax(84px, 1fr) minmax(74px, 1fr) minmax(100px, 1.15fr) minmax(58px, 0.7fr) minmax(82px, 0.85fr)",
   minWidth: "100%",
   gap: 12,
   padding: "10px 14px",
@@ -672,7 +966,7 @@ const tableHeader = {
 
 const tableRow = {
   display: "grid",
-  gridTemplateColumns: "minmax(130px, 1.05fr) minmax(150px, 1.2fr) minmax(64px, 0.65fr) minmax(84px, 1fr) minmax(74px, 1fr) minmax(100px, 1.15fr) minmax(120px, 1.5fr) minmax(58px, 0.7fr) minmax(82px, 0.85fr)",
+  gridTemplateColumns: "minmax(130px, 1.05fr) minmax(150px, 1.2fr) minmax(64px, 0.65fr) minmax(84px, 1fr) minmax(74px, 1fr) minmax(100px, 1.15fr) minmax(58px, 0.7fr) minmax(82px, 0.85fr)",
   minWidth: "100%",
   gap: 12,
   padding: "12px 14px",
