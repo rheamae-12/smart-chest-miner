@@ -177,6 +177,7 @@ typedef struct { char method[8]; char path[96]; char payload[448]; } FirebaseJob
 QueueHandle_t firebaseQueue;
 
 void drawBootScreen(const char* status, const char* detail);
+bool flushAnalyticsUpload();
 
 // =================================================================
 // Setup
@@ -317,6 +318,9 @@ void handleMonitoring(unsigned long now) {
     Serial.println("Chest detected. Reading vitals.");
   }
   if (!fingerDetected && wasFingerDetected) {
+    // Do not wait for the next 60-second interval to persist a short session.
+    // The pending bucket contains readings collected while contact was active.
+    if (flushAnalyticsUpload()) lastAnalyticsUploadTime = now;
     clearContactReadings();
     noFingerStateUploaded = false; forceUpload = true;
     Serial.println("[WARN] No chest detected!");
@@ -356,19 +360,13 @@ void handleMonitoring(unsigned long now) {
     forceUpload = false;
   }
 
-  if (now - lastAnalyticsUploadTime >= ANALYTICS_INTERVAL_MS) {
+  // Upload the first valid sample immediately, then continue with regular
+  // minute buckets. A session that lasts less than a minute is still visible
+  // in analytics instead of existing only in the live device state.
+  if (analyticsSampleCount > 0 &&
+      (lastAnalyticsUploadTime == 0 || now - lastAnalyticsUploadTime >= ANALYTICS_INTERVAL_MS) &&
+      flushAnalyticsUpload()) {
     lastAnalyticsUploadTime = now;
-    if (analyticsSampleCount == 0) { Serial.println("[ANALYTICS] No contact samples. Skip."); return; }
-    float avgBPM = analyticsBpmSum / analyticsSampleCount;
-    float avgSpO2 = analyticsSpo2Sum / analyticsSampleCount;
-    float avgTemp = analyticsTempCount ? (analyticsTempSum / analyticsTempCount) : 0;
-    analyticsBpmSum = analyticsSpo2Sum = analyticsTempSum = 0;
-    analyticsSampleCount = analyticsTempCount = 0;
-    if (WiFi.status() == WL_CONNECTED) {
-      enqueueAnalyticsUpload(avgBPM, avgSpO2, avgTemp);
-    } else {
-      Serial.println("[ANALYTICS] Offline; local monitoring continues, upload skipped.");
-    }
   }
 }
 
@@ -743,14 +741,32 @@ void enqueueLiveUpload() {
   enqueueJob("PATCH", "/devices/" + String(DEVICE_ID), dev);
 }
 
+bool flushAnalyticsUpload() {
+  if (analyticsSampleCount == 0 || WiFi.status() != WL_CONNECTED) return false;
+
+  // Keep the accumulated readings if the clock is not ready yet. This avoids
+  // losing a short session during NTP startup or a WiFi reconnect.
+  if (currentTimestampMs() <= 0) return false;
+
+  float avgBPM = analyticsBpmSum / analyticsSampleCount;
+  float avgSpO2 = analyticsSpo2Sum / analyticsSampleCount;
+  float avgTemp = analyticsTempCount ? (analyticsTempSum / analyticsTempCount) : 0;
+  enqueueAnalyticsUpload(avgBPM, avgSpO2, avgTemp);
+  analyticsBpmSum = analyticsSpo2Sum = analyticsTempSum = 0;
+  analyticsSampleCount = analyticsTempCount = 0;
+  return true;
+}
+
 void enqueueAnalyticsUpload(float avgBPM, float avgSpO2, float avgTemp) {
   double ts = currentTimestampMs();
   if (ts <= 0) { Serial.println("[ANALYTICS] Clock not ready, skip."); return; }
-  unsigned long long minuteTs = ((unsigned long long)(ts / 60000.0)) * 60000ULL;
-  String minuteText = String((double)minuteTs, 0);
+  // Use the actual upload timestamp as the key. This prevents a forced
+  // session-end flush from overwriting the regular sample written earlier in
+  // the same minute; the dashboard performs minute bucketing for display.
+  String timestampText = String(ts, 0);
   // Built only from contact samples -> finger:true so the dashboard keeps the row.
-  String payload = buildReadingPayload(avgBPM, avgSpO2, avgTemp, minuteText, true);
-  enqueueJob("PUT", "/analytics/" + String(DEVICE_ID) + "/" + minuteText, payload);
+  String payload = buildReadingPayload(avgBPM, avgSpO2, avgTemp, timestampText, true);
+  enqueueJob("PUT", "/analytics/" + String(DEVICE_ID) + "/" + timestampText, payload);
 }
 
 void enqueueButtonAnalyticsUpload() {

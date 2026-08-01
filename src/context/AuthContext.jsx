@@ -123,7 +123,7 @@ export function AuthProvider({ children }) {
     }
   });
   const [authReady, setAuthReady] = useState(!firebaseConfigured || !auth);
-  const [authError, setAuthError] = useState(firebaseConfigError);
+  const [authError, setAuthError] = useState(firebaseConfigError ? "Authentication service is unavailable. Contact an administrator." : "");
   const [authMessage, setAuthMessage] = useState("");
 
   useEffect(() => {
@@ -182,7 +182,7 @@ export function AuthProvider({ children }) {
           if (nextUser.profileWarning) {
             setAuthError(nextUser.profileWarning);
           } else {
-            setAuthMessage("Logged in with Firebase.");
+          setAuthMessage("Signed in successfully.");
           }
           return true;
         }
@@ -213,7 +213,7 @@ export function AuthProvider({ children }) {
     }
 
     registerFailedLogin();
-    setAuthError(firebaseConfigured ? "Invalid Firebase credentials." : "Invalid credentials. Demo: admin@smartchestminer.io / admin123");
+    setAuthError("Invalid email or password.");
     return false;
   };
 
@@ -246,13 +246,13 @@ export function AuthProvider({ children }) {
           if (nextUser.profileWarning) {
             setAuthError(nextUser.profileWarning);
           } else {
-            setAuthMessage("Firebase account created successfully.");
+          setAuthMessage("Account created successfully.");
           }
           return true;
         }
       } catch (error) {
         if (error.code === "auth/email-already-in-use") {
-          setAuthError("This email already exists in Firebase Authentication. Use Log In, and the app will create the missing Firestore profile automatically.");
+          setAuthError("This email is already registered. Use Log In to continue.");
         } else {
           setAuthError(describeAuthError(error));
         }
@@ -342,16 +342,16 @@ export function AuthProvider({ children }) {
 function describeAuthError(error) {
   const code = String(error?.code || "").replace(/^auth\//, "");
   const messages = {
-    "invalid-credential": "Firebase rejected these credentials. Check the email and password, and confirm Email/Password sign-in is enabled.",
-    "invalid-login-credentials": "Firebase rejected these credentials. Check the email and password, and confirm Email/Password sign-in is enabled.",
-    "user-not-found": "No Firebase account exists for this email.",
-    "wrong-password": "The Firebase password is incorrect.",
-    "user-disabled": "This Firebase account has been disabled.",
-    "operation-not-allowed": "Email/Password sign-in is disabled in Firebase Authentication.",
-    "network-request-failed": "Firebase could not be reached. Check the network, Firebase project, and authorized domain.",
-    "invalid-api-key": "The Firebase API key is invalid. Check the VITE_FIREBASE_* values used during the build.",
-    "app-not-authorized": "This domain is not authorized in Firebase Authentication settings.",
-    "too-many-requests": "Firebase temporarily blocked requests from this device. Try again later.",
+    "invalid-credential": "Invalid email or password.",
+    "invalid-login-credentials": "Invalid email or password.",
+    "user-not-found": "Invalid email or password.",
+    "wrong-password": "Invalid email or password.",
+    "user-disabled": "This account has been disabled.",
+    "operation-not-allowed": "Email and password sign-in is currently unavailable.",
+    "network-request-failed": "Unable to reach the sign-in service. Check your connection and try again.",
+    "invalid-api-key": "Sign-in service configuration is invalid. Contact an administrator.",
+    "app-not-authorized": "This sign-in page is not authorized for the current domain.",
+    "too-many-requests": "Too many attempts. Try again later.",
   };
-  return messages[code] || error?.message || "Authentication failed. Check the Firebase configuration and account details.";
+  return messages[code] || error?.message || "Authentication failed. Check your account details and try again.";
 }

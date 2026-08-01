@@ -154,8 +154,8 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
                   Clear All Logs
                 </button>
               </div>
-              <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
-                <div className="table-header-sticky" style={tableHeader}>
+              <div className="health-session-table-scroll hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
+                <div className="health-session-table-header table-header-sticky" style={tableHeader}>
                   <span>Miner</span>
                   <span>Session Time</span>
                   <span>Duration</span>
@@ -168,21 +168,21 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
                 </div>
                 {sessions.map((session) => (
                   <div key={session.id} className="health-session-table-row" style={tableRow}>
-                    <div>
+                    <div data-label="Miner">
                       <div style={{ color: C.text, fontWeight: 900 }}>{session.name}</div>
                       <div style={{ color: C.textMuted, fontSize: 10 }}>{session.deviceId}</div>
                     </div>
-                    <div style={{ display: "grid", gap: 3, color: C.textDim }}>
+                    <div data-label="Session time" style={{ display: "grid", gap: 3, color: C.textDim }}>
                       <span>{session.start}</span>
                       <span style={{ color: C.textMuted, fontSize: 10 }}>to {session.end}</span>
                     </div>
-                    <span style={{ color: C.textDim, fontWeight: 800 }}>{session.duration}</span>
-                    <ReadingRange value={session.hr} color={C.red} unit="bpm" />
-                    <ReadingRange value={session.spo2} color={C.oxygen} unit="%" />
-                    <ReadingRange value={session.temp} color={C.teal} unit="°C" />
-                    <AlertsText alerts={session.alerts} />
-                    <span style={{ color: session.manualPressCount ? C.red : C.textMuted, fontWeight: 900 }}>{session.manualPressCount}</span>
-                    <StatusText session={session} />
+                    <span data-label="Duration" style={{ color: C.textDim, fontWeight: 800 }}>{session.duration}</span>
+                    <div data-label="Heart rate"><ReadingRange value={session.hr} color={C.red} unit="bpm" /></div>
+                    <div data-label="SpO2"><ReadingRange value={session.spo2} color={C.oxygen} unit="%" /></div>
+                    <div data-label="Body temperature"><ReadingRange value={session.temp} color={C.teal} unit="°C" /></div>
+                    <div data-label="Alerts"><AlertsText alerts={session.alerts} /></div>
+                    <span data-label="SOS presses" style={{ color: session.manualPressCount ? C.red : C.textMuted, fontWeight: 900 }}>{session.manualPressCount}</span>
+                    <span data-label="Session status"><StatusText session={session} /></span>
                   </div>
                 ))}
                 {sessions.length === 0 && <div style={{ padding: 42, color: C.textMuted, textAlign: "center", fontSize: 13 }}>No miner session logs available for this filter.</div>}
@@ -230,11 +230,16 @@ function buildSessions(miners, analyticsData, activityLogs, thresholds) {
           Date.now() - Number(last.timestamp || 0) < SESSION_GAP_MS * 2;
         const isCurrentSession = index === groups.length - 1 && Math.abs(lastSeenValue(miner) - Number(last.timestamp || 0)) < SESSION_GAP_MS * 2;
         const nextSessionStart = Number(groups[index + 1]?.[0]?.timestamp || 0);
-        const statusLog = findSessionStatusLog(activityLogs, miner.id, Number(first.timestamp), Number(last.timestamp), nextSessionStart);
-        // A device stores only its latest session status. Never apply that value
-        // to older grouped sessions; historical rows use their own status log.
-        const latestDeviceStatus = index === groups.length - 1 ? String(miner.sessionStatus || "").toLowerCase() : "";
-        const recordedStatus = statusLog?.status || latestDeviceStatus;
+        const statusLog = findSessionStatusLog(activityLogs, miner.id, Number(last.timestamp), nextSessionStart);
+        // The device sessionStatus field is only the latest device-wide value.
+        // Historical groups must use their own timestamped status event.
+        const recordedStatus = statusLog?.status || "";
+        // Use the latest device reading as the end of an active session. The
+        // browser clock can be ahead of the device timeline and was making the
+        // displayed duration drift during a live session.
+        const sessionEndTimestamp = active
+          ? Math.max(Number(last.timestamp || 0), lastSeenValue(miner))
+          : Number(last.timestamp || 0);
         const manualPressCount = countManualPresses(miner, sessionRows, activityLogs, Number(first.timestamp), Number(last.timestamp), active);
         const alerts = detectSessionAlerts(miner, sessionRows, thresholds);
         const sessionStatus = active
@@ -255,10 +260,10 @@ function buildSessions(miners, analyticsData, activityLogs, thresholds) {
           sessionStatus,
           manualPressCount,
           alerts,
-          sortTimestamp: active ? Date.now() : Number(last.timestamp || 0),
+          sortTimestamp: sessionEndTimestamp,
           start: formatSystemTimestamp(first.timestamp),
           end: active ? "Now" : formatSystemTimestamp(last.timestamp),
-          duration: formatDuration(Number(first.timestamp), active ? Date.now() : Number(last.timestamp)),
+          duration: formatDuration(Number(first.timestamp), sessionEndTimestamp),
           hr: summarizeReading(sessionRows, "hr", 0, active ? miner.hr : 0),
           spo2: summarizeReading(sessionRows, "spo2", 0, active ? miner.spo2 : 0),
           temp: summarizeReading(sessionRows, "temp", 1, active ? miner.temp : 0),
@@ -268,21 +273,21 @@ function buildSessions(miners, analyticsData, activityLogs, thresholds) {
   }).sort((a, b) => sessionSortValue(b) - sessionSortValue(a));
 }
 
-function findSessionStatusLog(activityLogs, deviceId, startTimestamp, endTimestamp, nextSessionStart) {
+function findSessionStatusLog(activityLogs, deviceId, endTimestamp, nextSessionStart = 0) {
   const logs = (activityLogs || [])
     .filter((log) => log.deviceId === deviceId && log.type === "session_status" && ["completed", "interrupted", "offline"].includes(String(log.status || "").toLowerCase()))
     .map((log) => ({ ...log, status: String(log.status).toLowerCase(), timestamp: Number(log.timestamp || 0) }))
     .filter((log) => log.timestamp > 0);
+  // Session status prompts use the last live timestamp, which can be slightly
+  // after the final persisted analytics point. Stay within this session's end
+  // window, but never cross into the next session's reading timeline.
   const exactMatch = logs.find((log) => log.timestamp === endTimestamp);
   if (exactMatch) return exactMatch;
 
   return logs
-    .filter((log) => {
-      const nearSessionEnd = log.timestamp >= endTimestamp - SESSION_GAP_MS && (!nextSessionStart || log.timestamp < nextSessionStart + SESSION_GAP_MS);
-      const insideSessionWindow = log.timestamp >= startTimestamp && (!nextSessionStart || log.timestamp < nextSessionStart);
-      return nearSessionEnd || insideSessionWindow;
-    })
-    .sort((a, b) => Math.abs(a.timestamp - endTimestamp) - Math.abs(b.timestamp - endTimestamp))[0] || null;
+    .filter((log) => log.timestamp >= endTimestamp && log.timestamp - endTimestamp <= SESSION_GAP_MS)
+    .filter((log) => !nextSessionStart || log.timestamp < nextSessionStart)
+    .sort((a, b) => a.timestamp - b.timestamp)[0] || null;
 }
 
 function sessionSortValue(session) {

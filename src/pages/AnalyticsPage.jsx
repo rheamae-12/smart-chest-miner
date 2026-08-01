@@ -273,7 +273,6 @@ function bucketRows(rows, minutes) {
   });
   return Array.from(buckets.values())
     .sort((a, b) => a.timestamp - b.timestamp)
-    .slice(-42)
     .filter((bucket) => bucket.hrs.length || bucket.spo2s.length || bucket.temps.length)
     .map((bucket) => ({
       time: bucket.timestamp ? compactTimestamp(bucket.timestamp) : "",

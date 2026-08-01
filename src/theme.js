@@ -5,11 +5,8 @@
 export const C = {
   // Backgrounds (darkest → lightest)
   bg0: "#070B0E",
-  bg1: "#0B1115",
   bg2: "#10181D",
   bg3: "#162128",
-  bg4: "#05080A",
-  panel: "#10181D",
   sidebar: "rgba(8, 13, 17, 0.97)",
   navbar: "rgba(9, 15, 19, 0.91)",
 
@@ -19,20 +16,13 @@ export const C = {
 
   // Brand / accent
   primary: "#FF7A1A",
-  primaryHover: "#FF9B4A",
-  orange: "#FF7A1A",
   amber: "#F6AD3C",
-  amberD: "#C66E10",
   cyan: "#38BDF8",
-  cyanD: "#0E7490",
   oxygen: "#38BDF8",
-  blue: "#60A5FA",
-  violet: "#A78BFA",
 
   // Status colors
   red: "#FB5B5B",
   green: "#35D07F",
-  lime: "#84CC6A",
   teal: "#2DD4BF",   // body temperature sensor
   offline: "#63727B",
 

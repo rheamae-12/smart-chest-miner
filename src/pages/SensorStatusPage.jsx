@@ -56,9 +56,9 @@ export default function SensorStatusPage({ miners = [] }) {
             </div>
           </div>
 
-          <div className="hide-scrollbar" style={{ ...cardStyle, overflow: "auto", minHeight: 0 }}>
-            <PanelHeader title="Diagnostic guide" subtitle="Recommended recovery sequence." />
-            <div style={{ padding: "8px 14px 14px" }}>
+          <div className="diagnostic-guide-panel" style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
+            <div className="diagnostic-guide-header"><PanelHeader title="Diagnostic guide" subtitle="Recommended recovery sequence." /></div>
+            <div className="diagnostic-guide-body hide-scrollbar" style={{ overflow: "auto", minHeight: 0, padding: "8px 14px 14px" }}>
               <GuideStep number="01" title="Restore connection" text="Confirm power and WiFi before evaluating individual sensors." />
               <GuideStep number="02" title="Verify chest contact" text="Poor contact can suppress both HR and SpO2 while the device remains online." />
               <GuideStep number="03" title="Validate readings" text="Wait for stable HR, SpO2, and temperature values before clearing a warning." />

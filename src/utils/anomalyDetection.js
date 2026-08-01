@@ -39,24 +39,3 @@ export function analyzeSpo2Trend(points, { minSamples = 5, dropThreshold = 3, sl
     samples: n,
   };
 }
-
-// buildTrendWatch — fleet-wide early-warning list. `liveData` is the per-device
-// series map ({ [deviceId]: { spo2: [...] } }). Only active miners are considered.
-export function buildTrendWatch(miners = [], liveData = {}) {
-  const watch = [];
-  miners.forEach((miner) => {
-    if (!miner.active || miner.finger === false) return;
-    const trend = analyzeSpo2Trend((liveData[miner.id] || {}).spo2);
-    if (trend.declining) {
-      watch.push({
-        deviceId: miner.id,
-        name: miner.name,
-        severity: "warning",
-        metric: "spo2",
-        trend,
-        message: `${miner.name}: SpO₂ trending down ${trend.netDrop}% over last ${trend.samples} readings`,
-      });
-    }
-  });
-  return watch;
-}

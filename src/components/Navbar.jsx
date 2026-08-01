@@ -239,9 +239,9 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
           }
         >
           <div style={{ display: "grid", gap: 10 }}>
-            <SecurityRow label="Session" value={user?.source === "firebase" ? "Firebase authenticated" : user?.source === "local" ? "Local account mode" : "Demo supervisor"} good />
+            <SecurityRow label="Session" value={user?.source === "firebase" ? "Authenticated account" : user?.source === "local" ? "Local account mode" : "Demo supervisor"} good />
             <SecurityRow label="Access level" value={canManage ? "Full — can manage devices, settings & logs" : "View-only — monitoring access only"} good={canManage} />
-            <SecurityRow label="Realtime source" value={usingRealtime ? "Firebase live stream active" : "Waiting for verified device data"} good={usingRealtime} />
+            <SecurityRow label="Realtime source" value={usingRealtime ? "Live device stream active" : "Waiting for verified device data"} good={usingRealtime} />
             <SecurityRow label="Device alerts" value={`${alerts.length} condition${alerts.length === 1 ? "" : "s"} need review`} good={alerts.length === 0} />
             <SecurityRow label="Data policy" value="Secrets stay in environment variables; destructive device actions require confirmation." good />
             {connectionError && <div style={{ color: C.amber, fontSize: 12, lineHeight: 1.5, marginTop: 4 }}>{connectionError}</div>}
@@ -408,9 +408,6 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8 }}>
                     <AccountBadge>{account.role || "Supervisor"}</AccountBadge>
                     <AccountBadge>{account.shift || "Night Shift"}</AccountBadge>
-                    <AccountBadge accent={user?.source === "firebase"}>
-                      {user?.source === "firebase" ? "Firebase" : user?.source === "local" ? "Local" : "Demo"}
-                    </AccountBadge>
                     <AccessBadge viewOnly={isViewOnlyRole(account.role)} />
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 10 }}>
@@ -467,12 +464,6 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
                       />
                       <AccountField label="Assigned Shift" value={account.shift} onChange={(shift) => { setAccount({ ...account, shift }); setAccountSaved(false); }} />
                     </div>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 12px", background: "rgba(255,255,255,0.025)", border: `1px solid ${C.borderSoft}`, borderRadius: 7 }}>
-                    <span style={{ color: C.textMuted, fontSize: 11 }}>Account type</span>
-                    <span style={{ color: user?.source === "firebase" ? C.green : C.amber, fontSize: 11, fontWeight: 900 }}>
-                      {user?.source === "firebase" ? "Firebase authenticated" : user?.source === "local" ? "Local account" : "Demo supervisor"}
-                    </span>
                   </div>
                   {accountError && (
                     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", background: `${C.amber}10`, border: `1px solid ${C.amber}35`, borderRadius: 7 }}>

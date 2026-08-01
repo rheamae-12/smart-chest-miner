@@ -12,11 +12,6 @@ async function restAuthParam() {
   }
 }
 
-function noopSubscribe(onError) {
-  onError?.("Firebase is not configured. Add VITE_FIREBASE_* values to .env.");
-  return () => {};
-}
-
 export function subscribeToDevices(onData, onError) {
   if (!db) return subscribeToDevicesRest(onData, onError);
 
@@ -61,36 +56,6 @@ export async function testFirebaseConnection() {
     source: "Realtime Database REST",
     devices: (await response.json()) || {},
   };
-}
-
-export function subscribeToDeviceLive(deviceId, onData, onError) {
-  if (!db) return noopSubscribe(onError);
-  return onValue(
-    ref(db, `devices/${deviceId}/live`),
-    (snapshot) => onData(snapshot.val()),
-    (error) => onError?.(error.message),
-  );
-}
-
-export function subscribeToDeviceStatus(deviceId, onData, onError) {
-  if (!db) return noopSubscribe(onError);
-  return onValue(
-    ref(db, `devices/${deviceId}/status`),
-    (snapshot) => onData(snapshot.val() || "offline"),
-    (error) => onError?.(error.message),
-  );
-}
-
-export function subscribeToAnalytics(deviceId, onData, onError) {
-  if (!db) return noopSubscribe(onError);
-  return onValue(
-    ref(db, `analytics/${deviceId}`),
-    (snapshot) => {
-      const value = snapshot.val() || {};
-      onData(Object.values(value).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)));
-    },
-    (error) => onError?.(error.message),
-  );
 }
 
 export function subscribeToAllAnalytics(onData, onError) {
@@ -452,19 +417,6 @@ export async function removeWifiConnection(record, removeDeviceQueue = false) {
   }
 
   return updateMultiPath(updates);
-}
-
-export async function writeAnalyticsSnapshot(deviceId, avgHR, avgSpo2, avgTemp) {
-  if (!db || !deviceId) return false;
-  const timestamp = Date.now();
-  await set(ref(db, `analytics/${deviceId}/${timestamp}`), {
-    heartRate: avgHR,
-    hr: avgHR,
-    spo2: avgSpo2,
-    temp: avgTemp ?? 0,
-    timestamp,
-  });
-  return true;
 }
 
 export async function saveHistorySummaries(deviceId, healthLogs = {}, miningSessions = {}) {
