@@ -230,7 +230,8 @@ function buildSessions(miners, analyticsData, activityLogs, thresholds) {
           Date.now() - Number(last.timestamp || 0) < SESSION_GAP_MS * 2;
         const isCurrentSession = index === groups.length - 1 && Math.abs(lastSeenValue(miner) - Number(last.timestamp || 0)) < SESSION_GAP_MS * 2;
         const nextSessionStart = Number(groups[index + 1]?.[0]?.timestamp || 0);
-        const statusLog = findSessionStatusLog(activityLogs, miner.id, Number(last.timestamp), nextSessionStart);
+        const sessionId = first.sessionId || `${miner.id}-${first.timestamp}`;
+        const statusLog = findSessionStatusLog(activityLogs, miner.id, Number(last.timestamp), nextSessionStart, sessionId);
         // The device sessionStatus field is only the latest device-wide value.
         // Historical groups must use their own timestamped status event.
         const recordedStatus = statusLog?.status || "";
@@ -273,7 +274,7 @@ function buildSessions(miners, analyticsData, activityLogs, thresholds) {
   }).sort((a, b) => sessionSortValue(b) - sessionSortValue(a));
 }
 
-function findSessionStatusLog(activityLogs, deviceId, endTimestamp, nextSessionStart = 0) {
+function findSessionStatusLog(activityLogs, deviceId, endTimestamp, nextSessionStart = 0, sessionId = "") {
   const logs = (activityLogs || [])
     .filter((log) => log.deviceId === deviceId && log.type === "session_status" && ["completed", "interrupted", "offline"].includes(String(log.status || "").toLowerCase()))
     .map((log) => ({ ...log, status: String(log.status).toLowerCase(), timestamp: Number(log.timestamp || 0) }))
@@ -281,6 +282,11 @@ function findSessionStatusLog(activityLogs, deviceId, endTimestamp, nextSessionS
   // Session status prompts use the last live timestamp, which can be slightly
   // after the final persisted analytics point. Stay within this session's end
   // window, but never cross into the next session's reading timeline.
+  const sessionMatch = logs
+    .filter((log) => sessionId && log.sessionId === sessionId)
+    .sort((a, b) => Math.abs(a.timestamp - endTimestamp) - Math.abs(b.timestamp - endTimestamp))[0];
+  if (sessionMatch) return sessionMatch;
+
   const exactMatch = logs.find((log) => log.timestamp === endTimestamp);
   if (exactMatch) return exactMatch;
 
@@ -299,30 +305,33 @@ function sessionSortValue(session) {
 
 function countManualPresses(miner, rows, activityLogs, startTimestamp, endTimestamp, includeLive) {
   const buttonCounts = uniquePressCounts(rows);
-  const liveCount = includeLive ? Number(miner.button_press_count || miner.buttonPressCount || 0) : 0;
-  const maxCount = Math.max(...buttonCounts, liveCount, 0);
+  const maxCount = Math.max(...buttonCounts, 0);
   const minCount = Math.min(...buttonCounts, maxCount);
   const firstCountIsPress = rows.some((row) => {
     const count = Number(row.button_press_count ?? row.buttonPressCount ?? 0);
-    return count === minCount && count > 0 && (row.button_pressed || row.manual_alert);
+    return count === minCount && count > 0 && row.manual_alert;
   });
   const counterPresses = buttonCounts.length
     ? Math.max(0, maxCount - minCount + (firstCountIsPress ? 1 : 0))
     : 0;
   const analyticsPresses = rows.filter((row, index, all) => {
-    const pressed = row.button_pressed || row.manual_alert;
-    if (!pressed) return false;
+    if (!row.manual_alert) return false;
     const previous = all[index - 1];
-    return !(previous?.button_pressed || previous?.manual_alert);
+    return !previous?.manual_alert;
   }).length;
-  const logPresses = activityLogs.filter((log) => {
+  const matchingLogs = activityLogs.filter((log) => {
     const timestamp = Number(log.timestamp || 0);
     const isManual = log.type === "manual_alert" || /manual alert|button pressed|sos/i.test(`${log.title} ${log.detail}`);
     const inSession = !startTimestamp || (timestamp >= startTimestamp && timestamp <= endTimestamp + SESSION_GAP_MS);
     return log.deviceId === miner.id && isManual && inSession;
-  }).length;
-  const livePress = includeLive && (miner.button_pressed || miner.manual_alert) ? 1 : 0;
-  return Math.max(counterPresses, analyticsPresses + livePress, logPresses);
+  });
+  const logPresses = new Set(matchingLogs.map((log) => (
+    Number(log.buttonPressCount || 0) > 0
+      ? `count-${Number(log.buttonPressCount)}`
+      : `time-${Math.floor(Number(log.timestamp || 0) / 60000)}`
+  ))).size;
+  const livePress = includeLive && miner.manual_alert && !analyticsPresses && !counterPresses ? 1 : 0;
+  return Math.max(counterPresses, analyticsPresses, logPresses, livePress);
 }
 
 function uniquePressCounts(rows) {
@@ -476,9 +485,9 @@ function detectSessionAlerts(miner, rows, thresholds) {
     const hrStatus = getVitalStatus(hr, "hr", thresholds);
     const spo2Status = getVitalStatus(spo2, "spo2", thresholds);
     const tempStatus = getVitalStatus(temp, "temp", thresholds);
-    if (hrStatus === "LOW" || hrStatus === "HIGH") add(`hr-${hrStatus}`, `HR ${hrStatus.toLowerCase()} threshold`, hrStatus === "HIGH" ? C.red : C.amber);
+    if (["LOW", "HIGH", "CRITICAL"].includes(hrStatus)) add(`hr-${hrStatus}`, `HR ${hrStatus.toLowerCase()} threshold`, hrStatus === "CRITICAL" ? C.red : C.amber);
     if (spo2Status === "CRITICAL" || spo2Status === "LOW") add(`spo2-${spo2Status}`, `SpO₂ ${spo2Status.toLowerCase()} threshold`, spo2Status === "CRITICAL" ? C.red : C.amber);
-    if (tempStatus === "HIGH" || tempStatus === "LOW") add(`temp-${tempStatus}`, `Temperature ${tempStatus.toLowerCase()} threshold`, tempStatus === "HIGH" ? C.red : C.amber);
+    if (["HIGH", "LOW", "CRITICAL"].includes(tempStatus)) add(`temp-${tempStatus}`, `Temperature ${tempStatus.toLowerCase()} threshold`, tempStatus === "CRITICAL" ? C.red : C.amber);
   });
 
   const spike = detectSensorSpike(miner, rows, thresholds);
@@ -493,10 +502,13 @@ function detectSensorSpike(miner, rows, thresholds) {
   const spo2 = Number(latest.spo2 || miner.spo2 || 0);
 
   const temp = Number(latest.temp || miner.temp || 0);
-  if (hr > thresholds.hrMax) return { sensor: "Heart Rate", label: `HR high spike: ${formatReading(hr, 0)} bpm`, color: C.red };
+  if (hr >= thresholds.hrCriticalMin) return { sensor: "Heart Rate", label: `HR critical spike: ${formatReading(hr, 0)} bpm`, color: C.red };
+  if (hr > thresholds.hrMax) return { sensor: "Heart Rate", label: `HR high spike: ${formatReading(hr, 0)} bpm`, color: C.amber };
   if (hr > 0 && hr < thresholds.hrMin) return { sensor: "Heart Rate", label: `HR low spike: ${formatReading(hr, 0)} bpm`, color: C.amber };
-  if (spo2 > 0 && spo2 < thresholds.spo2Min) return { sensor: "SpO2", label: `SpO2 low spike: ${formatReading(spo2, 0)}%`, color: C.red };
-  if (temp > 0 && temp > thresholds.tempMax) return { sensor: "Body Temp", label: `Temp high: ${formatReading(temp, 1)}°C`, color: C.red };
+  if (spo2 > 0 && spo2 < thresholds.spo2CriticalMin) return { sensor: "SpO2", label: `SpO2 critical spike: ${formatReading(spo2, 0)}%`, color: C.red };
+  if (spo2 > 0 && spo2 < thresholds.spo2Min) return { sensor: "SpO2", label: `SpO2 low spike: ${formatReading(spo2, 0)}%`, color: C.amber };
+  if (temp > 0 && (temp <= thresholds.tempCriticalMin || temp >= thresholds.tempCriticalMax)) return { sensor: "Body Temp", label: `Temp critical: ${formatReading(temp, 1)}°C`, color: C.red };
+  if (temp > 0 && temp > thresholds.tempMax) return { sensor: "Body Temp", label: `Temp high: ${formatReading(temp, 1)}°C`, color: C.amber };
   if (temp > 0 && temp < thresholds.tempMin) return { sensor: "Body Temp", label: `Temp low: ${formatReading(temp, 1)}°C`, color: C.amber };
 
   for (let index = 1; index < validRows.length; index += 1) {

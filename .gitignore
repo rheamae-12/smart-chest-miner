@@ -15,6 +15,9 @@ dist-ssr
 !.env.example
 *.local
 
+# Device credentials must stay outside version control.
+/firmware/smart_chest_miner_full/secrets.h
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

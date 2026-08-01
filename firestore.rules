@@ -2,8 +2,62 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
     match /users/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && !request.resource.data.keys().hasAny(["role"]);
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && (
+          (!resource.data.keys().hasAny(["role"]) && !request.resource.data.keys().hasAny(["role"]))
+          || (
+            resource.data.keys().hasAny(["role"])
+            && request.resource.data.keys().hasAny(["role"])
+            && request.resource.data.role == resource.data.role
+          )
+        );
+    }
+
+    match /miners/{deviceId}/readings/{readingId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.deviceId == deviceId
+        && request.resource.data.timestamp is number
+        && request.resource.data.timestamp > 0
+        && request.resource.data.keys().hasAny([
+          "deviceId", "timestamp", "hr", "spo2", "temp", "finger",
+          "status", "manual_alert", "button_pressed", "button_press_count"
+        ]);
+      allow delete: if signedIn();
+    }
+
+    match /miners/{deviceId}/sessions/{sessionId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.deviceId == deviceId
+        && request.resource.data.sessionId == sessionId;
+      allow delete: if signedIn();
+    }
+
+    match /activityLogs/{logId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.timestamp is number
+        && !request.resource.data.keys().hasAny(["password"]);
+      allow delete: if signedIn();
+    }
+
+    match /wifiConnectionHistory/{recordId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.deviceId is string
+        && !request.resource.data.keys().hasAny(["password"]);
+      allow delete: if signedIn();
     }
 
     match /{document=**} {

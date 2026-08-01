@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { firebaseConfigured } from "../firebase/config";
-import { clearActivityLogs as clearActivityLogsRemote, clearHealthLogs as clearHealthLogsRemote, saveHistorySummaries, subscribeToActivityLogs, subscribeToAllAnalytics, subscribeToDevices, trimAnalyticsHistory, updateDevice, updateDeviceStatus, writeActivityLog } from "../firebase/database";
+import { firebaseConfigured, firestoreDb } from "../firebase/config";
+import { clearActivityLogs as clearActivityLogsRemote, clearHealthLogs as clearHealthLogsRemote, saveHistoricalReadingsToFirestore, saveHistorySummaries, subscribeToActivityLogs, subscribeToAllAnalytics, subscribeToDevices, subscribeToHistoricalReadings, trimAnalyticsHistory, updateDevice, updateDeviceStatus, updateSessionStatus, writeActivityLog } from "../firebase/database";
 import { DEFAULT_THRESHOLDS, getVitalStatus } from "../utils/alertChecker";
 import { formatSystemTimestamp, timeLabel } from "../utils/formatters";
+import { readStoredValue, reportNonFatal, writeStoredValue } from "../utils/safeStorage";
 
 const SYSTEM_STORAGE_KEY = "smart-chest-miner-system";
 const MIN_VALID_EPOCH_MS = 946684800000;
@@ -26,18 +27,19 @@ function addEvent(set, key) {
 
 // readStoredSystem — reads miners/thresholds/staleSeconds from localStorage; returns null on parse error
 function readStoredSystem() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(SYSTEM_STORAGE_KEY));
-    if (!stored) return null;
-    return {
-      miners: Array.isArray(stored.miners) ? stored.miners : null,
-      thresholds: stored.thresholds,
-      pollingInterval: stored.pollingInterval,
-      staleSeconds: Number.isFinite(Number(stored.staleSeconds)) ? Number(stored.staleSeconds) : DEFAULT_STALE_SECONDS,
-    };
-  } catch {
-    return null;
-  }
+  const stored = readStoredValue(SYSTEM_STORAGE_KEY, null);
+  if (!stored || typeof stored !== "object") return null;
+  return {
+    miners: Array.isArray(stored.miners) ? stored.miners : null,
+    thresholds: stored.thresholds,
+    pollingInterval: stored.pollingInterval,
+    staleSeconds: Number.isFinite(Number(stored.staleSeconds)) ? Number(stored.staleSeconds) : DEFAULT_STALE_SECONDS,
+  };
+}
+
+function handleAsyncError(setConnectionError, error, operation) {
+  reportNonFatal(error, operation);
+  setConnectionError(`${operation} failed. Check the connection and try again.`);
 }
 
 // normalizeTimestamp — converts a raw timestamp value to a valid Unix ms number; returns 0 if invalid
@@ -123,10 +125,13 @@ export function mapRealtimeDevices(value, timeoutMs = ONLINE_TIMEOUT_MS) {
 
 // mapRealtimeAnalytics — maps raw Firebase /analytics snapshot to per-device sorted reading arrays
 // Filters invalid rows (no finger contact, zero HR/SpO2) and caps to MAX_ANALYTICS_POINTS per device
-function mapRealtimeAnalytics(value) {
+function mapAnalyticsValue(value, maxPoints = MAX_ANALYTICS_POINTS) {
   const data = {};
   Object.entries(value || {}).forEach(([deviceId, rows]) => {
-    data[deviceId] = Object.entries(rows || {})
+    const entries = Array.isArray(rows)
+      ? rows.map((row, index) => [row?.id || row?.timestamp || index, row])
+      : Object.entries(rows || {});
+    const sortedRows = entries
       .map(([key, row]) => ({ ...(row || {}), timestamp: normalizeTimestamp(row?.timestamp) || normalizeTimestamp(key) }))
       .filter((row) => {
         const timestamp = normalizeTimestamp(row.timestamp);
@@ -138,8 +143,8 @@ function mapRealtimeAnalytics(value) {
         const buttonPressCount = toReading(row.button_press_count ?? row.buttonPressCount);
         return timestamp > 0 && (hr > 0 || spo2 > 0 || temp > 0 || manualAlert || buttonPressed || buttonPressCount > 0);
       })
-      .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
-      .slice(-MAX_ANALYTICS_POINTS)
+      .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    data[deviceId] = (maxPoints > 0 ? sortedRows.slice(-maxPoints) : sortedRows)
       .map((row) => {
         const timestamp = normalizeTimestamp(row.timestamp);
         const date = new Date(timestamp);
@@ -153,12 +158,61 @@ function mapRealtimeAnalytics(value) {
           manual_alert: toBoolean(row.manual_alert, false),
           button_pressed: toBoolean(row.button_pressed ?? row.buttonPressed, false),
           button_press_count: toReading(row.button_press_count ?? row.buttonPressCount),
+          sessionId: row.sessionId || "",
           status: row.status || "online",
           timestamp,
         };
       });
   });
   return data;
+}
+
+function mapRealtimeAnalytics(value) {
+  return mapAnalyticsValue(value, MAX_ANALYTICS_POINTS);
+}
+
+function mapHistoricalAnalytics(value) {
+  return mapAnalyticsValue(value, 0);
+}
+
+function mergeAnalyticsData(...sources) {
+  const merged = {};
+  sources.forEach((source) => {
+    Object.entries(source || {}).forEach(([deviceId, rows]) => {
+      const byTimestamp = new Map((merged[deviceId] || []).map((row) => [Number(row.timestamp), row]));
+      (rows || []).forEach((row) => {
+        const timestamp = Number(row.timestamp || 0);
+        if (timestamp > 0) byTimestamp.set(timestamp, row);
+      });
+      merged[deviceId] = [...byTimestamp.values()].sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+    });
+  });
+  return merged;
+}
+
+function sessionIdForReading(deviceId, rows, index) {
+  const sortedRows = [...(rows || [])].sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+  let firstTimestamp = Number(sortedRows[0]?.timestamp || 0);
+  for (let i = 1; i <= index && i < sortedRows.length; i++) {
+    if (Number(sortedRows[i].timestamp || 0) - Number(sortedRows[i - 1].timestamp || 0) > SESSION_GAP_MS) {
+      firstTimestamp = Number(sortedRows[i].timestamp || 0);
+    }
+  }
+  return firstTimestamp > 0 ? `${deviceId}-${firstTimestamp}` : "";
+}
+
+function sessionIdForTimestamp(deviceId, rows, timestamp) {
+  const sortedRows = [...(rows || [])]
+    .filter((row) => Number(row.timestamp || 0) > 0)
+    .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+  let sessionStart = 0;
+  for (let index = 0; index < sortedRows.length; index++) {
+    if (index === 0 || Number(sortedRows[index].timestamp) - Number(sortedRows[index - 1].timestamp) > SESSION_GAP_MS) {
+      sessionStart = Number(sortedRows[index].timestamp);
+    }
+    if (Number(sortedRows[index].timestamp) >= Number(timestamp)) break;
+  }
+  return sessionStart > 0 ? `${deviceId}-${sessionStart}` : `${deviceId}-${Number(timestamp)}`;
 }
 
 // latestAnalyticsMiner — builds a minimal miner object from the last analytics row for a device
@@ -226,20 +280,21 @@ function buildHistorySummariesForDevice(deviceId, rows, miner, thresholds) {
     const last = sessionRows[sessionRows.length - 1];
     const id = String(first.timestamp);
     const counts = uniquePressCounts(sessionRows);
-    const liveCount = Number(miner?.button_press_count || miner?.buttonPressCount || 0);
-    const maxCount = Math.max(...counts, liveCount, 0);
+    const maxCount = Math.max(...counts, 0);
     const minCount = Math.min(...counts, maxCount);
     const firstCountIsPress = sessionRows.some((row) => {
       const count = Number(row.button_press_count ?? row.buttonPressCount ?? 0);
-      return count === minCount && count > 0 && (row.button_pressed || row.manual_alert);
+      return count === minCount && count > 0 && row.manual_alert;
     });
     const counterPresses = counts.length ? Math.max(0, maxCount - minCount + (firstCountIsPress ? 1 : 0)) : 0;
-    const manualPressCount = Math.max(counterPresses, sessionRows.filter((row) => row.manual_alert || row.button_pressed).length);
+    const activationRows = sessionRows.filter((row, index, all) => row.manual_alert && !all[index - 1]?.manual_alert);
+    const manualPressCount = Math.max(counterPresses, activationRows.length);
     const avgHr = averageReading(sessionRows, "hr");
     const avgSpo2 = averageReading(sessionRows, "spo2");
     const avgTemp = averageReading(sessionRows, "temp");
     const payload = {
       id,
+      sessionId: `${deviceId}-${id}`,
       deviceId,
       miner: miner?.name || deviceId,
       location: miner?.location || "Unassigned",
@@ -275,7 +330,7 @@ function uniquePressCounts(rows) {
 
 function appendLiveSample(next, deviceId, sample) {
   const timestamp = Number(sample.timestamp || 0);
-  if (!deviceId || timestamp <= 0) return;
+  if (!deviceId || timestamp <= 0) return false;
 
   const cur = next[deviceId] || { hr: [], spo2: [], temp: [] };
   const lastTimestamp = Math.max(
@@ -283,7 +338,7 @@ function appendLiveSample(next, deviceId, sample) {
     Number(cur.spo2[cur.spo2.length - 1]?.timestamp || 0),
     Number((cur.temp || [])[(cur.temp || []).length - 1]?.timestamp || 0),
   );
-  if (Math.abs(timestamp - lastTimestamp) < LIVE_SAMPLE_DEDUPE_MS) return;
+  if (Math.abs(timestamp - lastTimestamp) < LIVE_SAMPLE_DEDUPE_MS) return false;
 
   const label = sample.time || timeLabel(new Date(timestamp));
   next[deviceId] = {
@@ -291,6 +346,29 @@ function appendLiveSample(next, deviceId, sample) {
     spo2: Number(sample.spo2) > 0 ? [...cur.spo2.slice(-(MAX_LIVE_POINTS - 1)), { time: label, spo2: Number(sample.spo2), timestamp }] : cur.spo2,
     temp: Number(sample.temp) > 0 ? [...(cur.temp || []).slice(-(MAX_LIVE_POINTS - 1)), { time: label, temp: Number(sample.temp), timestamp }] : (cur.temp || []),
   };
+  return true;
+}
+
+function areMinersEquivalent(previous, next) {
+  if (previous.length !== next.length) return false;
+  return previous.every((miner, index) => {
+    const candidate = next[index];
+    return candidate
+      && miner.id === candidate.id
+      && miner.name === candidate.name
+      && miner.location === candidate.location
+      && miner.active === candidate.active
+      && miner.status === candidate.status
+      && miner.stale === candidate.stale
+      && miner.sessionStatus === candidate.sessionStatus
+      && miner.hr === candidate.hr
+      && miner.spo2 === candidate.spo2
+      && miner.temp === candidate.temp
+      && miner.finger === candidate.finger
+      && miner.manual_alert === candidate.manual_alert
+      && miner.button_press_count === candidate.button_press_count
+      && miner.lastSeen?.getTime?.() === candidate.lastSeen?.getTime?.();
+  });
 }
 
 // applyLocalDeviceOverrides — applies name/location edits from DevicesPage and filters archived devices
@@ -309,6 +387,8 @@ function mapActivityLogs(value) {
     .map(([id, row]) => ({
       id,
       deviceId: row?.deviceId || "",
+      sessionId: row?.sessionId || "",
+      buttonPressCount: Number(row?.buttonPressCount || row?.button_press_count || 0),
       miner: row?.miner || row?.deviceId || "Unknown miner",
       type: row?.type || "activity",
       status: row?.status || "",
@@ -328,10 +408,10 @@ function mapActivityLogs(value) {
 function isConcerningState(miner, thresholds) {
   if (!miner || !miner.active) return false;
   if (miner.manual_alert) return true;
-  if (miner.button_pressed) return true;
   if (miner.finger === false) return true;
+  if (getVitalStatus(miner.hr, "hr", thresholds) === "CRITICAL") return true;
   if (getVitalStatus(miner.spo2, "spo2", thresholds) === "CRITICAL") return true;
-  if (getVitalStatus(miner.temp, "temp", thresholds) === "HIGH") return true;
+  if (getVitalStatus(miner.temp, "temp", thresholds) === "CRITICAL") return true;
   return false;
 }
 
@@ -380,12 +460,13 @@ export function buildVitalLogs(miner, thresholds) {
 
   // SOS is independent of optical/chest contact and must still be recorded when
   // the wearable has lost its sensor signal.
-  if (miner.button_pressed || miner.manual_alert) {
+  if (miner.manual_alert) {
     rows.push({
       deviceId: miner.id,
       miner: miner.name,
       type: "manual_alert",
       status: "pressed",
+      buttonPressCount: Number(miner.button_press_count || 0),
       severity: "critical",
       title: "Manual SOS pressed",
       detail: miner.button_pressed
@@ -400,13 +481,13 @@ export function buildVitalLogs(miner, thresholds) {
   const spo2Status = getVitalStatus(miner.spo2, "spo2", thresholds);
   const tempStatus = getVitalStatus(miner.temp, "temp", thresholds);
 
-  if (hrStatus === "HIGH" || hrStatus === "LOW") {
+  if (["HIGH", "LOW", "CRITICAL"].includes(hrStatus)) {
     rows.push({
       deviceId: miner.id,
       miner: miner.name,
       type: "vital",
       status: hrStatus.toLowerCase(),
-      severity: "warning",
+      severity: hrStatus === "CRITICAL" ? "critical" : "warning",
       title: `Heart rate ${hrStatus.toLowerCase()}`,
       detail: `${miner.name} recorded HR ${miner.hr} bpm at ${formatSystemTimestamp(miner.lastSeen)}.`,
       timestamp: miner.lastSeen?.getTime?.() || Date.now(),
@@ -426,14 +507,14 @@ export function buildVitalLogs(miner, thresholds) {
     });
   }
 
-  if (tempStatus === "HIGH") {
+  if (tempStatus === "HIGH" || tempStatus === "CRITICAL") {
     rows.push({
       deviceId: miner.id,
       miner: miner.name,
       type: "vital",
-      status: "high",
-      severity: "critical",
-      title: "Body temperature high",
+      status: tempStatus.toLowerCase(),
+      severity: tempStatus === "CRITICAL" ? "critical" : "warning",
+      title: `Body temperature ${tempStatus.toLowerCase()}`,
       detail: `${miner.name} recorded body temp ${miner.temp}°C at ${formatSystemTimestamp(miner.lastSeen)}.`,
       timestamp: miner.lastSeen?.getTime?.() || Date.now(),
     });
@@ -463,11 +544,7 @@ export function useMinerSystem(enabled) {
   const [liveData, setLiveData] = useState({});
   const [analyticsData, setAnalyticsData] = useState({});
   const [activityLogs, setActivityLogs] = useState([]);
-  const [thresholds, setThresholds] = useState({
-    ...DEFAULT_THRESHOLDS,
-    ...(stored?.thresholds || {}),
-    tempMin: Number(stored?.thresholds?.tempMin) === 36 ? DEFAULT_THRESHOLDS.tempMin : (stored?.thresholds?.tempMin ?? DEFAULT_THRESHOLDS.tempMin),
-  });
+  const [thresholds, setThresholds] = useState(DEFAULT_THRESHOLDS);
   const [pollingInterval, setPollingInterval] = useState(stored?.pollingInterval || 5);
   const [staleSeconds] = useState(DEFAULT_STALE_SECONDS);
   const [usingRealtime, setUsingRealtime] = useState(false);
@@ -479,6 +556,11 @@ export function useMinerSystem(enabled) {
   const hasDeviceSnapshotRef = useRef(false);
   const previousStatusRef = useRef({});
   const emittedEventRef = useRef(new Set());
+  const realtimeAnalyticsRef = useRef({});
+  const historicalAnalyticsRef = useRef({});
+  const historicalReadingKeysRef = useRef(new Set());
+  const historicalSummaryTimestampRef = useRef({});
+  const historicalReadyRef = useRef(false);
   const thresholdsRef = useRef(thresholds);
   const staleSecondsRef = useRef(staleSeconds);
   const metadataOverridesRef = useRef({});
@@ -499,9 +581,11 @@ export function useMinerSystem(enabled) {
   const resolveSessionStatus = async (prompt, sessionStatus) => {
     setSessionPrompts((current) => current.filter((item) => item.key !== prompt.key));
     const sessionTimestamp = Number(prompt.lastSeen) || Date.now();
+    const sessionId = sessionIdForTimestamp(prompt.deviceId, analyticsData[prompt.deviceId], sessionTimestamp);
     const sessionEvent = {
       id: `session-status-${prompt.deviceId}-${sessionTimestamp}`,
       deviceId: prompt.deviceId,
+      sessionId,
       miner: prompt.name,
       type: "session_status",
       status: sessionStatus,
@@ -523,8 +607,13 @@ export function useMinerSystem(enabled) {
       miner.id === prompt.deviceId ? { ...miner, sessionStatus } : miner
     ));
 
-    await updateDevice(prompt.deviceId, { sessionStatus }).catch(() => {});
-    await writeActivityLog(sessionEvent).catch(() => {});
+    try {
+      await updateDevice(prompt.deviceId, { sessionStatus });
+      await updateSessionStatus(prompt.deviceId, sessionId, sessionStatus, sessionTimestamp);
+      await writeActivityLog(sessionEvent);
+    } catch (error) {
+      handleAsyncError(setConnectionError, error, "Saving session status");
+    }
   };
 
   useEffect(() => {
@@ -571,18 +660,44 @@ export function useMinerSystem(enabled) {
   // reading tick. Only thresholds/timing are cached there. Offline/demo mode keeps
   // locally registered devices so they survive a reload when Firebase is unavailable.
   useEffect(() => {
-    localStorage.setItem(
-      SYSTEM_STORAGE_KEY,
-      JSON.stringify({
-        miners: firebaseConfigured ? undefined : miners,
-        thresholds,
-        pollingInterval,
-      }),
-    );
+    writeStoredValue(SYSTEM_STORAGE_KEY, {
+      miners: firebaseConfigured ? undefined : miners,
+      thresholds,
+      pollingInterval,
+    });
   }, [miners, thresholds, pollingInterval]);
 
   useEffect(() => {
     if (!enabled || !firebaseConfigured) return undefined;
+
+    let stopHistoricalReadings = null;
+    let historicalDeviceKey = "";
+    const subscribeHistoricalReadings = (deviceIds) => {
+      if (!firestoreDb) return;
+      const nextKey = [...new Set(deviceIds.filter(Boolean))].sort().join(",");
+      if (!nextKey || nextKey === historicalDeviceKey) return;
+      historicalDeviceKey = nextKey;
+      stopHistoricalReadings?.();
+      stopHistoricalReadings = subscribeToHistoricalReadings(
+        nextKey.split(","),
+        (value) => {
+          historicalReadyRef.current = true;
+          const mappedHistorical = mapHistoricalAnalytics(value);
+          historicalAnalyticsRef.current = mappedHistorical;
+          setAnalyticsData(mergeAnalyticsData(mappedHistorical, realtimeAnalyticsRef.current));
+
+          Object.entries(mappedHistorical).forEach(([deviceId, rows]) => {
+            const latestTimestamp = rows[rows.length - 1]?.timestamp || 0;
+            if (!latestTimestamp || historicalSummaryTimestampRef.current[deviceId] === latestTimestamp) return;
+            historicalSummaryTimestampRef.current[deviceId] = latestTimestamp;
+            const miner = minersRef.current.find((item) => item.id === deviceId);
+            const summaries = buildHistorySummariesForDevice(deviceId, rows, miner, thresholdsRef.current);
+            saveHistorySummaries(deviceId, summaries.healthLogs, summaries.miningSessions).catch((error) => handleAsyncError(setConnectionError, error, "Saving session history"));
+          });
+        },
+        (message) => setConnectionError(message),
+      );
+    };
 
     const unsubscribeDevices = subscribeToDevices(
       (value) => {
@@ -603,7 +718,7 @@ export function useMinerSystem(enabled) {
 
         setUsingRealtime(true);
         setConnectionError("");
-        rawSetMiners(realtimeMiners);
+        rawSetMiners((previous) => (areMinersEquivalent(previous, realtimeMiners) ? previous : realtimeMiners));
         minersRef.current = realtimeMiners;
 
         realtimeMiners.forEach((miner) => {
@@ -617,7 +732,7 @@ export function useMinerSystem(enabled) {
 
           const liveStatusNeedsSync = rawLiveStatus === "online" || rawLiveStatus === "offline";
           if (rawStatus !== expectedStatus || rawActive !== miner.active || (liveStatusNeedsSync && rawLiveStatus !== expectedStatus)) {
-            updateDeviceStatus(miner.id, expectedStatus, lastSeen).catch(() => {});
+            updateDeviceStatus(miner.id, expectedStatus, lastSeen).catch((error) => handleAsyncError(setConnectionError, error, "Updating device status"));
           }
 
           const previousStatus = previousStatusRef.current[miner.id];
@@ -628,34 +743,37 @@ export function useMinerSystem(enabled) {
             const key = `${statusEvent.type}:${statusEvent.deviceId}:${statusEvent.status}:${Math.floor(statusEvent.timestamp / 60000)}`;
             if (!emittedEventRef.current.has(key)) {
               addEvent(emittedEventRef.current, key);
-              writeActivityLog(statusEvent).catch(() => {});
+              writeActivityLog(statusEvent).catch((error) => handleAsyncError(setConnectionError, error, "Saving status log"));
             }
           }
 
           buildVitalLogs(miner, thresholdsRef.current).forEach((event) => {
-            const key = `${event.type}:${event.deviceId}:${event.status}:${Math.floor(event.timestamp / 60000)}`;
+            const key = event.type === "manual_alert"
+              ? `${event.type}:${event.deviceId}:${event.buttonPressCount || 0}`
+              : `${event.type}:${event.deviceId}:${event.status}:${Math.floor(event.timestamp / 60000)}`;
             if (!emittedEventRef.current.has(key)) {
               addEvent(emittedEventRef.current, key);
-              writeActivityLog(event).catch(() => {});
+              writeActivityLog(event).catch((error) => handleAsyncError(setConnectionError, error, "Saving alert log"));
             }
           });
         });
 
         setLiveData((prev) => {
           const next = { ...prev };
+          let changed = false;
           realtimeMiners.forEach((miner) => {
             if (!miner.active || miner.stale || miner.finger === false || (!miner.hr && !miner.spo2 && !miner.temp)) {
               return;
             }
-            appendLiveSample(next, miner.id, {
+            changed = appendLiveSample(next, miner.id, {
               time: timeLabel(miner.lastSeen),
               timestamp: miner.lastSeen.getTime(),
               hr: miner.hr,
               spo2: miner.spo2,
               temp: miner.temp,
-            });
+            }) || changed;
           });
-          return next;
+          return changed ? next : prev;
         });
 
       },
@@ -668,39 +786,56 @@ export function useMinerSystem(enabled) {
       (value) => {
         setConnectionError("");
         const mappedAnalytics = mapRealtimeAnalytics(value);
+        realtimeAnalyticsRef.current = mappedAnalytics;
+        subscribeHistoricalReadings(Object.keys(mappedAnalytics));
         const analyticsMiners = applyLocalDeviceOverrides(latestAnalyticsMiners(mappedAnalytics, staleSecondsRef.current * 1000), metadataOverridesRef.current, archivedDeviceIdsRef.current);
 
-        setAnalyticsData((prev) => ({ ...prev, ...mappedAnalytics }));
+        setAnalyticsData(() => historicalReadyRef.current
+          ? mergeAnalyticsData(historicalAnalyticsRef.current, mappedAnalytics)
+          : mappedAnalytics);
         if (analyticsMiners.length > 0 && !hasDeviceSnapshotRef.current && !minersRef.current.some((miner) => miner.active)) {
           rawSetMiners(analyticsMiners);
           minersRef.current = analyticsMiners;
         }
 
-        setLiveData((prev) =>
-          Object.keys(mappedAnalytics).reduce((next, deviceId) => {
+        setLiveData((prev) => {
+          let changed = false;
+          const next = Object.keys(mappedAnalytics).reduce((result, deviceId) => {
             const rows = mappedAnalytics[deviceId] || [];
             if (rows.length > 0) {
-              rows.slice(-MAX_LIVE_POINTS).forEach((row) => appendLiveSample(next, deviceId, row));
-              return next;
+              rows.slice(-MAX_LIVE_POINTS).forEach((row) => {
+                changed = appendLiveSample(result, deviceId, row) || changed;
+              });
             }
-            return next;
-          }, { ...prev }),
-        );
+            return result;
+          }, { ...prev });
+          return changed ? next : prev;
+        });
 
         if (Date.now() - lastTrimRef.current > 60000) {
           lastTrimRef.current = Date.now();
           Object.keys(mappedAnalytics).forEach((deviceId) => {
-            trimAnalyticsHistory(deviceId, MAX_ANALYTICS_POINTS).catch(() => {});
+            trimAnalyticsHistory(deviceId, MAX_ANALYTICS_POINTS).catch((error) => handleAsyncError(setConnectionError, error, "Trimming analytics history"));
           });
         }
 
         Object.entries(mappedAnalytics).forEach(([deviceId, rows]) => {
+          const pendingReadings = [];
+          rows.forEach((row, index) => {
+            const readingKey = `${deviceId}:${row.timestamp}`;
+            if (historicalReadingKeysRef.current.has(readingKey)) return;
+            historicalReadingKeysRef.current.add(readingKey);
+            pendingReadings.push({ ...row, sessionId: sessionIdForReading(deviceId, rows, index) });
+          });
+          if (pendingReadings.length > 0) {
+            saveHistoricalReadingsToFirestore(deviceId, pendingReadings).catch((error) => handleAsyncError(setConnectionError, error, "Saving historical readings"));
+          }
           const latestTimestamp = rows[rows.length - 1]?.timestamp || 0;
           if (!latestTimestamp || persistedHistoryRef.current[deviceId] === latestTimestamp) return;
           persistedHistoryRef.current[deviceId] = latestTimestamp;
           const miner = minersRef.current.find((item) => item.id === deviceId);
           const summaries = buildHistorySummariesForDevice(deviceId, rows, miner, thresholdsRef.current);
-          saveHistorySummaries(deviceId, summaries.healthLogs, summaries.miningSessions).catch(() => {});
+          saveHistorySummaries(deviceId, summaries.healthLogs, summaries.miningSessions).catch((error) => handleAsyncError(setConnectionError, error, "Saving session history"));
         });
       },
       (message) => setConnectionError(message),
@@ -718,6 +853,7 @@ export function useMinerSystem(enabled) {
       unsubscribeDevices();
       unsubscribeAnalytics();
       unsubscribeActivity();
+      stopHistoricalReadings?.();
     };
   }, [enabled]);
 
@@ -745,14 +881,14 @@ export function useMinerSystem(enabled) {
       staleMiners.forEach((miner) => {
         previousStatusRef.current[miner.id] = "offline";
         const timestamp = miner.lastSeen?.getTime?.() || Date.now();
-        updateDeviceStatus(miner.id, "offline", timestamp).catch(() => {});
+        updateDeviceStatus(miner.id, "offline", timestamp).catch((error) => handleAsyncError(setConnectionError, error, "Updating offline status"));
         const offlineMiner = { ...miner, active: false, status: "offline", stale: true, offlineConcern: isConcerningState(miner, thresholdsRef.current) };
         queueSessionPrompt(offlineMiner);
         const event = buildStatusLog(offlineMiner, "online");
         const key = `${event.type}:${event.deviceId}:${event.status}:${Math.floor(event.timestamp / 60000)}`;
         if (!emittedEventRef.current.has(key)) {
           addEvent(emittedEventRef.current, key);
-          writeActivityLog(event).catch(() => {});
+          writeActivityLog(event).catch((error) => handleAsyncError(setConnectionError, error, "Saving disconnect log"));
         }
       });
     }, 10000);
@@ -780,9 +916,14 @@ export function useMinerSystem(enabled) {
       setActivityLogs([]);
     },
     clearHealthLogs: async () => {
-      await clearHealthLogsRemote();
+      const deviceIds = [...new Set([...Object.keys(analyticsData), ...minersRef.current.map((miner) => miner.id)])];
+      await clearHealthLogsRemote(deviceIds);
       setAnalyticsData({});
       setLiveData({});
+      realtimeAnalyticsRef.current = {};
+      historicalAnalyticsRef.current = {};
+      historicalReadingKeysRef.current.clear();
+      historicalSummaryTimestampRef.current = {};
     },
   };
 }

@@ -1422,6 +1422,42 @@ input:-webkit-autofill:focus {
   max-height: 100%;
 }
 
+.sensor-device-list-header {
+  position: relative;
+  z-index: 4;
+  background: #10181d;
+}
+
+.sensor-device-list-scroll {
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+.sensor-device-column-header {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: 100%;
+  box-sizing: border-box;
+  align-items: center;
+  background: rgba(16, 24, 29, 0.97);
+  border-bottom: 1px solid rgba(184, 214, 226, 0.1);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.sensor-device-column-header > *,
+.maintenance-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.maintenance-row {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .diagnostic-guide-header {
   position: relative;
   z-index: 1;
@@ -1559,7 +1595,8 @@ input:-webkit-autofill:focus {
 
 /* Online status glow refinement */
 .status-badge.is-online {
-  animation: onlineHalo 3s ease-in-out infinite;
+  animation: onlineHalo 4.5s ease-in-out infinite;
+  contain: paint;
 }
 
 .filter-toolbar {
@@ -1918,6 +1955,39 @@ input:-webkit-autofill:focus {
   font-weight: 900;
   letter-spacing: 0.09em;
   text-transform: uppercase;
+}
+
+.dashboard-fleet-heading {
+  position: relative;
+  z-index: 4;
+  background: #10181d;
+}
+
+.dashboard-fleet-scroll {
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+.dashboard-fleet-column-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(16, 24, 29, 0.97);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.dashboard-fleet-column-head > *,
+.fleet-status-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fleet-status-row {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .fleet-status-row {
@@ -2284,13 +2354,13 @@ input:-webkit-autofill:focus {
   }
 }
 
-/* Desktop density scaling keeps the full dashboard composition visible on
-   short 15-inch/laptop viewports. The shell grows in layout space and is
-   rendered smaller, preserving the same page POV as a taller display without
-   adding a page-level scrollbar. */
+/* Desktop/laptop POV: keep the complete monitoring composition visible on
+   shorter wide screens without changing the mobile layout. The scale is
+   intentionally mild so text remains readable while more vertical content
+   fits in the viewport. */
 @media (min-width: 900px) and (max-height: 820px) {
   .app-shell {
-    --desktop-ui-scale: 0.88;
+    --desktop-ui-scale: 0.92;
     transform: scale(var(--desktop-ui-scale));
     transform-origin: top left;
     width: calc(100% / var(--desktop-ui-scale)) !important;
@@ -2300,13 +2370,13 @@ input:-webkit-autofill:focus {
 
 @media (min-width: 900px) and (max-height: 720px) {
   .app-shell {
-    --desktop-ui-scale: 0.82;
+    --desktop-ui-scale: 0.88;
   }
 }
 
 @media (min-width: 900px) and (max-height: 640px) {
   .app-shell {
-    --desktop-ui-scale: 0.76;
+    --desktop-ui-scale: 0.84;
   }
 }
 

@@ -12,7 +12,7 @@ export default function SettingsPage({ miners, staleSeconds }) {
 
   const online = miners.filter((miner) => miner.active && !miner.stale).length;
   const offline = miners.filter((miner) => !miner.active || miner.stale).length;
-  const warnings = miners.filter((m) => m.finger === false || m.manual_alert || m.button_pressed).length;
+  const warnings = miners.filter((m) => m.finger === false || m.manual_alert).length;
 
   const handlePushToggle = (enabled) => {
     setPushEnabled(enabled);

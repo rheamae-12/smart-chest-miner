@@ -18,9 +18,10 @@
  *   - Adafruit SSD1306  +  Adafruit GFX               (OLED)
  *   (MAX30205 is read directly over I2C — no extra library.)
  *
- * SECURITY: FIREBASE_DATABASE_SECRET is a legacy super-admin token that bypasses
- * database.rules.json. To disable legacy secrets, migrate to Firebase Auth and
- * use the returned idToken as ?auth=. Kept here knowingly.
+ * SECURITY: device credentials are loaded from the local, ignored secrets.h
+ * file. Do not commit that file. The legacy database token is supported only
+ * for backwards compatibility; migrate the device to Firebase Auth/short-lived
+ * tokens before deploying it outside a controlled network.
  *
  * HARDWARE: add 470-1000uF on the 5V rail at the ESP32 and 100uF+100nF on the
  * 3.3V sensor rail or WiFi spikes will brown-out the board. See docs/HARDWARE_NOTES.md.
@@ -36,11 +37,32 @@
 
 #define USE_SIMULATION 0
 
-const char* WIFI_SSID     = "Converge_2.4GHz_42BD";
-const char* WIFI_PASSWORD = "bordersnigerald2025";
+// Create secrets.h beside this sketch for a real device. The fallback values
+// intentionally do not contain working credentials.
+#if defined(__has_include)
+  #if __has_include("secrets.h")
+    #include "secrets.h"
+  #endif
+#endif
 
-#define FIREBASE_DATABASE_URL    "https://smart-chest-miner-default-rtdb.firebaseio.com/"
-#define FIREBASE_DATABASE_SECRET "GJY8fpUA211duwUw7o92ks0EXlYOFdqWYz5rK6N5"
+#ifndef SCM_WIFI_SSID
+  #define SCM_WIFI_SSID "CONFIGURE_IN_secrets.h"
+#endif
+#ifndef SCM_WIFI_PASSWORD
+  #define SCM_WIFI_PASSWORD "CONFIGURE_IN_secrets.h"
+#endif
+#ifndef SCM_FIREBASE_DATABASE_URL
+  #define SCM_FIREBASE_DATABASE_URL ""
+#endif
+#ifndef SCM_FIREBASE_DATABASE_SECRET
+  #define SCM_FIREBASE_DATABASE_SECRET ""
+#endif
+
+const char* WIFI_SSID     = SCM_WIFI_SSID;
+const char* WIFI_PASSWORD = SCM_WIFI_PASSWORD;
+
+#define FIREBASE_DATABASE_URL    SCM_FIREBASE_DATABASE_URL
+#define FIREBASE_DATABASE_SECRET SCM_FIREBASE_DATABASE_SECRET
 
 const char* DEVICE_ID      = "SCM-003";
 const char* MINER_NAME     = "Acuzar Great Miner";
@@ -119,12 +141,15 @@ const char* MINER_LOCATION = "Masara Shaft-3";
 #define BUZZER_TEMP_INTERVAL_MS   650
 
 // ---- Device-local normal ranges (inclusive) ----
-#define HR_NORMAL_MIN        70.0f
-#define HR_NORMAL_MAX       130.0f
+#define HR_NORMAL_MIN        60.0f
+#define HR_NORMAL_MAX       110.0f
+#define HR_CRITICAL_MIN     141.0f
 #define SPO2_NORMAL_MIN      80.0f
-#define SPO2_NORMAL_MAX     110.0f
-#define TEMP_NORMAL_MIN      25.0f
-#define TEMP_NORMAL_MAX      37.0f
+#define SPO2_CRITICAL_MIN    60.0f
+#define TEMP_NORMAL_MIN      20.0f
+#define TEMP_NORMAL_MAX      36.0f
+#define TEMP_CRITICAL_MIN    15.0f
+#define TEMP_CRITICAL_MAX    38.0f
 
 enum HealthState { HEALTH_NO_FINGER, HEALTH_STABILIZING, HEALTH_NORMAL, HEALTH_WARNING, HEALTH_CRITICAL, HEALTH_MANUAL_ALERT };
 
@@ -159,7 +184,7 @@ bool manualAlertActive = false;
 unsigned long lastButtonPress = 0;
 bool buttonPressedDisplay = false;
 bool wasButtonPressed = false;
-unsigned long buttonPressCount = 0;
+unsigned long buttonPressCount = 0; // SOS activation count; OFF toggles do not increment
 
 bool redLedState = false, greenLedState = false;
 bool hrBuzzerPhase = false, spO2BuzzerPhase = false, tempBuzzerPhase = false;
@@ -272,6 +297,10 @@ void drawBootScreen(const char* status, const char* detail) {
 }
 
 void connectWiFi() {
+  if (String(WIFI_SSID).startsWith("CONFIGURE_IN_") || String(WIFI_PASSWORD).startsWith("CONFIGURE_IN_")) {
+    Serial.println("[WIFI] Missing secrets.h credentials; WiFi disabled.");
+    return;
+  }
   Serial.printf("[INIT] Starting WiFi: %s (non-blocking)\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
@@ -531,20 +560,29 @@ void evaluateHealth() {
   bool spO2Ready = currentSpO2 > 0;
   bool tempReady = hasTemp && currentTemp > 0;
 
-  alertHR = hrReady &&
+  bool hrCritical = hrReady && currentBPM >= HR_CRITICAL_MIN;
+  bool spo2Critical = spO2Ready && currentSpO2 < SPO2_CRITICAL_MIN;
+  bool tempCritical = tempReady && (currentTemp <= TEMP_CRITICAL_MIN || currentTemp >= TEMP_CRITICAL_MAX);
+  bool hrWarning = hrReady && !hrCritical &&
     (currentBPM < HR_NORMAL_MIN || currentBPM > HR_NORMAL_MAX);
-  alertSpO2 = spO2Ready &&
-    (currentSpO2 < SPO2_NORMAL_MIN || currentSpO2 > SPO2_NORMAL_MAX);
-  alertTemp = tempReady &&
+  bool spo2Warning = spO2Ready && !spo2Critical && currentSpO2 < SPO2_NORMAL_MIN;
+  bool tempWarning = tempReady && !tempCritical &&
     (currentTemp < TEMP_NORMAL_MIN || currentTemp > TEMP_NORMAL_MAX);
 
+  alertHR = hrWarning || hrCritical;
+  alertSpO2 = spo2Warning || spo2Critical;
+  alertTemp = tempWarning || tempCritical;
+
+  int criticalCount = (hrCritical ? 1 : 0) +
+                      (spo2Critical ? 1 : 0) +
+                      (tempCritical ? 1 : 0);
   int abnormalCount = (alertHR ? 1 : 0) +
                       (alertSpO2 ? 1 : 0) +
                       (alertTemp ? 1 : 0);
 
-  if (abnormalCount >= 2) {
+  if (criticalCount > 0) {
     healthState = HEALTH_CRITICAL;
-  } else if (abnormalCount == 1) {
+  } else if (abnormalCount > 0) {
     healthState = HEALTH_WARNING;
   } else if (!hrReady || !spO2Ready) {
     healthState = HEALTH_STABILIZING;
@@ -579,15 +617,15 @@ void updateIndicators(unsigned long now) {
   }
 
   // Buzzers — beep in unison; each sounds only for its own critical vital (or SOS).
-  updateBuzzerTone(BUZZER_HR_PIN, manual || alertHR,
-    BUZZER_HR_FREQ, BUZZER_HR_INTERVAL_MS, now,
-    lastHrBuzzerToggle, hrBuzzerPhase);
+  updateBuzzerTone(BUZZER_TEMP_PIN, manual || alertHR,
+    BUZZER_TEMP_FREQ, BUZZER_TEMP_INTERVAL_MS, now,
+    lastTempBuzzerToggle, tempBuzzerPhase);
   updateBuzzerTone(BUZZER_SPO2_PIN, manual || alertSpO2,
     BUZZER_SPO2_FREQ, BUZZER_SPO2_INTERVAL_MS, now,
     lastSpO2BuzzerToggle, spO2BuzzerPhase);
-  updateBuzzerTone(BUZZER_TEMP_PIN, manual || alertTemp,
-    BUZZER_TEMP_FREQ, BUZZER_TEMP_INTERVAL_MS, now,
-    lastTempBuzzerToggle, tempBuzzerPhase);
+  updateBuzzerTone(BUZZER_HR_PIN, manual || alertTemp,
+    BUZZER_HR_FREQ, BUZZER_HR_INTERVAL_MS, now,
+    lastHrBuzzerToggle, hrBuzzerPhase);
 }
 
 void allBuzzers(uint8_t level) {
@@ -701,8 +739,8 @@ void handleButton(unsigned long now) {
   if (pressed && !wasButtonPressed &&
       now - lastButtonPress >= DEBOUNCE_DELAY_MS) {
     lastButtonPress = now;
-    buttonPressCount++;
     manualAlertActive = !manualAlertActive;
+    if (manualAlertActive) buttonPressCount++;
     buttonPressedDisplay = true;
     forceUpload = true;
     if (WiFi.status() == WL_CONNECTED) enqueueButtonAnalyticsUpload();

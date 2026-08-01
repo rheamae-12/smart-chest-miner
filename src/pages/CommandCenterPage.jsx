@@ -303,7 +303,7 @@ function VitalsRow({ miner, thresholds }) {
       <VitalTile label="SpO2" icon="droplet" value={live ? formatReading(miner.spo2, 0) : "--"} unit="%" color={C.oxygen} status={live ? getVitalStatus(miner.spo2, "spo2", thresholds) : "OFFLINE"} />
       <VitalTile label="Body Temp" icon="thermometer" value={live ? formatReading(miner.temp, 1) : "--"} unit="°C" color={C.teal} status={live ? getVitalStatus(miner.temp, "temp", thresholds) : "OFFLINE"} />
       <VitalTile label="Chest Contact" icon="contact" value={miner.active ? (miner.finger === false ? "No" : "Yes") : "--"} color={!miner.active ? C.offline : miner.finger === false ? C.amber : C.green} status={!miner.active ? "OFFLINE" : miner.finger === false ? "WARNING" : "NORMAL"} />
-      <VitalTile label="Manual SOS" icon="siren" value={miner.active ? (miner.button_pressed || miner.manual_alert ? "Pressed" : "Clear") : "--"} unit={miner.active ? `${miner.button_press_count || 0}x` : ""} color={!miner.active ? C.offline : miner.button_pressed || miner.manual_alert ? C.red : C.green} status={!miner.active ? "OFFLINE" : miner.button_pressed || miner.manual_alert ? "PRESSED" : "NORMAL"} />
+      <VitalTile label="Manual SOS" icon="siren" value={miner.active ? (miner.manual_alert ? "Pressed" : "Clear") : "--"} unit={miner.active ? `${miner.button_press_count || 0}x` : ""} color={!miner.active ? C.offline : miner.manual_alert ? C.red : C.green} status={!miner.active ? "OFFLINE" : miner.manual_alert ? "PRESSED" : "NORMAL"} />
     </div>
   );
 }
@@ -384,8 +384,8 @@ function OverviewTab({ miner, liveData, thresholds }) {
           detail={!miner.active ? "Waiting for the device to reconnect" : miner.finger === false ? "Re-seat the chest strap to restore readings" : "Sensor contact is stable"}
         />
         <Indicator
-          color={!miner.active ? C.offline : miner.button_pressed || miner.manual_alert ? C.red : C.green}
-          label={!miner.active ? "Manual SOS offline" : miner.button_pressed || miner.manual_alert ? `Manual SOS pressed (${miner.button_press_count || 0} total)` : `Manual SOS clear (${miner.button_press_count || 0} total)`}
+          color={!miner.active ? C.offline : miner.manual_alert ? C.red : C.green}
+          label={!miner.active ? "Manual SOS offline" : miner.manual_alert ? `Manual SOS pressed (${miner.button_press_count || 0} total)` : `Manual SOS clear (${miner.button_press_count || 0} total)`}
           detail={miner.active ? `${miner.button_press_count || 0} activation${Number(miner.button_press_count || 0) === 1 ? "" : "s"} recorded` : "SOS state unavailable while offline"}
         />
         <Indicator

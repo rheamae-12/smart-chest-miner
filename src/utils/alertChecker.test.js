@@ -8,28 +8,31 @@ describe("getVitalStatus", () => {
   });
 
   it("classifies heart rate against thresholds", () => {
-    expect(getVitalStatus(40, "hr")).toBe("LOW");
-    expect(getVitalStatus(80, "hr")).toBe("NORMAL");
-    expect(getVitalStatus(130, "hr")).toBe("HIGH");
+    expect(getVitalStatus(59, "hr")).toBe("LOW");
+    expect(getVitalStatus(60, "hr")).toBe("NORMAL");
+    expect(getVitalStatus(111, "hr")).toBe("HIGH");
+    expect(getVitalStatus(141, "hr")).toBe("CRITICAL");
   });
 
-  it("treats SpO2 below the floor as CRITICAL and the buffer band as LOW", () => {
-    expect(getVitalStatus(79, "spo2")).toBe("CRITICAL");
-    expect(getVitalStatus(81, "spo2")).toBe("LOW"); // within spo2Min+2
+  it("classifies SpO2 warning and critical bands", () => {
+    expect(getVitalStatus(59, "spo2")).toBe("CRITICAL");
+    expect(getVitalStatus(79, "spo2")).toBe("LOW");
     expect(getVitalStatus(98, "spo2")).toBe("NORMAL");
   });
 
   it("classifies body temperature", () => {
-    expect(getVitalStatus(29, "temp")).toBe("LOW");
-    expect(getVitalStatus(31, "temp")).toBe("NORMAL");
-    expect(getVitalStatus(37, "temp")).toBe("NORMAL");
-    expect(getVitalStatus(39, "temp")).toBe("HIGH");
+    expect(getVitalStatus(15, "temp")).toBe("CRITICAL");
+    expect(getVitalStatus(19, "temp")).toBe("LOW");
+    expect(getVitalStatus(20, "temp")).toBe("NORMAL");
+    expect(getVitalStatus(36, "temp")).toBe("NORMAL");
+    expect(getVitalStatus(37, "temp")).toBe("HIGH");
+    expect(getVitalStatus(38, "temp")).toBe("CRITICAL");
   });
 
 });
 
 describe("buildAlerts", () => {
-  const base = { id: "MCM-1", name: "Miner 1", active: true, finger: true, hr: 80, spo2: 99, temp: 37, manual_alert: false, stale: false };
+  const base = { id: "MCM-1", name: "Miner 1", active: true, finger: true, hr: 80, spo2: 99, temp: 36, manual_alert: false, stale: false };
 
   it("returns no alerts for a healthy active miner", () => {
     expect(buildAlerts([base], DEFAULT_THRESHOLDS)).toHaveLength(0);
@@ -51,7 +54,7 @@ describe("buildAlerts", () => {
   });
 
   it("raises a critical alert for dangerously low SpO2", () => {
-    const alerts = buildAlerts([{ ...base, spo2: 78 }], DEFAULT_THRESHOLDS);
+    const alerts = buildAlerts([{ ...base, spo2: 59 }], DEFAULT_THRESHOLDS);
     expect(alerts.some((a) => a.id === "MCM-1-spo2" && a.severity === "critical")).toBe(true);
   });
 
@@ -64,7 +67,7 @@ describe("buildAlerts", () => {
   });
 
   it("flags high body temperature as critical", () => {
-    const alerts = buildAlerts([{ ...base, temp: 39 }], DEFAULT_THRESHOLDS);
+    const alerts = buildAlerts([{ ...base, temp: 38 }], DEFAULT_THRESHOLDS);
     expect(alerts.some((a) => a.id === "MCM-1-temp-high" && a.severity === "critical")).toBe(true);
   });
 });

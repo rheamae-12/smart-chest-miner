@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { readStoredValue, writeStoredValue } from "../utils/safeStorage";
 
 const PUSH_ENABLED_KEY = "smart-chest-miner-push-enabled";
 // Seen-alert ids are kept in sessionStorage so a page reload within the same tab
@@ -7,17 +8,13 @@ const PUSH_ENABLED_KEY = "smart-chest-miner-push-enabled";
 const SEEN_ALERTS_SESSION_KEY = "smart-chest-miner-seen-alerts";
 
 function readSeenAlerts() {
-  try {
-    const value = JSON.parse(sessionStorage.getItem(SEEN_ALERTS_SESSION_KEY) || "[]");
-    return new Set(Array.isArray(value) ? value : []);
-  } catch {
-    return new Set();
-  }
+  const value = readStoredValue(SEEN_ALERTS_SESSION_KEY, [], sessionStorage);
+  return new Set(Array.isArray(value) ? value : []);
 }
 
 function writeSeenAlerts(set) {
   try {
-    sessionStorage.setItem(SEEN_ALERTS_SESSION_KEY, JSON.stringify([...set]));
+    writeStoredValue(SEEN_ALERTS_SESSION_KEY, [...set], sessionStorage);
   } catch {
     // Storage may be full or unavailable — non-fatal.
   }
@@ -25,7 +22,10 @@ function writeSeenAlerts(set) {
 
 function playAlertBeep(critical) {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (typeof window === "undefined") return;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
     const oscillator = ctx.createOscillator();
     const gain = ctx.createGain();
     oscillator.connect(gain);
@@ -43,6 +43,7 @@ function playAlertBeep(critical) {
 }
 
 function fireNotification(title, body, critical) {
+  if (typeof window === "undefined" || !("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
   try {
     new Notification(title, {
@@ -78,7 +79,7 @@ export function useAlertNotifications(alerts) {
     const newCritical = alerts.filter((a) => a.severity === "critical" && !seenIdsRef.current.has(a.id));
     const newWarning = alerts.filter((a) => a.severity !== "critical" && !seenIdsRef.current.has(a.id));
 
-    const pushEnabled = localStorage.getItem(PUSH_ENABLED_KEY) !== "false";
+    const pushEnabled = readStoredValue(PUSH_ENABLED_KEY, true) !== false;
     if (newCritical.length > 0) {
       if (pushEnabled) {
         playAlertBeep(true);

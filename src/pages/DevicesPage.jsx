@@ -37,7 +37,7 @@ export default function DevicesPage({ miners, setMiners }) {
         .filter((miner) => {
           const online = miner.active && !miner.stale;
           const matchText = matchesSearch(search, miner.name, miner.id, miner.location);
-          const matchStatus = status === "all" || (status === "online" && online) || (status === "offline" && !online) || (status === "attention" && (miner.stale || miner.manual_alert || miner.button_pressed || miner.finger === false));
+          const matchStatus = status === "all" || (status === "online" && online) || (status === "offline" && !online) || (status === "attention" && (miner.stale || miner.manual_alert || miner.finger === false));
           return matchText && matchStatus;
         })
         .sort(compareMinersActiveFirst),
@@ -48,7 +48,7 @@ export default function DevicesPage({ miners, setMiners }) {
     total: miners.length,
     online: miners.filter((miner) => miner.active && !miner.stale).length,
     offline: miners.filter((miner) => !miner.active || miner.stale).length,
-    attention: miners.filter((miner) => miner.stale || miner.manual_alert || miner.button_pressed || miner.finger === false).length,
+    attention: miners.filter((miner) => miner.stale || miner.manual_alert || miner.finger === false).length,
   };
   const activeFilterCount = Number(Boolean(search.trim())) + Number(status !== "all");
   const statusLabel = STATUS_FILTERS.find((option) => option.value === status)?.label || "All devices";
@@ -274,7 +274,7 @@ export default function DevicesPage({ miners, setMiners }) {
                   </div>
                   <div style={{ display: "grid", gap: 4 }}>
                     <StatePill label={miner.finger === false ? "No contact" : miner.active ? "Contact normal" : "No signal"} color={miner.finger === false ? C.amber : miner.active ? C.green : C.offline} />
-                    <StatePill label={miner.active ? `Manual SOS ${miner.button_pressed || miner.manual_alert ? "pressed" : "clear"} (${miner.button_press_count || 0})` : "Manual SOS offline"} color={!miner.active ? C.offline : miner.button_pressed || miner.manual_alert ? C.red : C.green} />
+                    <StatePill label={miner.active ? `Manual SOS ${miner.manual_alert ? "pressed" : "clear"} (${miner.button_press_count || 0})` : "Manual SOS offline"} color={!miner.active ? C.offline : miner.manual_alert ? C.red : C.green} />
                   </div>
                   <LastSeenCell miner={miner} />
                   <span style={{ display: "flex", gap: 6 }}>

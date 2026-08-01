@@ -35,15 +35,18 @@ export default function SensorStatusPage({ miners = [] }) {
         </section>
 
         <section className="sensor-support-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.6fr) minmax(280px, 0.8fr)", gap: 12, minHeight: 0, overflow: "hidden" }}>
-          <div className="hide-scrollbar" style={{ ...cardStyle, overflow: "auto", minHeight: 0 }}>
-            <PanelHeader
-              title="Device List"
-              subtitle="Device condition and sensor-specific checks, separate from the general event log."
-              meta={`${maintenance.filter((item) => !item.healthy).length} need review`}
-            />
-            <div style={{ padding: 10, display: "grid", gap: 7 }}>
+          <div className="sensor-device-list" style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
+            <div className="sensor-device-list-header">
+              <PanelHeader
+                title="Device List"
+                subtitle="Device condition and sensor-specific checks, separate from the general event log."
+                meta={`${maintenance.filter((item) => !item.healthy).length} need review`}
+              />
+            </div>
+            <div className="sensor-device-list-scroll hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
+              <div style={{ padding: 10, display: "grid", gap: 7 }}>
               {maintenance.length > 0 && (
-                <div className="maintenance-table-head" style={{ display: "grid", gridTemplateColumns: "minmax(140px, 0.7fr) minmax(120px, 0.55fr) minmax(140px, 0.7fr) minmax(220px, 1.2fr)", gap: 12, padding: "0 12px 2px", color: C.textMuted, fontSize: 9, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                <div className="maintenance-table-head sensor-device-column-header" style={{ display: "grid", gridTemplateColumns: "minmax(140px, 0.7fr) minmax(120px, 0.55fr) minmax(140px, 0.7fr) minmax(220px, 1.2fr)", gap: 12, padding: "0 12px 7px", color: C.textMuted, fontSize: 9, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>
                   <span>Device</span>
                   <span>Condition</span>
                   <span>Sensor status</span>
@@ -53,6 +56,7 @@ export default function SensorStatusPage({ miners = [] }) {
               {maintenance.length
                 ? maintenance.map((item) => <MaintenanceRow key={item.id} item={item} />)
                 : <EmptyState text="Register a device to populate the device list." />}
+              </div>
             </div>
           </div>
 
@@ -89,7 +93,7 @@ function SensorNode({ miner }) {
       <div className="sensor-metric-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, marginTop: 12 }}>
         <SensorMetric label="Heart rate" value={online && miner.hr > 0 ? `${formatReading(miner.hr, 0)} bpm` : "--"} color={online && miner.hr > 0 ? C.red : C.offline} state={online && miner.hr > 0 ? "Reading" : "No signal"} />
         <SensorMetric label="SpO2" value={online && miner.spo2 > 0 ? `${formatReading(miner.spo2, 0)}%` : "--"} color={online && miner.spo2 > 0 ? C.oxygen : C.offline} state={online && miner.spo2 > 0 ? "Reading" : "No signal"} />
-        <SensorMetric label="Manual SOS" value={online ? (miner.button_pressed || miner.manual_alert ? "Pressed" : "Clear") : "--"} color={online && (miner.button_pressed || miner.manual_alert) ? C.red : online ? C.green : C.offline} state={online ? `${miner.button_press_count || 0} presses` : "No signal"} />
+        <SensorMetric label="Manual SOS" value={online ? (miner.manual_alert ? "Pressed" : "Clear") : "--"} color={online && miner.manual_alert ? C.red : online ? C.green : C.offline} state={online ? `${miner.button_press_count || 0} activations` : "No signal"} />
         <SensorMetric label="Body temp" value={online && miner.temp > 0 ? `${formatReading(miner.temp, 1)}°C` : "--"} color={online && miner.temp > 0 ? C.teal : C.offline} state={online && miner.temp > 0 ? "Reading" : "No signal"} />
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, color: C.textMuted, fontSize: 11 }}>
@@ -116,7 +120,7 @@ function buildMaintenanceItem(miner) {
   if (miner.finger === false) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, condition: "Attention", issue: "Contact missing", action: "Re-seat the strap and verify skin contact." };
   if (!(miner.hr > 0) || !(miner.spo2 > 0)) return { id: miner.id, miner: miner.name, healthy: false, color: C.red, condition: "Attention", issue: "Optical sensor incomplete", action: "Inspect HR/SpO2 sensor placement and wiring." };
   if (!(miner.temp > 0)) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, condition: "Attention", issue: "Temperature unavailable", action: "Inspect the probe and allow it to settle." };
-  if (miner.button_pressed || miner.manual_alert) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, condition: "Good", issue: "Manual SOS active", action: "Review the alert in Alert Logs before closing the check." };
+  if (miner.manual_alert) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, condition: "Good", issue: "Manual SOS active", action: "Review the alert in Alert Logs before closing the check." };
   return { id: miner.id, miner: miner.name, healthy: true, color: C.green, condition: "Excellent", issue: "All sensors reporting", action: "No maintenance action is required." };
 }
 

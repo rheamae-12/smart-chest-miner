@@ -4,6 +4,7 @@ import { auth, firebaseConfigError, firebaseConfigured } from "../firebase/confi
 import { getUserProfile, saveUserProfile, updateUserProfile } from "../firebase/firestore";
 import { passwordMeetsPolicy } from "../utils/password";
 import { isViewOnlyRole } from "../utils/roles";
+import { readStoredValue, removeStoredValue, reportNonFatal, writeStoredValue } from "../utils/safeStorage";
 import { AuthContext } from "./authContextValue";
 
 const demoUser = {
@@ -17,6 +18,10 @@ const LOGIN_GUARD_KEY = "smart-chest-miner-login-guard";
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MS = 60000;
 const HASH_VERSION = 2;
+// Local/demo authentication is useful for development only. A production
+// build with missing Firebase configuration must fail closed instead of
+// exposing a predictable browser-only account.
+const localAuthEnabled = import.meta.env.DEV && !firebaseConfigured;
 
 async function hashPassword(password) {
   const data = new TextEncoder().encode(String(password));
@@ -34,34 +39,28 @@ async function passwordMatches(input, stored, storedVersion) {
 }
 
 function readLocalUsers() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
-  } catch {
-    return [];
-  }
+  const users = readStoredValue(STORAGE_KEY, []);
+  return Array.isArray(users) ? users : [];
 }
 
 function writeLocalUsers(users) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(users));
+  return writeStoredValue(STORAGE_KEY, users);
 }
 
 function readLoginGuard() {
-  try {
-    return JSON.parse(localStorage.getItem(LOGIN_GUARD_KEY)) || { count: 0, lockedUntil: 0 };
-  } catch {
-    return { count: 0, lockedUntil: 0 };
-  }
+  const guard = readStoredValue(LOGIN_GUARD_KEY, { count: 0, lockedUntil: 0 });
+  return guard && typeof guard === "object" ? guard : { count: 0, lockedUntil: 0 };
 }
 
 function clearLoginGuard() {
-  localStorage.removeItem(LOGIN_GUARD_KEY);
+  removeStoredValue(LOGIN_GUARD_KEY);
 }
 
 function registerFailedLogin() {
   const guard = readLoginGuard();
   const count = Number(guard.count || 0) + 1;
   const lockedUntil = count >= MAX_FAILED_ATTEMPTS ? Date.now() + LOCKOUT_MS : 0;
-  localStorage.setItem(LOGIN_GUARD_KEY, JSON.stringify({ count, lockedUntil }));
+  writeStoredValue(LOGIN_GUARD_KEY, { count, lockedUntil });
 }
 
 function lockoutMessage(lockedUntil) {
@@ -71,14 +70,14 @@ function lockoutMessage(lockedUntil) {
 
 // Returns whichever storage currently holds the session, defaulting to localStorage.
 function activeSessionStore() {
-  return sessionStorage.getItem(SESSION_KEY) ? sessionStorage : localStorage;
+  return readStoredValue(SESSION_KEY, null, sessionStorage) ? sessionStorage : localStorage;
 }
 
 function saveSession(user, remember) {
   const store = remember ? localStorage : sessionStorage;
   const other = remember ? sessionStorage : localStorage;
-  store.setItem(SESSION_KEY, JSON.stringify(user));
-  other.removeItem(SESSION_KEY);
+  writeStoredValue(SESSION_KEY, user, store);
+  removeStoredValue(SESSION_KEY, other);
 }
 
 async function profileForFirebaseUser(firebaseUser, fallbackName) {
@@ -116,11 +115,7 @@ async function profileForFirebaseUser(firebaseUser, fallbackName) {
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY));
-    } catch {
-      return null;
-    }
+    return readStoredValue(SESSION_KEY, null) || readStoredValue(SESSION_KEY, null, sessionStorage);
   });
   const [authReady, setAuthReady] = useState(!firebaseConfigured || !auth);
   const [authError, setAuthError] = useState(firebaseConfigError ? "Authentication service is unavailable. Contact an administrator." : "");
@@ -143,7 +138,7 @@ export function AuthProvider({ children }) {
         const nextUser = await profileForFirebaseUser(firebaseUser);
         setUser(nextUser);
         // Preserve whichever storage the user chose at login.
-        activeSessionStore().setItem(SESSION_KEY, JSON.stringify(nextUser));
+        writeStoredValue(SESSION_KEY, nextUser, activeSessionStore());
         if (nextUser.profileWarning) setAuthError(nextUser.profileWarning);
       } catch (error) {
         setAuthError(error.message);
@@ -164,7 +159,12 @@ export function AuthProvider({ children }) {
       return false;
     }
 
-    if (!firebaseConfigured && normalizedEmail === demoUser.email && password === "admin123") {
+    if (!firebaseConfigured && !localAuthEnabled) {
+      setAuthError(firebaseConfigError || "Authentication service is unavailable. Contact an administrator.");
+      return false;
+    }
+
+    if (localAuthEnabled && normalizedEmail === demoUser.email && password === "admin123") {
       clearLoginGuard();
       setUser(demoUser);
       saveSession(demoUser, remember);
@@ -191,7 +191,7 @@ export function AuthProvider({ children }) {
         setAuthError(describeAuthError(error));
         return false;
       }
-    } else {
+    } else if (localAuthEnabled) {
       const localUser = readLocalUsers().find((item) => item.email === normalizedEmail);
       if (localUser && await passwordMatches(password, localUser.password, localUser.v)) {
         if (localUser.v !== HASH_VERSION) {
@@ -260,6 +260,11 @@ export function AuthProvider({ children }) {
       }
     }
 
+    if (!localAuthEnabled) {
+      setAuthError(firebaseConfigError || "Authentication service is unavailable. Contact an administrator.");
+      return false;
+    }
+
     const newUser = {
       name: cleanName,
       email: normalizedEmail,
@@ -276,16 +281,19 @@ export function AuthProvider({ children }) {
 
   const updateUser = (patch) => {
     if (!user) return;
-    const nextUser = { ...user, ...patch };
+    const safePatch = user.source === "firebase" ? { ...patch, role: user.role } : patch;
+    const nextUser = { ...user, ...safePatch };
     setUser(nextUser);
-    activeSessionStore().setItem(SESSION_KEY, JSON.stringify(nextUser));
+    writeStoredValue(SESSION_KEY, nextUser, activeSessionStore());
     if (user.source === "firebase" && user.uid) {
       updateUserProfile(user.uid, {
         name: nextUser.name,
         email: nextUser.email,
-        role: nextUser.role || null,
         photoURL: nextUser.photoURL || null,
-      }).catch((error) => setAuthError(error.message));
+      }).catch((error) => {
+        reportNonFatal(error, "Profile update");
+        setAuthError("Profile could not be saved. Check your connection and try again.");
+      });
       return;
     }
     const users = readLocalUsers();
@@ -318,8 +326,8 @@ export function AuthProvider({ children }) {
     setUser(null);
     setAuthError("");
     setAuthMessage("");
-    localStorage.removeItem(SESSION_KEY);
-    sessionStorage.removeItem(SESSION_KEY);
+    removeStoredValue(SESSION_KEY, localStorage);
+    removeStoredValue(SESSION_KEY, sessionStorage);
   };
 
   // resetPassword — sends a Firebase reset email. Throws if Firebase is not

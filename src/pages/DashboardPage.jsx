@@ -23,7 +23,7 @@ export default function DashboardPage({
   const alerts = useMemo(() => buildAlerts(miners, thresholds), [miners, thresholds]);
   const visibleAlerts = alerts.filter((alert) => !dismissedAlertIds.includes(alert.id));
   const activeMiners = miners.filter((miner) => miner.active && !miner.stale);
-  const readyCount = activeMiners.filter((miner) => !(miner.button_pressed || miner.manual_alert)).length;
+  const readyCount = activeMiners.filter((miner) => !miner.manual_alert).length;
   const averageTemp = average(activeMiners.map((miner) => miner.temp));
 
   return (
@@ -31,7 +31,7 @@ export default function DashboardPage({
       <div className="dashboard-layout page-layout" style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr) auto", gap: 12, height: "100%", minHeight: 0 }}>
         <AlertBanner miners={miners} thresholds={thresholds} dismissedAlertIds={dismissedAlertIds} onDismissAlerts={onDismissAlerts} />
 
-        <section className="dashboard-stats" style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 10 }}>
+        <section className="dashboard-stats" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <StatCard label="Active Miners" value={activeMiners.length} unit={`/${miners.length}`} color={activeMiners.length ? C.green : C.offline} sub={`${readyCount} with SOS clear`} />
           <StatCard label="Average HR" value={formatReading(average(activeMiners.map((miner) => miner.hr)), 0)} unit="bpm" color={C.red} sub="active devices only" />
           <StatCard label="Average SpO2" value={formatReading(average(activeMiners.map((miner) => miner.spo2)), 0)} unit="%" color={C.oxygen} sub={`minimum ${thresholds.spo2Min}%`} />
@@ -40,33 +40,36 @@ export default function DashboardPage({
             label="Manual SOS"
             value={activeMiners.length ? (readyCount === activeMiners.length ? "Clear" : activeMiners.length - readyCount) : "--"}
             color={activeMiners.length ? (readyCount === activeMiners.length ? C.green : C.red) : C.offline}
-            sub="only compliance measure"
+            sub="active SOS miners"
           />
-          <StatCard label="Open Conditions" value={visibleAlerts.length || "Clear"} color={visibleAlerts.length ? C.amber : C.green} sub="requires operator review" />
         </section>
 
         <section className="dashboard-fleet-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12, alignItems: "stretch", minHeight: 0, overflow: "hidden" }}>
-          <div className="dashboard-fleet-panel hide-scrollbar" style={{ ...cardStyle, overflow: "auto", minHeight: 0 }}>
-            <SectionHeading
-              title="Miners"
-              subtitle="Active miners appear first; each status group stays ordered by device ID."
-              meta={`${fleet.length} registered`}
-            />
-            <div className="fleet-table-head">
-              <span>Miner</span><span>Connection</span><span>Live vitals</span><span>Safety</span><span>Last seen</span>
+          <div className="dashboard-fleet-panel" style={{ ...cardStyle, overflow: "hidden", minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
+            <div className="dashboard-fleet-heading">
+              <SectionHeading
+                title="Miners"
+                subtitle="Active miners appear first; each status group stays ordered by device ID."
+                meta={`${fleet.length} registered`}
+              />
             </div>
-            <div>
-              {fleet.length ? fleet.map((miner) => (
-                <FleetStatusRow
-                  key={miner.id}
-                  miner={miner}
-                  thresholds={thresholds}
-                  alerts={alerts.filter((alert) => alert.deviceId === miner.id)}
-                  series={liveData[miner.id]}
-                />
-              )) : (
-                <EmptyState title="No miners registered" text="Register a device to begin fleet monitoring." />
-              )}
+            <div className="dashboard-fleet-scroll hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
+              <div className="fleet-table-head dashboard-fleet-column-head">
+                <span>Miner</span><span>Connection</span><span>Live vitals</span><span>Safety</span><span>Last seen</span>
+              </div>
+              <div>
+                {fleet.length ? fleet.map((miner) => (
+                  <FleetStatusRow
+                    key={miner.id}
+                    miner={miner}
+                    thresholds={thresholds}
+                    alerts={alerts.filter((alert) => alert.deviceId === miner.id)}
+                    series={liveData[miner.id]}
+                  />
+                )) : (
+                  <EmptyState title="No miners registered" text="Register a device to begin fleet monitoring." />
+                )}
+              </div>
             </div>
           </div>
 
@@ -103,7 +106,7 @@ export default function DashboardPage({
 function FleetStatusRow({ miner, thresholds, alerts, series }) {
   const online = Boolean(miner.active && !miner.stale);
   const contact = online && miner.finger !== false;
-  const sos = Boolean(miner.button_pressed || miner.manual_alert);
+  const sos = Boolean(miner.manual_alert);
   const worst = alerts.some((alert) => alert.severity === "critical") ? "Critical" : alerts.length ? "Warning" : "Clear";
   const worstColor = worst === "Critical" ? C.red : worst === "Warning" ? C.amber : online ? C.green : C.offline;
   const trend = analyzeSpo2Trend(series?.spo2);

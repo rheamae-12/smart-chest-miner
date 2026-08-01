@@ -459,7 +459,8 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
                         label="Role"
                         value={account.role}
                         options={ROLE_OPTIONS}
-                        hint={isViewOnlyRole(account.role) ? "Read-only access" : "Can manage devices, settings & logs"}
+                        disabled={user?.source === "firebase"}
+                        hint={user?.source === "firebase" ? "Managed by an administrator" : isViewOnlyRole(account.role) ? "Read-only access" : "Can manage devices, settings & logs"}
                         onChange={(role) => { setAccount({ ...account, role }); setAccountSaved(false); }}
                       />
                       <AccountField label="Assigned Shift" value={account.shift} onChange={(shift) => { setAccount({ ...account, shift }); setAccountSaved(false); }} />
@@ -690,12 +691,12 @@ function AccountField({ label, value, onChange }) {
 }
 
 // AccountSelectField — labelled dropdown (used for Role) with a helper hint line
-function AccountSelectField({ label, value, options, onChange, hint }) {
+function AccountSelectField({ label, value, options, onChange, hint, disabled = false }) {
   const known = options.includes(value);
   return (
     <label>
       <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 6, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 900 }}>{label}</div>
-      <select value={known ? value : ""} onChange={(event) => onChange(event.target.value)} style={{ ...controlStyle, width: "100%" }}>
+      <select disabled={disabled} value={known ? value : ""} onChange={(event) => onChange(event.target.value)} style={{ ...controlStyle, width: "100%", opacity: disabled ? 0.65 : 1, cursor: disabled ? "not-allowed" : "pointer" }}>
         {!known && <option value="">{value || "Select role"}</option>}
         {options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
       </select>

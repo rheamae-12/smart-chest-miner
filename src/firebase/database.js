@@ -1,5 +1,20 @@
 import { get, onValue, push, ref, remove, serverTimestamp, set, update } from "firebase/database";
-import { auth, db, firebaseDatabaseUrl } from "./config";
+import { auth, db, firebaseDatabaseUrl, firestoreDb } from "./config";
+import {
+  clearActivityLogs as clearFirestoreActivityLogs,
+  clearHistoricalData,
+  removeWifiHistoryRecord,
+  saveActivityLog,
+  saveHistoricalReading,
+  saveHistoricalReadings,
+  saveSessionSummaries,
+  saveWifiHistoryRecord,
+  subscribeToHistoricalReadings as subscribeToFirestoreReadings,
+  subscribeToStoredActivityLogs,
+  subscribeToWifiHistory,
+  updateSessionStatus as updateFirestoreSessionStatus,
+} from "./firestore";
+import { reportNonFatal } from "../utils/safeStorage";
 
 // restAuthParam — returns "&auth=<idToken>" for the signed-in user so the REST
 // fallback obeys the same security rules as the SDK. Never uses an admin secret.
@@ -49,7 +64,7 @@ export async function testFirebaseConnection() {
   const url = firebaseRestUrl("devices");
   if (!url) throw new Error("Firebase is not configured. Add VITE_FIREBASE_* values to .env.");
 
-  const response = await fetch(`${url}?print=pretty${await restAuthParam()}`);
+  const response = await fetchWithTimeout(`${url}?print=pretty${await restAuthParam()}`);
   if (!response.ok) throw new Error(`Firebase device check failed: HTTP ${response.status}`);
   return {
     connected: true,
@@ -79,6 +94,11 @@ export function subscribeToAllAnalytics(onData, onError) {
 }
 
 export function subscribeToActivityLogs(onData, onError) {
+  if (firestoreDb) {
+    const unsubscribe = subscribeToStoredActivityLogs(onData, onError);
+    migrateLegacyActivityLogs().catch((error) => reportNonFatal(error, "Legacy activity migration"));
+    return unsubscribe;
+  }
   if (!db) return subscribeToActivityLogsRest(onData, onError);
 
   let stopRestPolling = null;
@@ -108,6 +128,11 @@ export function subscribeToWifiConfigurations(onData, onError) {
 }
 
 export function subscribeToWifiConnectionHistory(onData, onError) {
+  if (firestoreDb) {
+    const unsubscribe = subscribeToWifiHistory(onData, onError);
+    migrateLegacyWifiHistory().catch((error) => reportNonFatal(error, "Legacy WiFi history migration"));
+    return unsubscribe;
+  }
   if (!db) return pollFirebasePath("wifiConnectionHistory", onData, onError, 3000);
   return onValue(
     ref(db, "wifiConnectionHistory"),
@@ -137,9 +162,12 @@ function pollFirebasePath(path, onData, onError, intervalMs = 2000) {
   }
 
   let stopped = false;
+  let loading = false;
   const load = async () => {
+    if (stopped || loading) return;
+    loading = true;
     try {
-      const response = await fetch(`${url}?print=pretty${await restAuthParam()}`);
+      const response = await fetchWithTimeout(`${url}?print=pretty${await restAuthParam()}`);
       if (!response.ok) {
         throw new Error(`REST ${path} failed: HTTP ${response.status}`);
       }
@@ -147,6 +175,8 @@ function pollFirebasePath(path, onData, onError, intervalMs = 2000) {
       if (!stopped) onData(value || {});
     } catch (error) {
       if (!stopped) onError?.(error.message);
+    } finally {
+      loading = false;
     }
   };
 
@@ -170,11 +200,31 @@ function subscribeToActivityLogsRest(onData, onError) {
   return pollFirebasePath("activityLogs", onData, onError, 3000);
 }
 
+async function migrateLegacyActivityLogs() {
+  if (!db || !firestoreDb) return;
+  const snapshot = await get(ref(db, "activityLogs"));
+  const rows = snapshot.val() || {};
+  await Promise.all(Object.entries(rows).map(([id, row]) => saveActivityLog({
+    ...(row || {}),
+    id: `legacy-${id}`,
+  })));
+}
+
+async function migrateLegacyWifiHistory() {
+  if (!db || !firestoreDb) return;
+  const snapshot = await get(ref(db, "wifiConnectionHistory"));
+  const rows = snapshot.val() || {};
+  await Promise.all(Object.entries(rows).map(([id, row]) => saveWifiHistoryRecord({
+    ...(row || {}),
+    id: row?.id || id,
+  })));
+}
+
 async function writeFirebasePath(path, method, payload) {
   const url = firebaseRestUrl(path);
-  if (!url) return false;
+  if (!url) throw new Error("Firebase REST fallback is not configured.");
 
-  const response = await fetch(`${url}?${(await restAuthParam()).replace(/^&/, "")}`, {
+  const response = await fetchWithTimeout(`${url}?${(await restAuthParam()).replace(/^&/, "")}`, {
     method,
     headers: { "Content-Type": "application/json" },
     body: payload === undefined ? undefined : JSON.stringify(payload),
@@ -214,7 +264,7 @@ export async function trimAnalyticsHistory(deviceId, keepCount = 120) {
   if (!url) return false;
 
   const authParam = await restAuthParam();
-  const response = await fetch(`${url}?shallow=true${authParam}`);
+  const response = await fetchWithTimeout(`${url}?shallow=true${authParam}`);
   if (!response.ok) return false;
 
   const rows = (await response.json()) || {};
@@ -225,13 +275,35 @@ export async function trimAnalyticsHistory(deviceId, keepCount = 120) {
   if (keysToDelete.length === 0) return true;
 
   const updates = Object.fromEntries(keysToDelete.map((key) => [key, null]));
-  const patchResponse = await fetch(`${url}?${authParam.replace(/^&/, "")}`, {
+  const patchResponse = await fetchWithTimeout(`${url}?${authParam.replace(/^&/, "")}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),
   });
 
   return patchResponse.ok;
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+export function subscribeToHistoricalReadings(deviceIds, onData, onError) {
+  return subscribeToFirestoreReadings(deviceIds, onData, onError);
+}
+
+export async function saveHistoricalReadingToFirestore(deviceId, reading, sessionId = "") {
+  return saveHistoricalReading(deviceId, reading, sessionId);
+}
+
+export async function saveHistoricalReadingsToFirestore(deviceId, readings = []) {
+  return saveHistoricalReadings(deviceId, readings);
 }
 
 export async function registerDevice(device) {
@@ -350,6 +422,9 @@ export async function writeActivityLog(event) {
   const timestamp = Number(event.timestamp) || Date.now();
   const payload = {
     deviceId: event.deviceId || "",
+    id: event.id || "",
+    sessionId: event.sessionId || "",
+    buttonPressCount: Number(event.buttonPressCount || event.button_press_count || 0),
     miner: event.miner || event.deviceId || "Unknown miner",
     type: event.type || "activity",
     status: event.status || "",
@@ -358,6 +433,8 @@ export async function writeActivityLog(event) {
     detail: event.detail || "",
     timestamp,
   };
+
+  if (firestoreDb) return saveActivityLog(payload);
 
   if (!db) return writeFirebasePath("activityLogs", "POST", payload);
 
@@ -371,6 +448,7 @@ export async function writeActivityLog(event) {
 }
 
 export async function clearActivityLogs() {
+  if (firestoreDb) return clearFirestoreActivityLogs();
   return writeWithSdkFallback(
     () => remove(ref(db, "activityLogs")),
     "activityLogs",
@@ -378,7 +456,8 @@ export async function clearActivityLogs() {
   );
 }
 
-export async function clearHealthLogs() {
+export async function clearHealthLogs(deviceIds = []) {
+  if (firestoreDb) return clearHistoricalData(deviceIds);
   return updateMultiPath({
     analytics: null,
     healthLogs: null,
@@ -401,26 +480,29 @@ export async function saveWifiConfiguration(deviceId, config, recordId = "") {
     sourceRecordId: id,
   };
 
-  return updateMultiPath({
-    [`wifiConfigurations/${deviceId}`]: payload,
-    [`wifiConnectionHistory/${id}`]: { ...payload, id },
-  });
+  const configWrite = await updateMultiPath({ [`wifiConfigurations/${deviceId}`]: payload });
+  if (firestoreDb) {
+    await saveWifiHistoryRecord({ ...payload, id });
+    return configWrite;
+  }
+  return updateMultiPath({ [`wifiConnectionHistory/${id}`]: { ...payload, id } });
 }
 
 export async function removeWifiConnection(record, removeDeviceQueue = false) {
-  const updates = {
-    [`wifiConnectionHistory/${record.id}`]: null,
-  };
-
-  if (removeDeviceQueue) {
-    updates[`wifiConfigurations/${record.deviceId}`] = null;
+  if (firestoreDb) {
+    await removeWifiHistoryRecord(record.id);
+    if (removeDeviceQueue) await updateMultiPath({ [`wifiConfigurations/${record.deviceId}`]: null });
+    return true;
   }
 
+  const updates = { [`wifiConnectionHistory/${record.id}`]: null };
+  if (removeDeviceQueue) updates[`wifiConfigurations/${record.deviceId}`] = null;
   return updateMultiPath(updates);
 }
 
 export async function saveHistorySummaries(deviceId, healthLogs = {}, miningSessions = {}) {
   if (!deviceId) return false;
+  if (firestoreDb) return saveSessionSummaries(deviceId, healthLogs, miningSessions);
   const updates = {};
 
   Object.entries(healthLogs || {}).forEach(([id, payload]) => {
@@ -433,4 +515,9 @@ export async function saveHistorySummaries(deviceId, healthLogs = {}, miningSess
 
   if (Object.keys(updates).length === 0) return true;
   return updateMultiPath(updates);
+}
+
+export async function updateSessionStatus(deviceId, sessionId, status, timestamp) {
+  if (firestoreDb) return updateFirestoreSessionStatus(deviceId, sessionId, status, timestamp);
+  return updateDevice(deviceId, { sessionStatus: status });
 }

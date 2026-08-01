@@ -1,24 +1,30 @@
 export const DEFAULT_THRESHOLDS = {
-  hrMin: 55,
-  hrMax: 105,
+  hrMin: 60,
+  hrMax: 110,
+  hrCriticalMin: 141,
   spo2Min: 80,
-  tempMin: 30.0,
-  tempMax: 38.0,
+  spo2CriticalMin: 60,
+  tempMin: 20.0,
+  tempMax: 36.0,
+  tempCriticalMin: 15.0,
+  tempCriticalMax: 38.0,
 };
 
 export function getVitalStatus(value, type, thresholds = DEFAULT_THRESHOLDS) {
   if (!value || value <= 0) return null;
   if (type === "hr") {
+    if (value >= thresholds.hrCriticalMin) return "CRITICAL";
     if (value < thresholds.hrMin) return "LOW";
     if (value > thresholds.hrMax) return "HIGH";
     return "NORMAL";
   }
   if (type === "spo2") {
-    if (value < thresholds.spo2Min) return "CRITICAL";
-    if (value < thresholds.spo2Min + 2) return "LOW";
+    if (value < thresholds.spo2CriticalMin) return "CRITICAL";
+    if (value < thresholds.spo2Min) return "LOW";
     return "NORMAL";
   }
   if (type === "temp") {
+    if (value <= thresholds.tempCriticalMin || value >= thresholds.tempCriticalMax) return "CRITICAL";
     if (value < thresholds.tempMin) return "LOW";
     if (value > thresholds.tempMax) return "HIGH";
     return "NORMAL";
@@ -56,8 +62,8 @@ export function buildAlerts(miners, thresholds = DEFAULT_THRESHOLDS) {
     const hrStatus = getVitalStatus(miner.hr, "hr", thresholds);
     const spo2Status = getVitalStatus(miner.spo2, "spo2", thresholds);
     const tempStatus = getVitalStatus(miner.temp, "temp", thresholds);
-    if (hrStatus === "LOW" || hrStatus === "HIGH") {
-      alerts.push({ id: `${miner.id}-hr`, deviceId: miner.id, severity: "warning", message: `${miner.name}: HR ${hrStatus} (${miner.hr} bpm)` });
+    if (["LOW", "HIGH", "CRITICAL"].includes(hrStatus)) {
+      alerts.push({ id: `${miner.id}-hr`, deviceId: miner.id, severity: hrStatus === "CRITICAL" ? "critical" : "warning", message: `${miner.name}: HR ${hrStatus} (${miner.hr} bpm)` });
     }
     if (spo2Status === "CRITICAL") {
       alerts.push({ id: `${miner.id}-spo2`, deviceId: miner.id, severity: "critical", message: `${miner.name}: SpO2 CRITICAL (${miner.spo2}%)` });
@@ -65,8 +71,8 @@ export function buildAlerts(miners, thresholds = DEFAULT_THRESHOLDS) {
     if (spo2Status === "LOW") {
       alerts.push({ id: `${miner.id}-spo2-low`, deviceId: miner.id, severity: "warning", message: `${miner.name}: SpO2 LOW (${miner.spo2}%)` });
     }
-    if (tempStatus === "HIGH") {
-      alerts.push({ id: `${miner.id}-temp-high`, deviceId: miner.id, severity: "critical", message: `${miner.name}: TEMP HIGH (${miner.temp}°C)` });
+    if (tempStatus === "HIGH" || tempStatus === "CRITICAL") {
+      alerts.push({ id: `${miner.id}-temp-high`, deviceId: miner.id, severity: tempStatus === "CRITICAL" ? "critical" : "warning", message: `${miner.name}: TEMP ${tempStatus} (${miner.temp}°C)` });
     }
     if (tempStatus === "LOW") {
       alerts.push({ id: `${miner.id}-temp-low`, deviceId: miner.id, severity: "warning", message: `${miner.name}: TEMP LOW (${miner.temp}°C)` });

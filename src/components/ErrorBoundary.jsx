@@ -1,5 +1,6 @@
 import { Component } from "react";
 import { C, ghostButtonStyle } from "../theme";
+import { reportNonFatal } from "../utils/safeStorage";
 
 // ErrorBoundary — catches render errors in the page tree so a single broken
 // module never white-screens the whole monitoring console. Safety-critical UI
@@ -17,7 +18,7 @@ export default class ErrorBoundary extends Component {
   componentDidCatch(error, info) {
     // Surface to the console for debugging; a production build could forward
     // this to a logging endpoint.
-    console.error("Page render error:", error, info?.componentStack);
+    reportNonFatal({ error, componentStack: info?.componentStack }, "Page render error");
   }
 
   reset = () => this.setState({ error: null });
@@ -34,7 +35,7 @@ export default class ErrorBoundary extends Component {
           <div style={{ color: C.textMuted, fontSize: 13, lineHeight: 1.6, marginTop: 10 }}>
             The rest of the console is still running. Live monitoring and alerts continue in the background.
           </div>
-          {this.state.error?.message && (
+          {import.meta.env.DEV && this.state.error?.message && (
             <div style={{ color: C.textDim, fontSize: 11, fontFamily: "monospace", marginTop: 12, padding: "9px 12px", background: "rgba(255,255,255,0.03)", border: `1px solid ${C.borderSoft}`, borderRadius: 7, wordBreak: "break-word" }}>
               {this.state.error.message}
             </div>
