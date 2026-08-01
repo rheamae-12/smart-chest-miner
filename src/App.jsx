@@ -147,7 +147,7 @@ export default function App() {
                 />
                 <Route
                   path="/devices"
-                  element={<DevicesPage miners={system.miners} setMiners={system.setMiners} />}
+                  element={<DevicesPage miners={system.miners} setMiners={system.setMiners} onActivityLog={system.recordActivityLog} />}
                 />
                 <Route
                   path="/health-logs"

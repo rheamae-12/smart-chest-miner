@@ -3,7 +3,7 @@ import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Too
 import Icon from "../components/Icon";
 import { C, cardStyle, controlStyle, moduleLabel, pageStyle } from "../theme";
 import { buildAlerts, getVitalStatus } from "../utils/alertChecker";
-import { dedupeConsecutiveLogs, formatLastSeen, formatReading, formatSystemTimestamp, lastSeenValue, uniqueChartLabels } from "../utils/formatters";
+import { dedupeConsecutiveLogs, formatLastSeen, formatReading, formatSystemTimestamp, uniqueChartLabels } from "../utils/formatters";
 import { sortMinersActiveFirst } from "../utils/minerOrdering";
 import { mergeSensorSeries } from "../utils/sensorSeries";
 
@@ -12,26 +12,6 @@ const TABS = [
   { key: "logs", label: "Activity", icon: "clock" },
   { key: "signal", label: "Signal", icon: "contact" },
 ];
-
-function latestMinerTimestamp(miner, series = {}) {
-  return ["hr", "spo2", "temp"].reduce(
-    (latest, key) => (series[key] || []).reduce(
-      (seriesLatest, point) => Math.max(seriesLatest, Number(point.timestamp || 0)),
-      latest,
-    ),
-    lastSeenValue(miner),
-  );
-}
-
-function findLatestMinerId(miners, liveData) {
-  return miners.reduce(
-    (latest, miner) => {
-      const timestamp = latestMinerTimestamp(miner, liveData[miner.id]);
-      return !latest || timestamp > latest.timestamp ? { id: miner.id, timestamp } : latest;
-    },
-    null,
-  )?.id || "";
-}
 
 // CommandCenterPage — master/detail operations cockpit. Left rail lists the fleet;
 // the right panel shows the selected miner's live vitals, trend, and detail tabs.
@@ -43,20 +23,22 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
     [miners],
   );
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState(() => findLatestMinerId(miners, liveData));
+  const [connectionFilter, setConnectionFilter] = useState("all");
+  const [selectedId, setSelectedId] = useState("");
   const [tab, setTab] = useState("overview");
-  const latestMinerId = useMemo(
-    () => findLatestMinerId(sorted, liveData),
-    [liveData, sorted],
-  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return sorted;
-    return sorted.filter((m) => `${m.name} ${m.id} ${m.location}`.toLowerCase().includes(q));
-  }, [sorted, search]);
+    return sorted.filter((m) => {
+      const matchesSearch = !q || `${m.name} ${m.id} ${m.location}`.toLowerCase().includes(q);
+      const online = m.active && !m.stale;
+      const matchesConnection = connectionFilter === "all"
+        || (connectionFilter === "online" ? online : !online);
+      return matchesSearch && matchesConnection;
+    });
+  }, [sorted, search, connectionFilter]);
 
-  const selected = miners.find((miner) => miner.id === selectedId) || miners.find((miner) => miner.id === latestMinerId) || null;
+  const selected = miners.find((miner) => miner.id === selectedId) || null;
   const alerts = useMemo(() => buildAlerts(miners, thresholds), [miners, thresholds]);
   const minerAlerts = selected ? alerts.filter((a) => a.deviceId === selected.id && !dismissedAlertIds.includes(a.id)) : [];
 
@@ -70,24 +52,38 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
         {/* ── Fleet rail (master) ── */}
         <aside className="cc-fleet-column">
           <div className="cc-miners-card" style={{ ...cardStyle, display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", minHeight: 0, overflow: "hidden" }}>
-          <div style={{ padding: "13px 14px", borderBottom: `1px solid ${C.borderSoft}` }}>
-            <div style={moduleLabel}>Miners</div>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
-              <span style={{ color: C.text, fontSize: 19, fontWeight: 950 }}>{online}<span style={{ color: C.textMuted, fontSize: 13 }}>/{miners.length}</span></span>
-              <span style={{ color: C.textMuted, fontSize: 11 }}>online</span>
-              {alerting > 0 && (
-                <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, color: C.red, fontSize: 11, fontWeight: 900 }}>
-                  <Icon name="alert" size={12} color={C.red} /> {alerting} alert{alerting === 1 ? "" : "s"}
-                </span>
-              )}
+          <div className="cc-miners-header" style={{ padding: "13px 14px", borderBottom: `1px solid ${C.borderSoft}` }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={moduleLabel}>Miners</div>
+              <div style={{ display: "inline-flex", alignItems: "baseline", gap: 8 }}>
+                <span style={{ color: C.text, fontSize: 19, fontWeight: 950 }}>{online}<span style={{ color: C.textMuted, fontSize: 13 }}>/{miners.length}</span></span>
+                <span style={{ color: C.textMuted, fontSize: 11 }}>online</span>
+                {alerting > 0 && (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: C.red, fontSize: 11, fontWeight: 900 }}>
+                    <Icon name="alert" size={12} color={C.red} /> {alerting}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="cc-miner-connection-filter" role="group" aria-label="Filter miners by connection status">
+              {["all", "online", "offline"].map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  className={connectionFilter === filter ? "is-active" : ""}
+                  onClick={() => setConnectionFilter(filter)}
+                >
+                  {filter[0].toUpperCase() + filter.slice(1)}
+                </button>
+              ))}
             </div>
           </div>
-          <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.borderSoft}` }}>
+          <div style={{ padding: "6px 8px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", alignItems: "center" }}>
             <input
               placeholder="Search miners"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              style={{ ...controlStyle, width: "100%", padding: "8px 11px", fontSize: 12 }}
+              style={{ ...controlStyle, width: "100%", margin: 0, boxSizing: "border-box", padding: "4px 9px", fontSize: 11.5 }}
             />
           </div>
           <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0, padding: 8 }}>
@@ -174,7 +170,7 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
         <section style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", gap: 12, minWidth: 0, minHeight: 0, overflow: "hidden" }}>
           {!selected ? (
             <div style={{ ...cardStyle, display: "grid", placeItems: "center", padding: 40, color: C.textMuted, fontSize: 13 }}>
-              No miners registered yet.
+              {miners.length ? "Select a miner from the list to view live monitoring." : "No miners registered yet."}
             </div>
           ) : (
             <>
@@ -301,7 +297,7 @@ function VitalsRow({ miner, thresholds }) {
     <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }} className="cc-vitals">
       <VitalTile label="Heart Rate" icon="heart" value={live ? formatReading(miner.hr, 0) : "--"} unit="bpm" color={C.red} status={live ? getVitalStatus(miner.hr, "hr", thresholds) : "OFFLINE"} />
       <VitalTile label="SpO2" icon="droplet" value={live ? formatReading(miner.spo2, 0) : "--"} unit="%" color={C.oxygen} status={live ? getVitalStatus(miner.spo2, "spo2", thresholds) : "OFFLINE"} />
-      <VitalTile label="Body Temp" icon="thermometer" value={live ? formatReading(miner.temp, 1) : "--"} unit="°C" color={C.teal} status={live ? getVitalStatus(miner.temp, "temp", thresholds) : "OFFLINE"} />
+      <VitalTile label="Temperature" icon="thermometer" value={live ? formatReading(miner.temp, 1) : "--"} unit="°C" color={C.teal} status={live ? getVitalStatus(miner.temp, "temp", thresholds) : "OFFLINE"} />
       <VitalTile label="Chest Contact" icon="contact" value={miner.active ? (miner.finger === false ? "No" : "Yes") : "--"} color={!miner.active ? C.offline : miner.finger === false ? C.amber : C.green} status={!miner.active ? "OFFLINE" : miner.finger === false ? "WARNING" : "NORMAL"} />
       <VitalTile label="Manual SOS" icon="siren" value={miner.active ? (miner.manual_alert ? "Pressed" : "Clear") : "--"} unit={miner.active ? `${miner.button_press_count || 0}x` : ""} color={!miner.active ? C.offline : miner.manual_alert ? C.red : C.green} status={!miner.active ? "OFFLINE" : miner.manual_alert ? "PRESSED" : "NORMAL"} />
     </div>
@@ -358,7 +354,7 @@ function OverviewTab({ miner, liveData, thresholds }) {
               <ReferenceLine yAxisId="spo2" y={thresholds?.spo2Min ?? 80} stroke={C.amber} strokeDasharray="4 4" strokeOpacity={0.5} />
               <Line yAxisId="hr" type="monotone" dataKey="hr" name="HR" stroke={C.red} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
               <Line yAxisId="spo2" type="monotone" dataKey="spo2" name="SpO2" stroke={C.oxygen} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
-              <Line yAxisId="temp" type="monotone" dataKey="temp" name="Body Temp" stroke={C.teal} strokeWidth={1.8} dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="temp" type="monotone" dataKey="temp" name="Temperature" stroke={C.teal} strokeWidth={1.8} dot={false} isAnimationActive={false} connectNulls />
             </LineChart>
           </ResponsiveContainer>
         ) : (
@@ -390,7 +386,7 @@ function OverviewTab({ miner, liveData, thresholds }) {
         />
         <Indicator
           color={!miner.active ? C.offline : miner.temp > 0 ? C.teal : C.amber}
-          label={!miner.active ? "Body temp offline" : miner.temp > 0 ? `Body temp ${formatReading(miner.temp, 1)}°C` : "Body temp waiting"}
+              label={!miner.active ? "Temperature offline" : miner.temp > 0 ? `Temperature ${formatReading(miner.temp, 1)}°C` : "Temperature waiting"}
           detail={!miner.active ? "No current temperature signal" : miner.temp > 0 ? "Within the live sensor stream" : "Waiting for a valid temperature"}
         />
       </div>

@@ -403,7 +403,7 @@ function mapActivityLogs(value) {
 
 // buildStatusLog — builds an activity log entry when a miner transitions between online/offline
 // isConcerningState — true when a miner is in a state worth alarming about if it
-// drops offline (manual alert, no chest contact, SpO2 critical, or body temp high).
+// drops offline (manual alert, no chest contact, SpO2 critical, or temperature high).
 // Used to tell a normal session-end apart from a possible emergency disconnect.
 function isConcerningState(miner, thresholds) {
   if (!miner || !miner.active) return false;
@@ -453,7 +453,7 @@ function buildStatusLog(miner, previousStatus) {
   };
 }
 
-// buildVitalLogs — generates activity log entries for out-of-range HR, SpO2, body temp, and manual alerts
+// buildVitalLogs — generates activity log entries for out-of-range HR, SpO2, temperature, and manual alerts
 export function buildVitalLogs(miner, thresholds) {
   if (!miner.active) return [];
   const rows = [];
@@ -514,8 +514,8 @@ export function buildVitalLogs(miner, thresholds) {
       type: "vital",
       status: tempStatus.toLowerCase(),
       severity: tempStatus === "CRITICAL" ? "critical" : "warning",
-      title: `Body temperature ${tempStatus.toLowerCase()}`,
-      detail: `${miner.name} recorded body temp ${miner.temp}°C at ${formatSystemTimestamp(miner.lastSeen)}.`,
+      title: `Temperature ${tempStatus.toLowerCase()}`,
+      detail: `${miner.name} recorded temperature ${miner.temp}°C at ${formatSystemTimestamp(miner.lastSeen)}.`,
       timestamp: miner.lastSeen?.getTime?.() || Date.now(),
     });
   }
@@ -527,8 +527,8 @@ export function buildVitalLogs(miner, thresholds) {
       type: "vital",
       status: "low",
       severity: "warning",
-      title: "Body temperature low",
-      detail: `${miner.name} recorded body temp ${miner.temp}°C at ${formatSystemTimestamp(miner.lastSeen)}.`,
+      title: "Temperature low",
+      detail: `${miner.name} recorded temperature ${miner.temp}°C at ${formatSystemTimestamp(miner.lastSeen)}.`,
       timestamp: miner.lastSeen?.getTime?.() || Date.now(),
     });
   }
@@ -555,6 +555,7 @@ export function useMinerSystem(enabled) {
   const persistedHistoryRef = useRef({});
   const hasDeviceSnapshotRef = useRef(false);
   const previousStatusRef = useRef({});
+  const knownStatusDeviceIdsRef = useRef(new Set());
   const emittedEventRef = useRef(new Set());
   const realtimeAnalyticsRef = useRef({});
   const historicalAnalyticsRef = useRef({});
@@ -642,9 +643,34 @@ export function useMinerSystem(enabled) {
         archivedDeviceIdsRef.current.delete(miner.id);
       });
 
+      prev.forEach((miner) => {
+        if (!nextIds.has(miner.id)) {
+          delete previousStatusRef.current[miner.id];
+          knownStatusDeviceIdsRef.current.delete(miner.id);
+        }
+      });
+
       minersRef.current = next;
       return next;
     });
+  };
+
+  // recordActivityLog — persists an operator activity and updates the local feed
+  // immediately, so registry changes are visible in notifications without waiting
+  // for the next activity-log subscription snapshot.
+  const recordActivityLog = async (event = {}) => {
+    const timestamp = Number(event.timestamp) || Date.now();
+    const payload = {
+      ...event,
+      id: event.id || `operator-${event.type || "activity"}-${event.deviceId || "system"}-${timestamp}`,
+      timestamp,
+    };
+    await writeActivityLog(payload);
+    setActivityLogs((current) => [
+      payload,
+      ...current.filter((log) => log.id !== payload.id),
+    ].sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0)).slice(0, MAX_ACTIVITY_LOGS));
+    return payload;
   };
 
   useEffect(() => {
@@ -736,7 +762,14 @@ export function useMinerSystem(enabled) {
           }
 
           const previousStatus = previousStatusRef.current[miner.id];
-          if (previousStatus !== expectedStatus) {
+          const firstSeenDevice = !knownStatusDeviceIdsRef.current.has(miner.id);
+          knownStatusDeviceIdsRef.current.add(miner.id);
+          if (firstSeenDevice) {
+            // The first snapshot establishes the baseline. A newly registered
+            // offline device has never been online, so it must not create a
+            // misleading "Connection lost" notification.
+            previousStatusRef.current[miner.id] = expectedStatus;
+          } else if (previousStatus !== expectedStatus) {
             previousStatusRef.current[miner.id] = expectedStatus;
             if (previousStatus === "online" && expectedStatus === "offline") queueSessionPrompt(miner);
             const statusEvent = buildStatusLog(miner, previousStatus);
@@ -899,6 +932,7 @@ export function useMinerSystem(enabled) {
   return {
     miners,
     setMiners,
+    recordActivityLog,
     liveData,
     analyticsData,
     activityLogs,

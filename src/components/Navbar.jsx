@@ -255,47 +255,59 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
           className="notification-modal-panel"
           onClose={() => setNotificationsOpen(false)}
           actions={
-            <>
-              <button
-                onClick={() => setClearConfirmOpen(true)}
-                disabled={visibleEvents.length === 0}
-                style={{ ...ghostButtonStyle, padding: "9px 14px", color: C.red, borderColor: `${C.red}44`, opacity: visibleEvents.length ? 1 : 0.5, cursor: visibleEvents.length ? "pointer" : "not-allowed" }}
-              >
-                Clear all
-              </button>
-              <button
-                onClick={markAllRead}
-                disabled={notificationCount === 0}
-                style={{ ...ghostButtonStyle, padding: "9px 14px", opacity: notificationCount ? 1 : 0.5, cursor: notificationCount ? "pointer" : "not-allowed" }}
-              >
-                Mark all read
-              </button>
-              <button onClick={() => setNotificationsOpen(false)} style={{ ...primaryButtonStyle, padding: "9px 16px" }}>
-                Done
-              </button>
-            </>
+            <button onClick={() => setNotificationsOpen(false)} style={{ ...primaryButtonStyle, padding: "9px 16px" }}>
+              Done
+            </button>
           }
         >
           <div className="notification-modal-content">
-          <div className="notification-modal-summary" style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 11 }}>
-            {notificationCount === 0 ? (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: C.green, fontSize: 12, fontWeight: 800 }}>
-                <Icon name="check" size={14} color={C.green} /> All caught up
-              </span>
-            ) : (
-              <>
-                <span style={{ color: C.textMuted, fontSize: 12 }}>{notificationCount} unread</span>
-                {criticalCount > 0 && <CountChip color={C.red} label={`${criticalCount} critical`} />}
-                {warningCount > 0 && <CountChip color={C.amber} label={`${warningCount} warning`} />}
-              </>
-            )}
-            <button
-              onClick={() => setShowUnreadOnly((value) => !value)}
-              style={{ marginLeft: "auto", ...ghostButtonStyle, padding: "4px 10px", fontSize: 10, fontWeight: 900, color: showUnreadOnly ? C.primary : C.textMuted, borderColor: showUnreadOnly ? `${C.primary}55` : C.border }}
-            >
-              {showUnreadOnly ? "Showing unread" : "Show all"}
-            </button>
-          </div>
+            <div className="notification-modal-summary" style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 11 }}>
+              {notificationCount === 0 ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: C.green, fontSize: 12, fontWeight: 800 }}>
+                  <Icon name="check" size={14} color={C.green} /> All caught up
+                </span>
+              ) : (
+                <>
+                  <span style={{ color: C.textMuted, fontSize: 12 }}>{notificationCount} unread</span>
+                  {criticalCount > 0 && <CountChip color={C.red} label={`${criticalCount} critical`} />}
+                  {warningCount > 0 && <CountChip color={C.amber} label={`${warningCount} warning`} />}
+                </>
+              )}
+              <div className="notification-modal-actions" aria-label="Notification actions">
+                <button
+                  type="button"
+                  onClick={() => setClearConfirmOpen(true)}
+                  disabled={visibleEvents.length === 0}
+                  className="notification-icon-action"
+                  title="Clear all notifications"
+                  aria-label="Clear all notifications"
+                  style={{ ...ghostButtonStyle, color: C.red, borderColor: `${C.red}44`, opacity: visibleEvents.length ? 1 : 0.5, cursor: visibleEvents.length ? "pointer" : "not-allowed" }}
+                >
+                  <Icon name="trash" size={14} color={visibleEvents.length ? C.red : C.textMuted} />
+                </button>
+                <button
+                  type="button"
+                  onClick={markAllRead}
+                  disabled={notificationCount === 0}
+                  className="notification-icon-action"
+                  title="Mark all notifications as read"
+                  aria-label="Mark all notifications as read"
+                  style={{ ...ghostButtonStyle, opacity: notificationCount ? 1 : 0.5, cursor: notificationCount ? "pointer" : "not-allowed" }}
+                >
+                  <Icon name="check" size={14} color={notificationCount ? C.textMuted : C.textMuted} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowUnreadOnly((value) => !value)}
+                  className="notification-icon-action"
+                  title={showUnreadOnly ? "Show all notifications" : "Show unread notifications only"}
+                  aria-label={showUnreadOnly ? "Show all notifications" : "Show unread notifications only"}
+                  style={{ ...ghostButtonStyle, color: showUnreadOnly ? C.primary : C.textMuted, borderColor: showUnreadOnly ? `${C.primary}55` : C.border }}
+                >
+                  <Icon name={showUnreadOnly ? "eyeOff" : "eye"} size={14} color={showUnreadOnly ? C.primary : C.textMuted} />
+                </button>
+              </div>
+            </div>
           <div className="notification-list hide-scrollbar" style={{ display: "grid", gap: 8, overflow: "auto" }}>
             {visibleEvents.length === 0 ? (
               <div style={{ color: C.textMuted, fontSize: 13 }}>

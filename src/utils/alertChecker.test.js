@@ -20,7 +20,7 @@ describe("getVitalStatus", () => {
     expect(getVitalStatus(98, "spo2")).toBe("NORMAL");
   });
 
-  it("classifies body temperature", () => {
+  it("classifies temperature", () => {
     expect(getVitalStatus(15, "temp")).toBe("CRITICAL");
     expect(getVitalStatus(19, "temp")).toBe("LOW");
     expect(getVitalStatus(20, "temp")).toBe("NORMAL");
@@ -66,7 +66,7 @@ describe("buildAlerts", () => {
     expect(alerts.some((a) => a.id === "MCM-1-hr")).toBe(false);
   });
 
-  it("flags high body temperature as critical", () => {
+  it("flags high temperature as critical", () => {
     const alerts = buildAlerts([{ ...base, temp: 38 }], DEFAULT_THRESHOLDS);
     expect(alerts.some((a) => a.id === "MCM-1-temp-high" && a.severity === "critical")).toBe(true);
   });

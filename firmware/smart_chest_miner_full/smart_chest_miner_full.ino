@@ -1,11 +1,11 @@
 /*
  * Smart Chest Miner - ESP32 firmware (COMPLETE / full hardware)
- * Based on the schematic: MAX30102 (HR/SpO2) + MAX30205 (body temp) +
+ * Based on the schematic: MAX30102 (HR/SpO2) + MAX30205 (temperature) +
  * SSD1306 OLED + 3 buzzers + 2 LEDs + SOS button.
  *
  * Design notes:
  *  - Real HR + SpO2 via the Maxim algorithm (no simulation).
- *  - Body temperature from MAX30205 (°C).
+ *  - Temperature from MAX30205 (°C).
  *  - OLED shows live vitals on-device.
  *  - 3 buzzers map to the 3 vitals (HR / SpO2 / Temp); the SOS button sounds all.
  *  - I2C devices are AUTO-DETECTED at boot, so this same sketch runs on the
@@ -536,7 +536,7 @@ void updateSimulatedValues() {
   currentSpO2 = constrain(currentSpO2 + random(-50, 51) / 100.0, SIM_SPO2_MIN, SIM_SPO2_MAX);
 }
 
-// MAX30205 body temperature (register 0x00, 1 LSB = 1/256 °C)
+// MAX30205 temperature (register 0x00, 1 LSB = 1/256 °C)
 float readBodyTemp() {
   Wire.beginTransmission(ADDR_MAX30205);
   Wire.write(0x00);

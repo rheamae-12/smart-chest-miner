@@ -608,6 +608,22 @@ input:-webkit-autofill:focus {
   margin-left: auto;
 }
 
+.notification-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.notification-icon-action {
+  width: 30px;
+  height: 30px;
+  padding: 0 !important;
+  display: grid;
+  place-items: center;
+}
+
 .notification-row-detail {
   overflow-wrap: anywhere;
 }
@@ -1407,6 +1423,7 @@ input:-webkit-autofill:focus {
    narrow screens instead of forcing the page wider than the viewport. */
 .health-session-table-header,
 .health-session-table-row {
+  width: 100%;
   box-sizing: border-box;
 }
 
@@ -1453,6 +1470,12 @@ input:-webkit-autofill:focus {
   overflow-wrap: anywhere;
 }
 
+.sensor-nodes-grid {
+  min-width: 0;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
 .maintenance-row {
   width: 100%;
   box-sizing: border-box;
@@ -1481,6 +1504,13 @@ input:-webkit-autofill:focus {
 }
 
 @container app-content (max-width: 840px) {
+  .sensor-nodes-grid {
+    grid-auto-flow: row !important;
+    grid-auto-columns: auto !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    overflow-x: hidden !important;
+  }
+
   .health-session-table-header {
     display: none !important;
   }
@@ -1758,6 +1788,39 @@ input:-webkit-autofill:focus {
 .dashboard-readiness-card,
 .dashboard-priority-card {
   min-width: 0;
+}
+
+.cc-miner-connection-filter {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 10px;
+  padding: 3px;
+  border: 1px solid rgba(184, 214, 226, 0.1);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.cc-miner-connection-filter button {
+  min-width: 0;
+  padding: 5px 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #768390;
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.cc-miner-connection-filter button:hover,
+.cc-miner-connection-filter button.is-active {
+  background: rgba(255, 255, 255, 0.09);
+  color: #e6edf0;
 }
 
 .dashboard-fleet-panel > *,
@@ -2079,6 +2142,10 @@ input:-webkit-autofill:focus {
 }
 
 @media (max-width: 680px) {
+  .sensor-nodes-grid {
+    grid-template-columns: 1fr !important;
+  }
+
   .filter-toolbar-controls,
   .filter-field,
   .filter-search {

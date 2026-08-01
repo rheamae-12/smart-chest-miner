@@ -1,12 +1,14 @@
 import { useMemo } from "react";
 import { C, cardStyle, pageStyle } from "../theme";
-import { formatLastSeen, formatReading } from "../utils/formatters";
-import { sortMinersActiveFirst } from "../utils/minerOrdering";
+import { formatLastSeen, formatReading, lastSeenValue } from "../utils/formatters";
 
 // Dedicated sensor diagnostics. General events remain in Alert History and Command Center.
 export default function SensorStatusPage({ miners = [] }) {
   const fleet = useMemo(
-    () => sortMinersActiveFirst(miners),
+    () => [...miners].sort((a, b) => {
+      const newestFirst = lastSeenValue(b) - lastSeenValue(a);
+      return newestFirst || String(a.id || "").localeCompare(String(b.id || ""));
+    }),
     [miners],
   );
   const isOnline = (miner) => miner.active && !miner.stale;
@@ -29,7 +31,7 @@ export default function SensorStatusPage({ miners = [] }) {
             <div style={{ color: C.text, fontSize: 15, fontWeight: 950 }}>Sensor nodes</div>
             <Indicator color={active ? C.green : C.offline} label="Diagnostics update automatically" />
           </div>
-          <div className="sensor-nodes-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(310px, 1fr))", gap: 10 }}>
+          <div className="sensor-nodes-grid hide-scrollbar" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(310px, 1fr))", gridTemplateRows: "auto", gridAutoFlow: "column", gridAutoColumns: "minmax(310px, 1fr)", gap: 10, overflowX: "auto", overflowY: "hidden", minWidth: 0 }}>
             {fleet.map((miner) => <SensorNode key={miner.id} miner={miner} />)}
           </div>
         </section>
@@ -94,7 +96,7 @@ function SensorNode({ miner }) {
         <SensorMetric label="Heart rate" value={online && miner.hr > 0 ? `${formatReading(miner.hr, 0)} bpm` : "--"} color={online && miner.hr > 0 ? C.red : C.offline} state={online && miner.hr > 0 ? "Reading" : "No signal"} />
         <SensorMetric label="SpO2" value={online && miner.spo2 > 0 ? `${formatReading(miner.spo2, 0)}%` : "--"} color={online && miner.spo2 > 0 ? C.oxygen : C.offline} state={online && miner.spo2 > 0 ? "Reading" : "No signal"} />
         <SensorMetric label="Manual SOS" value={online ? (miner.manual_alert ? "Pressed" : "Clear") : "--"} color={online && miner.manual_alert ? C.red : online ? C.green : C.offline} state={online ? `${miner.button_press_count || 0} activations` : "No signal"} />
-        <SensorMetric label="Body temp" value={online && miner.temp > 0 ? `${formatReading(miner.temp, 1)}°C` : "--"} color={online && miner.temp > 0 ? C.teal : C.offline} state={online && miner.temp > 0 ? "Reading" : "No signal"} />
+        <SensorMetric label="Temperature" value={online && miner.temp > 0 ? `${formatReading(miner.temp, 1)}°C` : "--"} color={online && miner.temp > 0 ? C.teal : C.offline} state={online && miner.temp > 0 ? "Reading" : "No signal"} />
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, color: C.textMuted, fontSize: 11 }}>
         <span>Contact: <b style={{ color: miner.finger === false ? C.amber : online ? C.green : C.offline }}>{miner.finger === false ? "Missing" : online ? "Valid" : "Offline"}</b></span>

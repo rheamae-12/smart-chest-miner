@@ -113,8 +113,8 @@ export default function SettingsPage({ miners, staleSeconds }) {
               </div>
             )}
             <div style={{ display: "grid", gap: 6 }}>
-              <AlertRow label="Critical Alert" description="Manual SOS button, low SpO2, or high body temperature" color={C.red} />
-              <AlertRow label="Warning Alert" description="Heart rate out of range, chest contact lost, or low body temperature" color={C.amber} />
+              <AlertRow label="Critical Alert" description="Manual SOS button, low SpO2, or high temperature" color={C.red} />
+              <AlertRow label="Warning Alert" description="Heart rate out of range, chest contact lost, or low temperature" color={C.amber} />
               <AlertRow label="Device Offline" description="A miner stops sending data past the offline timeout" color={C.offline} />
             </div>
           </SettingsCard>

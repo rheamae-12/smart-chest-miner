@@ -137,7 +137,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
             <div className="cc-vitals health-chart-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, minHeight: 0, height: "100%" }}>
               <SensorChart data={chartData} dataKey="hr" name="Heart Rate" color={C.red} yLabel="bpm" />
               <SensorChart data={chartData} dataKey="spo2" name="SpO2" color={C.oxygen} domain={dynamicDomain(chartData, "spo2", 2)} yLabel="%" />
-              <SensorChart data={chartData} dataKey="temp" name="Body Temp" color={C.teal} domain={dynamicDomain(chartData, "temp", 0.4)} yLabel="°C" />
+              <SensorChart data={chartData} dataKey="temp" name="Temperature" color={C.teal} domain={dynamicDomain(chartData, "temp", 0.4)} yLabel="°C" />
             </div>
 
             <div style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
@@ -161,7 +161,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
                   <span>Duration</span>
                   <span>Heart Rate</span>
                   <span>SpO₂</span>
-                  <span>Body Temperature</span>
+                  <span>Temperature</span>
                   <span>Alerts</span>
                   <span>SOS Presses</span>
                   <span>Session Status</span>
@@ -179,7 +179,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, a
                     <span data-label="Duration" style={{ color: C.textDim, fontWeight: 800 }}>{session.duration}</span>
                     <div data-label="Heart rate"><ReadingRange value={session.hr} color={C.red} unit="bpm" /></div>
                     <div data-label="SpO2"><ReadingRange value={session.spo2} color={C.oxygen} unit="%" /></div>
-                    <div data-label="Body temperature"><ReadingRange value={session.temp} color={C.teal} unit="°C" /></div>
+                    <div data-label="Temperature"><ReadingRange value={session.temp} color={C.teal} unit="°C" /></div>
                     <div data-label="Alerts"><AlertsText alerts={session.alerts} /></div>
                     <span data-label="SOS presses" style={{ color: session.manualPressCount ? C.red : C.textMuted, fontWeight: 900 }}>{session.manualPressCount}</span>
                     <span data-label="Session status"><StatusText session={session} /></span>
@@ -507,9 +507,9 @@ function detectSensorSpike(miner, rows, thresholds) {
   if (hr > 0 && hr < thresholds.hrMin) return { sensor: "Heart Rate", label: `HR low spike: ${formatReading(hr, 0)} bpm`, color: C.amber };
   if (spo2 > 0 && spo2 < thresholds.spo2CriticalMin) return { sensor: "SpO2", label: `SpO2 critical spike: ${formatReading(spo2, 0)}%`, color: C.red };
   if (spo2 > 0 && spo2 < thresholds.spo2Min) return { sensor: "SpO2", label: `SpO2 low spike: ${formatReading(spo2, 0)}%`, color: C.amber };
-  if (temp > 0 && (temp <= thresholds.tempCriticalMin || temp >= thresholds.tempCriticalMax)) return { sensor: "Body Temp", label: `Temp critical: ${formatReading(temp, 1)}°C`, color: C.red };
-  if (temp > 0 && temp > thresholds.tempMax) return { sensor: "Body Temp", label: `Temp high: ${formatReading(temp, 1)}°C`, color: C.amber };
-  if (temp > 0 && temp < thresholds.tempMin) return { sensor: "Body Temp", label: `Temp low: ${formatReading(temp, 1)}°C`, color: C.amber };
+  if (temp > 0 && (temp <= thresholds.tempCriticalMin || temp >= thresholds.tempCriticalMax)) return { sensor: "Temperature", label: `Temperature critical: ${formatReading(temp, 1)}°C`, color: C.red };
+  if (temp > 0 && temp > thresholds.tempMax) return { sensor: "Temperature", label: `Temperature high: ${formatReading(temp, 1)}°C`, color: C.amber };
+  if (temp > 0 && temp < thresholds.tempMin) return { sensor: "Temperature", label: `Temperature low: ${formatReading(temp, 1)}°C`, color: C.amber };
 
   for (let index = 1; index < validRows.length; index += 1) {
     const previous = validRows[index - 1];
@@ -659,8 +659,8 @@ function AlertsText({ alerts }) {
 
 const tableHeader = {
   display: "grid",
-  gridTemplateColumns: "1.05fr 1.2fr 0.65fr 1fr 1fr 1.15fr 1.5fr 0.7fr 0.85fr",
-  minWidth: 1480,
+  gridTemplateColumns: "minmax(130px, 1.05fr) minmax(150px, 1.2fr) minmax(64px, 0.65fr) minmax(84px, 1fr) minmax(74px, 1fr) minmax(100px, 1.15fr) minmax(120px, 1.5fr) minmax(58px, 0.7fr) minmax(82px, 0.85fr)",
+  minWidth: "100%",
   gap: 12,
   padding: "10px 14px",
   color: C.textMuted,
@@ -672,8 +672,8 @@ const tableHeader = {
 
 const tableRow = {
   display: "grid",
-  gridTemplateColumns: "1.05fr 1.2fr 0.65fr 1fr 1fr 1.15fr 1.5fr 0.7fr 0.85fr",
-  minWidth: 1480,
+  gridTemplateColumns: "minmax(130px, 1.05fr) minmax(150px, 1.2fr) minmax(64px, 0.65fr) minmax(84px, 1fr) minmax(74px, 1fr) minmax(100px, 1.15fr) minmax(120px, 1.5fr) minmax(58px, 0.7fr) minmax(82px, 0.85fr)",
+  minWidth: "100%",
   gap: 12,
   padding: "12px 14px",
   alignItems: "center",

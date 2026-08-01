@@ -20,7 +20,7 @@ const STATUS_FILTERS = [
 ];
 
 // DevicesPage — device registry: register, edit, and remove miners; shows live vitals per row
-export default function DevicesPage({ miners, setMiners }) {
+export default function DevicesPage({ miners, setMiners, onActivityLog }) {
   const { canManage } = useAuth();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
@@ -115,19 +115,19 @@ export default function DevicesPage({ miners, setMiners }) {
             : [...prev, newDevice]
           ).sort((a, b) => a.id.localeCompare(b.id));
         });
-        await persist(() => writeActivityLog({ deviceId: newDevice.id, miner: newDevice.name, type: "crud", status: "registered", severity: "info", title: "Device registered", detail: `${newDevice.name} was added to the miner registry.` }));
+        await persist(() => (onActivityLog || writeActivityLog)({ deviceId: newDevice.id, miner: newDevice.name, type: "crud", status: "registered", severity: "info", title: "Device registered", detail: `${newDevice.name} was added to the miner registry.` }));
         showNotice(`${payload.name} registered successfully.`);
 
       } else if (type === "edit") {
         await updateDevice(payload.id, { name: payload.name, location: payload.location });
         setMiners((prev) => prev.map((m) => (m.id === payload.id ? { ...m, name: payload.name, location: payload.location } : m)));
-        await persist(() => writeActivityLog({ deviceId: payload.id, miner: payload.name, type: "crud", status: "updated", severity: "info", title: "Device updated", detail: `${payload.name} registry details were updated.` }), "");
+        await persist(() => (onActivityLog || writeActivityLog)({ deviceId: payload.id, miner: payload.name, type: "crud", status: "updated", severity: "info", title: "Device updated", detail: `${payload.name} registry details were updated.` }), "");
         showNotice(`${payload.name} updated successfully.`);
 
       } else if (type === "remove") {
         await removeDevice(payload.id);
         setMiners((prev) => prev.filter((m) => m.id !== payload.id));
-        await persist(() => writeActivityLog({ deviceId: payload.id, miner: payload.name, type: "crud", status: "removed", severity: "warning", title: "Device removed", detail: `${payload.name} was removed from the miner registry.` }), "");
+        await persist(() => (onActivityLog || writeActivityLog)({ deviceId: payload.id, miner: payload.name, type: "crud", status: "removed", severity: "warning", title: "Device removed", detail: `${payload.name} was removed from the miner registry.` }), "");
         showNotice(`${payload.name} removed.`);
       }
 

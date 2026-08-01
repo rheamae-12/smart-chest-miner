@@ -23,7 +23,7 @@ export const C = {
   // Status colors
   red: "#FB5B5B",
   green: "#35D07F",
-  teal: "#2DD4BF",   // body temperature sensor
+  teal: "#2DD4BF",   // temperature sensor
   offline: "#63727B",
 
   // Typography

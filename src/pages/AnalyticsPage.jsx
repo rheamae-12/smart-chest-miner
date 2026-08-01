@@ -5,7 +5,7 @@ import { C, cardStyle, controlStyle, pageStyle } from "../theme";
 import { average, compactTimestamp, dedupeConsecutiveLogs, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 import { compareMinersActiveFirst } from "../utils/minerOrdering";
 
-// AnalyticsPage — trend charts and miner comparison for HR, SpO2, and body temperature analytics
+// AnalyticsPage — trend charts and miner comparison for HR, SpO2, and temperature analytics
 export default function AnalyticsPage({ miners, analyticsData, liveData = {}, activityLogs = [] }) {
   const [filter, setFilter] = useState({ miner: "all", range: "ALL", bucket: "1" });
   const sortedMiners = useMemo(() => buildMinerOptions(miners, analyticsData, liveData), [analyticsData, liveData, miners]);
@@ -71,7 +71,7 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
         <section className="analytics-metrics" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <Metric label="Avg Heart Rate" value={formatReading(average(rows.map((row) => row.hr)), 0)} unit="bpm" color={C.red} range={readingRange(rows, "hr", 0)} />
           <Metric label="Avg SpO2" value={formatReading(average(rows.map((row) => row.spo2)), 0)} unit="%" color={C.oxygen} range={readingRange(rows, "spo2", 0)} />
-          <Metric label="Avg Body Temp" value={formatReading(average(rows.map((row) => row.temp)), 1)} unit="°C" color={C.teal} range={readingRange(rows, "temp", 1)} />
+          <Metric label="Avg Temperature" value={formatReading(average(rows.map((row) => row.temp)), 1)} unit="°C" color={C.teal} range={readingRange(rows, "temp", 1)} />
           <Metric label="Tracked Miners" value={visibleMiners.length} unit={`/${miners.length}`} color={C.green} />
           <Metric label="Total Readings" value={rows.length} unit="records" color={C.amber} />
         </section>
@@ -83,7 +83,7 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
                 <div style={{ minWidth: 0 }}>
                   <div style={{ color: C.text, fontSize: 15, fontWeight: 950 }}>Reading History</div>
                   <div style={{ color: C.textMuted, fontSize: 11, marginTop: 2 }}>
-                    {filter.miner === "all" ? "HR, SpO2 & body temp aggregated across miners" : `Readings for ${visibleMiners[0]?.name || "selected miner"}`}
+                    {filter.miner === "all" ? "HR, SpO2 & temperature aggregated across miners" : `Readings for ${visibleMiners[0]?.name || "selected miner"}`}
                   </div>
                 </div>
                 <Legend />
@@ -105,7 +105,7 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
                       <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
                       <Area yAxisId="vital" type="monotone" dataKey="hr" name="Heart Rate" stroke={C.red} fill="url(#analyticsHr)" strokeWidth={2.2} dot={chartData.length < 2 ? { r: 3 } : false} isAnimationActive={false} connectNulls />
                       <Area yAxisId="vital" type="monotone" dataKey="spo2" name="SpO2" stroke={C.oxygen} fill="transparent" strokeWidth={2} dot={chartData.length < 2 ? { r: 3 } : false} isAnimationActive={false} connectNulls />
-                      <Line yAxisId="temp" type="monotone" dataKey="temp" name="Body Temp" stroke={C.teal} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+                      <Line yAxisId="temp" type="monotone" dataKey="temp" name="Temperature" stroke={C.teal} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
                     </ComposedChart>
                   </ResponsiveContainer>
                 ) : (
@@ -300,21 +300,21 @@ function getRangeStart(range, referenceTimestamp = 0) {
   return 0;
 }
 
-// buildActivityLogEntries — maps raw Firebase activity logs to display-ready objects,
-// filtered by miner and de-duplicated (collapses repeated identical events).
+// buildActivityLogEntries — maps only sensor and manual SOS activity logs to
+// display-ready objects, filtered by miner and de-duplicated.
 function buildActivityLogEntries(activityLogs, minerFilter, range, referenceTimestamp) {
   const start = getRangeStart(range, referenceTimestamp);
   const matchingLogs = activityLogs
     .filter((log) => {
       const selected = minerFilter === "all" || log.deviceId === minerFilter;
-      const anomalous = log.severity === "critical" || log.severity === "warning";
+      const alertType = log.type === "vital" || log.type === "manual_alert";
+      const anomalous = log.type === "manual_alert" || log.severity === "critical" || log.severity === "warning";
       const withinRange = !start || Number(log.timestamp || 0) >= start;
-      return selected && anomalous && withinRange;
+      return selected && alertType && anomalous && withinRange;
     })
     .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
 
   return dedupeConsecutiveLogs(matchingLogs)
-    .slice(0, 40)
     .map((log) => ({
       id: log.id,
       name: log.miner || log.deviceId,
