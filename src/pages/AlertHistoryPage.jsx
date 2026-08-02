@@ -39,9 +39,11 @@ const tableRow = {
   fontSize: 12,
 };
 
-function isAlertEntry(log) {
-  if (log.severity === "info") return false;
+// eslint-disable-next-line react-refresh/only-export-components
+export function isAlertEntry(log) {
   if (log.type === "status" && log.status === "online") return false;
+  if (log.type === "status" && log.status === "offline") return true;
+  if (log.severity === "info") return false;
   return true;
 }
 
@@ -300,8 +302,8 @@ function AlertRow({ log, alertType, onViewSnapshot }) {
         <div style={{ color: C.textMuted, fontSize: 10, marginTop: 2 }}>{log.deviceId}</div>
       </div>
       <span style={{ color: C.textDim }}>{alertType}</span>
-      <strong style={{ color: log.severity === "critical" ? C.red : C.amber }}>
-        {log.severity === "critical" ? "Critical" : "Warning"}
+      <strong style={{ color: log.type === "status" && log.status === "offline" ? C.offline : log.severity === "critical" ? C.red : C.amber }}>
+        {log.type === "status" && log.status === "offline" ? "Offline" : log.severity === "critical" ? "Critical" : "Warning"}
       </strong>
       <button
         onClick={onViewSnapshot}
@@ -397,31 +399,62 @@ function RecentAlertNote({ log, onClick }) {
   );
 }
 
-function formatAlertReading(log) {
-  const hasReading = log?.reading !== null && log?.reading !== undefined && log?.reading !== "" && Number.isFinite(Number(log.reading));
-  if (hasReading) {
-    const value = Number(log.reading);
-    const digits = log.unit === "°C" ? 1 : 0;
-    return `${formatReading(value, digits)}${log.unit ? ` ${log.unit}` : ""}`;
+// eslint-disable-next-line react-refresh/only-export-components
+export function formatAlertReading(log) {
+  const text = `${log?.title || ""} ${log?.detail || ""}`;
+  const metric = /\b(?:heart\s*rate|hr)\b/i.test(text)
+    ? "hr"
+    : /(?:spo2|spo₂)/i.test(text)
+      ? "spo2"
+      : /\b(?:temperature|temp)\b/i.test(text)
+        ? "temp"
+        : "";
+  const explicitUnit = normalizeAlertUnit(log?.unit || log?.readingUnit);
+  const unit = explicitUnit || { hr: "bpm", spo2: "%", temp: "°C" }[metric] || "";
+  const digits = unit === "°C" ? 1 : 0;
+  const directCandidates = [log?.reading, log?.readingValue, log?.value, log?.currentValue];
+  const directValue = directCandidates
+    .map((candidate) => {
+      const numericValue = Number(candidate);
+      if (Number.isFinite(numericValue)) return numericValue;
+      const textValue = String(candidate || "").match(/-?\d+(?:\.\d+)?/);
+      return textValue ? Number(textValue[0]) : 0;
+    })
+    .find((value) => Number.isFinite(value) && value > 0);
+  if (directValue) return `${formatReading(directValue, digits)}${unit ? ` ${unit}` : ""}`;
+
+  const fieldValue = metric === "hr" ? log?.hr : metric === "spo2" ? log?.spo2 : metric === "temp" ? log?.temp : null;
+  const numericFieldValue = Number(fieldValue);
+  if (Number.isFinite(numericFieldValue) && numericFieldValue > 0) {
+    return `${formatReading(numericFieldValue, digits)}${unit ? ` ${unit}` : ""}`;
   }
 
   // Older activity records did not persist a separate reading field. Recover
-  // the value from their detail text so historical snapshots remain useful.
-  const detail = String(log?.detail || "");
-  const patterns = [
-    { pattern: /HR\s+(-?\d+(?:\.\d+)?)\s*bpm/i, unit: "bpm", digits: 0 },
-    { pattern: /SpO2\s+(-?\d+(?:\.\d+)?)\s*%/i, unit: "%", digits: 0 },
-    { pattern: /temperature\s+(-?\d+(?:\.\d+)?)\s*°?C/i, unit: "°C", digits: 1 },
-  ];
-  const match = patterns.find(({ pattern }) => pattern.exec(detail));
-  if (!match) return "—";
-  const value = match.pattern.exec(detail)?.[1];
-  return `${formatReading(Number(value), match.digits)} ${match.unit}`;
+  // the value from their title/detail text so historical snapshots remain useful.
+  const patterns = metric === "hr"
+    ? /(?:heart\s*rate|hr)\D{0,35}(-?\d+(?:\.\d+)?)\s*(?:bpm)?/i
+    : metric === "spo2"
+      ? /(?:spo2|spo₂)\D{0,35}(-?\d+(?:\.\d+)?)\s*%/i
+      : metric === "temp"
+        ? /(?:temperature|temp)\D{0,35}(-?\d+(?:\.\d+)?)\s*°?\s*c/i
+        : null;
+  const value = patterns?.exec(text)?.[1];
+  if (!value) return "—";
+  return `${formatReading(Number(value), digits)}${unit ? ` ${unit}` : ""}`;
+}
+
+function normalizeAlertUnit(value) {
+  const unit = String(value || "").trim().toLowerCase();
+  if (unit.includes("bpm")) return "bpm";
+  if (unit.includes("%")) return "%";
+  if (unit === "c" || unit.includes("°c") || unit.includes("â°c")) return "°C";
+  return "";
 }
 
 function SnapshotModal({ log, onClose }) {
   const alertType = deriveAlertType(log);
   const isCritical = log.severity === "critical";
+  const isOffline = log.type === "status" && log.status === "offline";
 
   return (
     <Modal
@@ -453,7 +486,7 @@ function SnapshotModal({ log, onClose }) {
           <SnapField label="Device ID" value={log.deviceId || "—"} />
           <SnapField label="Timestamp" value={formatTimestamp(log.timestamp)} />
           <SnapField label="Reading" value={formatAlertReading(log)} />
-          <SnapField label="Level" value={isCritical ? "Critical" : "Warning"} valueColor={isCritical ? C.red : C.amber} />
+          <SnapField label="Level" value={isOffline ? "Offline" : isCritical ? "Critical" : "Warning"} valueColor={isOffline ? C.offline : isCritical ? C.red : C.amber} />
           <SnapField label="Event Type" value={log.type || "—"} />
         </div>
 

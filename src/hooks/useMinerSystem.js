@@ -501,7 +501,7 @@ function applyLocalDeviceOverrides(miners, metadataOverrides, archivedDeviceIds)
 function mapActivityLogs(value) {
   return Object.entries(value || {})
     .map(([id, row]) => {
-      const rawReading = row?.reading;
+      const rawReading = row?.reading ?? row?.readingValue ?? row?.value ?? null;
       return {
         id,
         deviceId: row?.deviceId || "",
@@ -516,7 +516,8 @@ function mapActivityLogs(value) {
         reading: rawReading === null || rawReading === undefined || rawReading === ""
           ? null
           : Number.isFinite(Number(rawReading)) ? Number(rawReading) : null,
-        unit: row?.unit || "",
+        readingValue: rawReading,
+        unit: row?.unit || row?.readingUnit || "",
         timestamp: normalizeTimestamp(row?.timestamp) || Date.now(),
       };
     })

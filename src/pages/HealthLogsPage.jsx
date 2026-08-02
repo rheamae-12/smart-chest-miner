@@ -214,6 +214,7 @@ export function buildSessions(miners, analyticsData, activityLogs, thresholds, s
 
     const rows = [...(analyticsData[miner.id] || [])]
       .filter((row) => Number(row.timestamp) > 0)
+      .filter((row) => isWithinDateRange(row.timestamp, dateRange))
       .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
       .filter((row, index, all) => index === 0 || Number(row.timestamp || 0) !== Number(all[index - 1].timestamp || 0));
 

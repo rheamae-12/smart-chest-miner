@@ -1,27 +1,66 @@
 /*
- * Smart Chest Miner - ESP32 firmware (COMPLETE / full hardware)
- * Based on the schematic: MAX30102 (HR/SpO2) + MAX30205 (temperature) +
- * SSD1306 OLED + 3 buzzers + 2 LEDs + SOS button.
+ * ============================================================
+ *  Smart Chest Miner — ESP32 Firmware (Full Hardware Build)
+ * ============================================================
  *
- * Design notes:
- *  - Real HR + SpO2 via the Maxim algorithm (no simulation).
- *  - Temperature from MAX30205 (°C).
- *  - OLED shows live vitals on-device.
- *  - 3 buzzers map to the 3 vitals (HR / SpO2 / Temp); the SOS button sounds all.
- *  - I2C devices are AUTO-DETECTED at boot, so this same sketch runs on the
- *    prototype (MAX30102 only) and the final board (all sensors) unchanged.
- *  - NTP-safe timestamps; Firebase HTTP runs in a FreeRTOS task on core 0 so a
- *    slow upload never freezes the sensor loop / alert buzzers on core 1.
+ * OVERVIEW
+ * --------
+ * Firmware for a wearable chest-mounted health monitor used to track
+ * a miner's vitals in real time. Based on the schematic:
+ *   - MAX30102  : Heart rate (HR) + SpO2
+ *   - MAX30205  : Body temperature
+ *   - SSD1306   : OLED display (live vitals)
+ *   - 3x Buzzer : One per vital (HR / SpO2 / Temp)
+ *   - 2x LED    : Status indicators (green/red)
+ *   - SOS button: Manual alert, triggers all buzzers
  *
- * Required libraries (Library Manager):
- *   - SparkFun MAX3010x Pulse and Proximity Sensor   (MAX30105.h, spo2_algorithm.h)
- *   - Adafruit SSD1306  +  Adafruit GFX               (OLED)
- *   (MAX30205 is read directly over I2C — no extra library.)
+ * HOW TO MONITOR A DIFFERENT MINER
+ * ---------------------------------
+ *   1. Register the new miner on the website FIRST.
+ *      This generates a unique Miner (Device) ID.
+ *   2. Copy that ID into the DEVICE_ID constant below.
+ *   3. Re-flash this same sketch — no other changes needed.
  *
- * Firebase requests use the configured database URL and device credential.
+ *   NOTE: The website owns the miner's name/location (Device Registry).
+ *         This firmware only publishes live state + history for
+ *         whatever DEVICE_ID it's given.
  *
- * HARDWARE: add 470-1000uF on the 5V rail at the ESP32 and 100uF+100nF on the
- * 3.3V sensor rail or WiFi spikes will brown-out the board. See docs/HARDWARE_NOTES.md.
+ * DESIGN NOTES
+ * ------------
+ *   - Real HR + SpO2 via the Maxim algorithm (no simulation by default).
+ *   - Temperature read directly from MAX30205 (°C).
+ *   - OLED shows live vitals on-device.
+ *   - I2C devices are AUTO-DETECTED at boot, so the same sketch runs on:
+ *       (a) the prototype board (MAX30102 only), and
+ *       (b) the final board (all sensors) — unchanged.
+ *   - NTP-synced timestamps for accurate logging.
+ *   - Firebase HTTP requests run in a FreeRTOS task on Core 0, so a
+ *     slow/failed upload never blocks the sensor loop or alert
+ *     buzzers running on Core 1.
+ *
+ * REQUIRED LIBRARIES (Arduino Library Manager)
+ * ---------------------------------------------
+ *   - SparkFun MAX3010x Pulse and Proximity Sensor
+ *       (provides MAX30105.h, spo2_algorithm.h)
+ *   - Adafruit SSD1306
+ *   - Adafruit GFX
+ *   (MAX30205 needs no extra library — read directly over I2C.)
+ *
+ * FIREBASE
+ * --------
+ *   Uses the standard Firebase Realtime Database HTTP REST API,
+ *   authenticated with the configured database URL + device secret
+ *   (see FIREBASE_DATABASE_URL / FIREBASE_DATABASE_SECRET below).
+ *
+ * HARDWARE REQUIREMENT — READ BEFORE POWERING ON
+ * -------------------------------------------------
+ *   Add bulk capacitance or WiFi transmit spikes WILL brown-out the
+ *   board:
+ *     - 470–1000 µF on the 5V rail at the ESP32
+ *     - 100 µF + 100 nF on the 3.3V sensor rail
+ *   See docs/HARDWARE_NOTES.md for placement details.
+ *
+ * ============================================================
  */
 
 #include <Wire.h>
