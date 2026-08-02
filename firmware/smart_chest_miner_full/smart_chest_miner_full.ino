@@ -34,15 +34,15 @@
 
 #define USE_SIMULATION 0
 
-const char* WIFI_SSID     = "Converge_2.4GHz_42BD";
-const char* WIFI_PASSWORD = "bordersnigerald2025";
+const char* WIFI_SSID     = "ZTE_2.4_uuCrK2";
+const char* WIFI_PASSWORD = "TizH3Ucd";
 
 #define FIREBASE_DATABASE_URL    "https://smart-chest-miner-default-rtdb.firebaseio.com/"
 #define FIREBASE_DATABASE_SECRET "GJY8fpUA211duwUw7o92ks0EXlYOFdqWYz5rK6N5"
 
 // This ID must already exist in the website Device Registry. The website owns
 // the miner name and location; firmware only publishes live state and history.
-const char* DEVICE_ID = "SCM-003";
+const char* DEVICE_ID = "SCM-001";
 
 // ---- Pins (schematic / final board) ----
 #define SDA_PIN          21
