@@ -1,4 +1,4 @@
-import { get, onValue, push, ref, remove, serverTimestamp, set, update } from "firebase/database";
+import { get, onValue, push, ref, remove, runTransaction, serverTimestamp, set, update } from "firebase/database";
 import { auth, db, firebaseDatabaseUrl, firestoreDb } from "./config";
 import {
   clearActivityLogs as clearFirestoreActivityLogs,
@@ -16,6 +16,7 @@ import {
   updateSessionStatus as updateFirestoreSessionStatus,
 } from "./firestore";
 import { reportNonFatal } from "../utils/safeStorage";
+import { canonicalSessionId, isTerminalSessionStatus, sessionSummaryKey } from "../utils/sessionIds";
 
 // restAuthParam — returns "&auth=<idToken>" for the signed-in user so the REST
 // fallback obeys the same security rules as the SDK. Never uses an admin secret.
@@ -456,6 +457,8 @@ export async function writeActivityLog(event) {
     severity: event.severity || "info",
     title: event.title || "Miner activity",
     detail: event.detail || "",
+    reading: Number.isFinite(Number(event.reading)) ? Number(event.reading) : null,
+    unit: event.unit || "",
     timestamp,
   };
 
@@ -546,7 +549,10 @@ export async function saveHistorySummaries(deviceId, healthLogs = {}, miningSess
   });
 
   Object.entries(miningSessions || {}).forEach(([id, payload]) => {
-    updates[`miningSessions/${deviceId}/${id}`] = payload;
+    updates[`miningSessions/${deviceId}/${sessionSummaryKey(deviceId, payload?.sessionId, id)}`] = {
+      ...payload,
+      sessionId: canonicalSessionId(deviceId, payload?.sessionId, payload?.startTimestamp || id),
+    };
   });
 
   if (Object.keys(updates).length === 0) return true;
@@ -555,5 +561,27 @@ export async function saveHistorySummaries(deviceId, healthLogs = {}, miningSess
 
 export async function updateSessionStatus(deviceId, sessionId, status, timestamp) {
   if (firestoreDb) return updateFirestoreSessionStatus(deviceId, sessionId, status, timestamp);
-  return updateDevice(deviceId, { sessionStatus: status });
+  if (!db || !deviceId || !sessionId) return { accepted: true, status };
+
+  const canonicalId = canonicalSessionId(deviceId, sessionId, timestamp);
+  const summaryRef = ref(db, `miningSessions/${deviceId}/${sessionSummaryKey(deviceId, canonicalId, timestamp)}`);
+  const nextStatus = String(status || "").toLowerCase();
+  const result = await runTransaction(summaryRef, (current) => {
+    const currentStatus = String(current?.status || "").toLowerCase();
+    if (isTerminalSessionStatus(currentStatus)) return;
+    return {
+      ...(current || {}),
+      deviceId,
+      sessionId: canonicalId,
+      status: nextStatus,
+      statusTimestamp: Number(timestamp) || Date.now(),
+      updatedAt: Date.now(),
+    };
+  });
+  const current = result.snapshot.val() || {};
+  return {
+    accepted: result.committed,
+    status: String(current.status || nextStatus).toLowerCase(),
+    statusTimestamp: Number(current.statusTimestamp) || Number(timestamp) || Date.now(),
+  };
 }

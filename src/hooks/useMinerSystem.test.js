@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_THRESHOLDS } from "../utils/alertChecker";
-import { buildVitalLogs, mapRealtimeDevices, mergeAnalyticsData } from "./useMinerSystem";
+import { canonicalSessionId, createSessionId } from "../utils/sessionIds";
+import { buildHistorySummariesForDevice, buildVitalLogs, mapRealtimeDevices, mergeAnalyticsData } from "./useMinerSystem";
 
 describe("mapRealtimeDevices", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -71,6 +72,25 @@ describe("buildVitalLogs", () => {
       status: "pressed",
     });
   });
+
+  it("persists the triggering vital reading and unit on alert records", () => {
+    const logs = buildVitalLogs({
+      id: "SCM-001",
+      name: "Miner 1",
+      active: true,
+      finger: true,
+      hr: 150,
+      spo2: 75,
+      temp: 39,
+      lastSeen: new Date(1_700_000_000_000),
+    }, DEFAULT_THRESHOLDS);
+
+    expect(logs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "vital", title: "Heart rate critical", reading: 150, unit: "bpm" }),
+      expect.objectContaining({ type: "vital", title: "SpO2 low", reading: 75, unit: "%" }),
+      expect.objectContaining({ type: "vital", title: "Temperature critical", reading: 39, unit: "°C" }),
+    ]));
+  });
 });
 
 describe("mergeAnalyticsData", () => {
@@ -87,5 +107,31 @@ describe("mergeAnalyticsData", () => {
       temp: 36.5,
       sessionId: "session-1",
     });
+  });
+});
+
+describe("session IDs", () => {
+  it("uses the same lifecycle ID for every monitor of the same device timeline", () => {
+    const timestamp = 1_700_000_000_000;
+    expect(createSessionId("SCM-001", timestamp)).toBe("SCM-001-session-1700000000000");
+    expect(createSessionId("SCM-001", timestamp)).toBe(createSessionId("SCM-001", timestamp));
+    expect(canonicalSessionId("SCM-001", "SCM-001-session-1700000000000-12345")).toBe("SCM-001-session-1700000000000");
+  });
+
+  it("keeps the final reading in the same session as its terminal status event", () => {
+    const start = 1_700_900_000_000;
+    const summaries = buildHistorySummariesForDevice(
+      "SCM-001",
+      [
+        { timestamp: start, hr: 101, spo2: 98, temp: 32 },
+        { timestamp: start + 60_000, hr: 116, spo2: 100, temp: 32.1 },
+      ],
+      { name: "Miner 1", location: "Shaft A" },
+      DEFAULT_THRESHOLDS,
+      [{ deviceId: "SCM-001", type: "session_status", status: "completed", timestamp: start + 60_000 }],
+    );
+
+    expect(Object.keys(summaries.miningSessions)).toHaveLength(1);
+    expect(Object.values(summaries.miningSessions)[0].startTimestamp).toBe(start);
   });
 });

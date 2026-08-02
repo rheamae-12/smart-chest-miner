@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import FilterToolbar, { FilterField, FilterTabs } from "../components/FilterToolbar";
 import Modal from "../components/Modal";
 import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
-import { dedupeConsecutiveLogs, formatSystemTimestamp } from "../utils/formatters";
+import { dedupeConsecutiveLogs, formatReading, formatSystemTimestamp } from "../utils/formatters";
 import { DATE_RANGE_OPTIONS, isWithinDateRange, matchesAlertType, matchesSearch, resolveDateRange } from "../utils/filtering";
 
 const PAGE_SIZE = 15;
@@ -397,6 +397,28 @@ function RecentAlertNote({ log, onClick }) {
   );
 }
 
+function formatAlertReading(log) {
+  const hasReading = log?.reading !== null && log?.reading !== undefined && log?.reading !== "" && Number.isFinite(Number(log.reading));
+  if (hasReading) {
+    const value = Number(log.reading);
+    const digits = log.unit === "°C" ? 1 : 0;
+    return `${formatReading(value, digits)}${log.unit ? ` ${log.unit}` : ""}`;
+  }
+
+  // Older activity records did not persist a separate reading field. Recover
+  // the value from their detail text so historical snapshots remain useful.
+  const detail = String(log?.detail || "");
+  const patterns = [
+    { pattern: /HR\s+(-?\d+(?:\.\d+)?)\s*bpm/i, unit: "bpm", digits: 0 },
+    { pattern: /SpO2\s+(-?\d+(?:\.\d+)?)\s*%/i, unit: "%", digits: 0 },
+    { pattern: /temperature\s+(-?\d+(?:\.\d+)?)\s*°?C/i, unit: "°C", digits: 1 },
+  ];
+  const match = patterns.find(({ pattern }) => pattern.exec(detail));
+  if (!match) return "—";
+  const value = match.pattern.exec(detail)?.[1];
+  return `${formatReading(Number(value), match.digits)} ${match.unit}`;
+}
+
 function SnapshotModal({ log, onClose }) {
   const alertType = deriveAlertType(log);
   const isCritical = log.severity === "critical";
@@ -430,10 +452,9 @@ function SnapshotModal({ log, onClose }) {
           <SnapField label="Miner" value={log.miner || "—"} />
           <SnapField label="Device ID" value={log.deviceId || "—"} />
           <SnapField label="Timestamp" value={formatTimestamp(log.timestamp)} />
+          <SnapField label="Reading" value={formatAlertReading(log)} />
           <SnapField label="Level" value={isCritical ? "Critical" : "Warning"} valueColor={isCritical ? C.red : C.amber} />
-          <div style={{ gridColumn: "1 / -1" }}>
-            <SnapField label="Event Type" value={log.type || "—"} />
-          </div>
+          <SnapField label="Event Type" value={log.type || "—"} />
         </div>
 
       </div>

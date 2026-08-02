@@ -95,6 +95,34 @@ describe("buildSessions", () => {
     expect(sessions[0].sessionStatus).toBe("completed");
   });
 
+  it("counts warning and critical vital alerts once per reading event", () => {
+    const start = 1_700_250_000_000;
+    const sessionId = `SCM-001-session-${start}`;
+    const sessions = buildSessions(
+      [{ id: "SCM-001", name: "Miner 1", active: false, stale: false, lastSeen: new Date(start + 60_000) }],
+      {
+        "SCM-001": [
+          { timestamp: start, sessionId, hr: 150, spo2: 98, temp: 37 },
+          { timestamp: start + 60_000, sessionId, hr: 82, spo2: 75, temp: 39 },
+        ],
+      },
+      [
+        { deviceId: "SCM-001", type: "vital", status: "critical", severity: "critical", timestamp: start },
+        { deviceId: "SCM-001", type: "vital", status: "critical", severity: "critical", timestamp: start },
+        { deviceId: "SCM-001", type: "vital", status: "low", severity: "warning", timestamp: start + 60_000 },
+        { deviceId: "SCM-001", type: "manual_alert", severity: "critical", timestamp: start + 60_000 },
+      ],
+      DEFAULT_THRESHOLDS,
+      {
+        "SCM-001": [{ sessionId, startTimestamp: start, endTimestamp: start + 60_000, status: "completed" }],
+      },
+    );
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].alertCount).toBe(4);
+    expect(sessions[0].manualPressCount).toBe(1);
+  });
+
   it("keeps interrupted and completed sessions separate across a quick reconnect", () => {
     const firstTimestamp = 1_700_300_000_000;
     const secondTimestamp = firstTimestamp + 60_000;
@@ -240,5 +268,55 @@ describe("buildSessions", () => {
 
     expect(sessions).toHaveLength(1);
     expect(sessions[0].id).toContain(`SCM-001-session-${start}-123`);
+  });
+
+  it("collapses overlapping summaries from monitors that observed one session at different times", () => {
+    const start = 1_700_800_000_000;
+    const sessions = buildSessions(
+      [{ id: "SCM-001", name: "Miner 1", active: false, stale: false, lastSeen: new Date(start + 60_000) }],
+      {},
+      [],
+      DEFAULT_THRESHOLDS,
+      {
+        "SCM-001": [
+          {
+            sessionId: `SCM-001-session-${start}`,
+            startTimestamp: start,
+            endTimestamp: start + 60_000,
+            readingCount: 2,
+            avgHr: 101,
+            avgSpo2: 100,
+            avgTemp: 31.4,
+            hrMin: 92,
+            hrMax: 146,
+            spo2Min: 100,
+            spo2Max: 100,
+            tempMin: 31.2,
+            tempMax: 31.9,
+            status: "completed",
+          },
+          {
+            sessionId: `SCM-001-session-${start + 60_000}`,
+            startTimestamp: start + 60_000,
+            endTimestamp: start + 60_000,
+            readingCount: 1,
+            avgHr: 102,
+            avgSpo2: 98,
+            avgTemp: 31.7,
+            hrMin: 102,
+            hrMax: 102,
+            spo2Min: 98,
+            spo2Max: 98,
+            tempMin: 31.7,
+            tempMax: 31.7,
+            status: "completed",
+          },
+        ],
+      },
+    );
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].sessionStatus).toBe("completed");
+    expect(sessions[0].duration).toBe("1m");
   });
 });

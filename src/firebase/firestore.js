@@ -9,6 +9,7 @@ import {
   limitToLast,
   onSnapshot,
   orderBy,
+  runTransaction,
   query,
   serverTimestamp,
   setDoc,
@@ -16,6 +17,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { firestoreDb } from "./config";
+import { canonicalSessionId, isTerminalSessionStatus } from "../utils/sessionIds";
 
 const HISTORY_READ_LIMIT = 5000;
 const ACTIVITY_LOG_LIMIT = 500;
@@ -172,10 +174,10 @@ export async function saveSessionSummaries(deviceId, healthLogs = {}, miningSess
   for (let start = 0; start < entries.length; start += 400) {
     const batch = writeBatch(firestoreDb);
     entries.slice(start, start + 400).forEach(([id, summary]) => {
-      const sessionId = safeDocumentId(summary?.sessionId || `${deviceId}-${id}`);
+      const sessionId = canonicalSessionId(deviceId, summary?.sessionId, summary?.startTimestamp || id);
       const health = healthLogs?.[id] || {};
       batch.set(
-        doc(firestoreDb, "miners", deviceId, "sessions", sessionId),
+        doc(firestoreDb, "miners", deviceId, "sessions", safeDocumentId(sessionId)),
         {
           ...summary,
           ...health,
@@ -195,18 +197,29 @@ export async function saveSessionSummaries(deviceId, healthLogs = {}, miningSess
 export async function updateSessionStatus(deviceId, sessionId, status, statusTimestamp = Date.now()) {
   if (!firestoreDb || !deviceId || !sessionId) return false;
 
-  await setDoc(
-    doc(firestoreDb, "miners", deviceId, "sessions", safeDocumentId(sessionId)),
-    {
+  const canonicalId = canonicalSessionId(deviceId, sessionId, statusTimestamp);
+  const sessionRef = doc(firestoreDb, "miners", deviceId, "sessions", safeDocumentId(canonicalId));
+  const nextStatus = String(status || "").toLowerCase();
+  const timestamp = Number(statusTimestamp) || Date.now();
+
+  return runTransaction(firestoreDb, async (transaction) => {
+    const snapshot = await transaction.get(sessionRef);
+    const current = snapshot.exists() ? snapshot.data() : {};
+    const currentStatus = String(current.status || "").toLowerCase();
+    if (isTerminalSessionStatus(currentStatus)) {
+      return { accepted: false, status: currentStatus, statusTimestamp: Number(current.statusTimestamp) || timestamp };
+    }
+
+    const payload = {
       deviceId,
-      sessionId,
-      status,
-      statusTimestamp: Number(statusTimestamp) || Date.now(),
+      sessionId: canonicalId,
+      status: nextStatus,
+      statusTimestamp: timestamp,
       updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
-  return true;
+    };
+    transaction.set(sessionRef, payload, { merge: true });
+    return { accepted: true, status: nextStatus, statusTimestamp: timestamp };
+  });
 }
 
 export async function saveActivityLog(event) {
@@ -223,6 +236,8 @@ export async function saveActivityLog(event) {
     severity: event?.severity || "info",
     title: event?.title || "Miner activity",
     detail: event?.detail || "",
+    reading: Number.isFinite(Number(event?.reading)) ? Number(event.reading) : null,
+    unit: event?.unit || "",
     timestamp,
     createdAt: serverTimestamp(),
   };

@@ -8,6 +8,7 @@ import { countMinuteReadings } from "../utils/analyticsReadings";
 import { DATE_RANGE_OPTIONS, isWithinDateRange, resolveDateRange } from "../utils/filtering";
 import { average, compactTimestamp, formatReading, formatSystemTimestamp, lastSeenValue, uniqueChartLabels } from "../utils/formatters";
 import { compareMinersActiveFirst } from "../utils/minerOrdering";
+import { countVitalAlertLogs, countVitalAlertsInRows } from "../utils/sessionAlertCounter";
 
 const SESSION_GAP_MS = 3 * 60 * 1000;
 
@@ -147,7 +148,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, s
 
             <div style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
               <div style={{ padding: "14px 16px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                <PanelHeader title="Mining Session Logs" meta="Session time, duration, vital ranges, SOS, status" />
+                <PanelHeader title="Mining Session Logs" meta="Session time, duration, vital ranges, SOS, alerts, status" />
                 <button
                   disabled={!sessions.length || !onClearHealthLogs}
                   onClick={() => {
@@ -168,6 +169,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, s
                   <span>SpO₂</span>
                   <span>Temperature</span>
                   <span>SOS Presses</span>
+                  <span>Alert Counter</span>
                   <span>Session Status</span>
                 </div>
                 {sessions.map((session) => (
@@ -185,6 +187,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, s
                     <div data-label="SpO2"><ReadingRange value={session.spo2} color={C.oxygen} unit="%" /></div>
                     <div data-label="Temperature"><ReadingRange value={session.temp} color={C.teal} unit="°C" /></div>
                     <span data-label="SOS presses" style={{ color: session.manualPressCount ? C.red : C.textMuted, fontWeight: 900 }}>{session.manualPressCount}</span>
+                    <span data-label="Alert counter" style={{ color: session.alertCount ? C.amber : C.textMuted, fontWeight: 900 }}>{session.alertCount}</span>
                     <span data-label="Session status"><StatusText session={session} /></span>
                   </div>
                 ))}
@@ -268,6 +271,10 @@ export function buildSessions(miners, analyticsData, activityLogs, thresholds, s
           ? Math.max(Number(last.timestamp || 0), lastSeenValue(miner))
           : Number(last.timestamp || 0);
         const manualPressCount = countManualPresses(miner, sessionRows, activityLogs, Number(first.timestamp), Number(last.timestamp), active);
+        const alertCount = Math.max(
+          countVitalAlertsInRows(sessionRows, thresholds),
+          countVitalAlertLogs(activityLogs, miner.id, Number(first.timestamp), sessionEndTimestamp),
+        );
         const alerts = detectSessionAlerts(miner, sessionRows, thresholds);
         const sessionStatus = active
           ? "ongoing"
@@ -286,6 +293,7 @@ export function buildSessions(miners, analyticsData, activityLogs, thresholds, s
           active,
           sessionStatus,
           manualPressCount,
+          alertCount,
           alerts,
           sortTimestamp: sessionEndTimestamp,
           start: formatSystemTimestamp(first.timestamp),
@@ -318,6 +326,16 @@ function buildStoredSessions(miner, storedRows, activityLogs, thresholds, analyt
       : active ? "ongoing" : "completed";
     const manualPressCount = countLoggedSosPresses(activityLogs, miner.id, startTimestamp, endTimestamp)
       || Number(summary.manualPressCount || 0);
+    const matchingRows = analyticsRows.filter((row) => {
+      const timestamp = Number(row.timestamp || 0);
+      return (summary.sessionId && row.sessionId === summary.sessionId)
+        || (timestamp >= startTimestamp && timestamp <= endTimestamp);
+    });
+    const alertCount = Math.max(
+      countVitalAlertLogs(activityLogs, miner.id, startTimestamp, endTimestamp),
+      countVitalAlertsInRows(matchingRows, thresholds),
+      Number(summary.alertCount || 0),
+    );
     const avgHr = Number(summary.avgHr || 0);
     const avgSpo2 = Number(summary.avgSpo2 || 0);
     const avgTemp = Number(summary.avgTemp || 0);
@@ -329,6 +347,7 @@ function buildStoredSessions(miner, storedRows, activityLogs, thresholds, analyt
       active,
       sessionStatus,
       manualPressCount,
+      alertCount,
       alerts: summary.alerts || detectSummaryAlerts(summary, thresholds),
       sortTimestamp: endTimestamp,
       start: formatSystemTimestamp(startTimestamp),
@@ -388,7 +407,7 @@ function hydrateStoredSummaries(summaries, analyticsRows) {
 }
 
 function sessionStartFromId(sessionId) {
-  const match = String(sessionId || "").match(/-session-(\d+)-/);
+  const match = String(sessionId || "").match(/-session-(\d+)(?:-|$)/);
   return match ? Number(match[1]) : 0;
 }
 
@@ -415,9 +434,15 @@ function coalesceStoredSessionSummaries(deviceId, rows, activityLogs = []) {
       // their immutable IDs and remain separate rows.
       const duplicateAlias = current && areDuplicateStoredSessionAliases(deviceId, current, row);
       const terminal = ["completed", "interrupted", "offline"].includes(String(current?.status || "").toLowerCase());
-      const lifecycleBoundary = current && hasStoredSessionBoundary(activityLogs, deviceId, currentEnd, rowStart);
+      // Two monitors can persist different windows of the same live timeline
+      // (for example 3:13–3:14 and 3:14–3:14). Overlapping summaries cannot be
+      // separate chronological sessions; collapse them unless a real lifecycle
+      // boundary exists between the summaries.
+      const overlappingAlias = current && !sameSession && rowStart <= currentEnd;
+      const lifecycleBoundary = current && rowStart > currentEnd
+        && hasStoredSessionBoundary(activityLogs, deviceId, currentEnd, rowStart);
 
-      if (!current || lifecycleBoundary || (!sameSession && !duplicateAlias && !(legacyPerReading && rowStart - currentEnd <= SESSION_GAP_MS && !terminal))) {
+      if (!current || lifecycleBoundary || (!sameSession && !duplicateAlias && !overlappingAlias && !(legacyPerReading && rowStart - currentEnd <= SESSION_GAP_MS && !terminal))) {
         groups.push({ ...row });
         return;
       }
@@ -432,7 +457,7 @@ function hasStoredSessionBoundary(activityLogs, deviceId, previousTimestamp, cur
   return (activityLogs || []).some((log) => {
     if (log.deviceId !== deviceId) return false;
     const timestamp = Number(log.timestamp || 0);
-    if (timestamp < previousTimestamp || timestamp > currentTimestamp) return false;
+    if (timestamp <= previousTimestamp || timestamp > currentTimestamp) return false;
     if (log.type === "session_status") return ["completed", "interrupted", "offline"].includes(String(log.status || "").toLowerCase());
     return log.type === "status" && String(log.status || "").toLowerCase() === "online";
   });
@@ -468,6 +493,7 @@ function mergeStoredSessionSummaries(first, next, deviceId = "") {
     tempMin: minPositive(first.tempMin, next.tempMin),
     tempMax: Math.max(Number(first.tempMax || 0), Number(next.tempMax || 0)),
     manualPressCount: Math.max(Number(first.manualPressCount || 0), Number(next.manualPressCount || 0)),
+    alertCount: Math.max(Number(first.alertCount || 0), Number(next.alertCount || 0)),
     status: next.status || first.status || "",
     alerts: [...new Map([...(first.alerts || []), ...(next.alerts || [])].map((alert) => [alert.key, alert])).values()],
   };
@@ -953,7 +979,7 @@ function ReadingRange({ value, color, unit }) {
 
 const tableHeader = {
   display: "grid",
-  gridTemplateColumns: "minmax(130px, 1.05fr) minmax(150px, 1.2fr) minmax(64px, 0.65fr) minmax(84px, 1fr) minmax(74px, 1fr) minmax(100px, 1.15fr) minmax(58px, 0.7fr) minmax(82px, 0.85fr)",
+  gridTemplateColumns: "minmax(130px, 1.05fr) minmax(150px, 1.2fr) minmax(64px, 0.65fr) minmax(84px, 1fr) minmax(74px, 1fr) minmax(100px, 1.15fr) minmax(58px, 0.7fr) minmax(64px, 0.75fr) minmax(82px, 0.85fr)",
   minWidth: "100%",
   gap: 12,
   padding: "10px 14px",
@@ -966,7 +992,7 @@ const tableHeader = {
 
 const tableRow = {
   display: "grid",
-  gridTemplateColumns: "minmax(130px, 1.05fr) minmax(150px, 1.2fr) minmax(64px, 0.65fr) minmax(84px, 1fr) minmax(74px, 1fr) minmax(100px, 1.15fr) minmax(58px, 0.7fr) minmax(82px, 0.85fr)",
+  gridTemplateColumns: "minmax(130px, 1.05fr) minmax(150px, 1.2fr) minmax(64px, 0.65fr) minmax(84px, 1fr) minmax(74px, 1fr) minmax(100px, 1.15fr) minmax(58px, 0.7fr) minmax(64px, 0.75fr) minmax(82px, 0.85fr)",
   minWidth: "100%",
   gap: 12,
   padding: "12px 14px",
