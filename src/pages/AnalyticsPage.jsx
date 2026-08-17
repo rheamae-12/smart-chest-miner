@@ -3,6 +3,7 @@ import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip,
 import FilterToolbar, { FilterField, FilterTabs } from "../components/FilterToolbar";
 import { C, cardStyle, controlStyle, pageStyle } from "../theme";
 import { countMinuteReadings } from "../utils/analyticsReadings";
+import { zeroBasedTenScale } from "../utils/chartScales";
 import { average, compactTimestamp, dedupeConsecutiveLogs, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 import { compareMinersActiveFirst } from "../utils/minerOrdering";
 
@@ -27,6 +28,8 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
     [analyticsData, dataReferenceTimestamp, filter.range, liveData, visibleMiners],
   );
   const chartData = useMemo(() => bucketRows(rows, Number(filter.bucket)), [filter.bucket, rows]);
+  const vitalScale = zeroBasedTenScale(chartData.flatMap((row) => [row.hr, row.spo2]), 140);
+  const temperatureScale = zeroBasedTenScale(chartData.map((row) => row.temp), 50);
   const logs = useMemo(
     () => buildActivityLogEntries(activityLogs, filter.miner, filter.range, activityReferenceTimestamp),
     [activityLogs, activityReferenceTimestamp, filter.miner, filter.range],
@@ -101,8 +104,8 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
                       </defs>
                       <CartesianGrid stroke={C.borderSoft} vertical={false} />
                       <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={26} label={{ value: "Time", fill: C.textMuted, fontSize: 10, position: "insideBottom", offset: -4 }} />
-                      <YAxis yAxisId="vital" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={42} label={{ value: "bpm / %", angle: -90, fill: C.textMuted, fontSize: 10, position: "insideLeft" }} />
-                      <YAxis yAxisId="temp" orientation="right" domain={dynamicDomain(chartData, "temp", 0.4)} tick={{ fill: C.teal, fontSize: 10 }} axisLine={false} tickLine={false} width={46} unit="°C" label={{ value: "°C", angle: 90, fill: C.teal, fontSize: 10, position: "insideRight" }} />
+                      <YAxis yAxisId="vital" domain={vitalScale.domain} ticks={vitalScale.ticks} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={42} label={{ value: "bpm / %", angle: -90, fill: C.textMuted, fontSize: 10, position: "insideLeft" }} />
+                      <YAxis yAxisId="temp" orientation="right" domain={temperatureScale.domain} ticks={temperatureScale.ticks} tick={{ fill: C.teal, fontSize: 10 }} axisLine={false} tickLine={false} width={46} unit="°C" label={{ value: "°C", angle: 90, fill: C.teal, fontSize: 10, position: "insideRight" }} />
                       <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
                       <Area yAxisId="vital" type="monotone" dataKey="hr" name="Heart Rate" stroke={C.red} fill="url(#analyticsHr)" strokeWidth={2.2} dot={chartData.length < 2 ? { r: 3 } : false} isAnimationActive={false} connectNulls />
                       <Area yAxisId="vital" type="monotone" dataKey="spo2" name="SpO2" stroke={C.oxygen} fill="transparent" strokeWidth={2} dot={chartData.length < 2 ? { r: 3 } : false} isAnimationActive={false} connectNulls />
@@ -281,15 +284,6 @@ function bucketRows(rows, minutes) {
       spo2: bucket.spo2s.length ? average(bucket.spo2s) : null,
       temp: bucket.temps.length ? average(bucket.temps) : null,
     }));
-}
-
-// getRangeStart — returns a Unix ms timestamp for the start of the selected range (or 0 for all-time)
-function dynamicDomain(data, key, padding = 1) {
-  const values = (data || []).map((row) => Number(row[key])).filter((value) => Number.isFinite(value) && value > 0);
-  if (!values.length) return ["auto", "auto"];
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  return [Number((min - padding).toFixed(1)), Number((max + padding).toFixed(1))];
 }
 
 function getRangeStart(range, referenceTimestamp = 0) {

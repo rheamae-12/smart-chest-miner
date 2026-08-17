@@ -73,8 +73,8 @@
 
 #define USE_SIMULATION 0
 
-const char* WIFI_SSID     = "ZTE_2.4_uuCrK2";
-const char* WIFI_PASSWORD = "TizH3Ucd";
+const char* WIFI_SSID     = "Converge_5G";
+const char* WIFI_PASSWORD = "bordersnigerald2026";
 
 #define FIREBASE_DATABASE_URL    "https://smart-chest-miner-default-rtdb.firebaseio.com/"
 #define FIREBASE_DATABASE_SECRET "GJY8fpUA211duwUw7o92ks0EXlYOFdqWYz5rK6N5"
@@ -113,7 +113,8 @@ const char* DEVICE_ID = "SCM-001";
 #define WIFI_RECONNECT_INTERVAL  10000
 #define DEVICE_REGISTRATION_RETRY_MS 10000
 #define WIFI_CONFIG_POLL_MS      30000
-#define RED_LED_BLINK_INTERVAL   200
+#define WARNING_LED_BLINK_INTERVAL   1000
+#define CRITICAL_LED_BLINK_INTERVAL   150
 #define NETWORK_TASK_POLL_MS     50
 
 // ---- Contact detection ----
@@ -152,9 +153,8 @@ const char* DEVICE_ID = "SCM-001";
 #define BUZZER_HR_FREQ           1000
 #define BUZZER_SPO2_FREQ         1600
 #define BUZZER_TEMP_FREQ         2200
-#define BUZZER_HR_INTERVAL_MS     450
-#define BUZZER_SPO2_INTERVAL_MS   250
-#define BUZZER_TEMP_INTERVAL_MS   650
+#define WARNING_BUZZER_INTERVAL_MS 1500
+#define WARNING_BUZZER_ON_TIME_MS   180
 
 // ---- Device-local normal ranges (inclusive) ----
 #define HR_NORMAL_MIN        60.0f
@@ -178,7 +178,8 @@ bool hasTemp    = false;
 bool hasDisplay = false;
 
 HealthState healthState = HEALTH_NO_FINGER;
-bool alertHR = false, alertSpO2 = false, alertTemp = false;  // per-vital (critical) for buzzers
+bool alertHR = false, alertSpO2 = false, alertTemp = false;  // per-vital warning or critical state
+bool criticalHR = false, criticalSpO2 = false, criticalTemp = false;
 
 float currentBPM    = 0.0;
 float currentSpO2   = 0.0;
@@ -206,6 +207,7 @@ unsigned long buttonPressCount = 0; // SOS activation count; OFF toggles do not 
 
 bool redLedState = false, greenLedState = false;
 bool hrBuzzerPhase = false, spO2BuzzerPhase = false, tempBuzzerPhase = false;
+HealthState lastIndicatorState = HEALTH_NO_FINGER;
 bool deviceRegistrationChecked = false, deviceRegistered = false;
 
 bool fingerDetected = false, wasFingerDetected = false, noFingerStateUploaded = false;
@@ -473,12 +475,15 @@ void clearContactReadings() {
   rawIndex = 0;
   hrJumpCandidateCount = spO2JumpCandidateCount = 0;
   hrJumpCandidate = spO2JumpCandidate = 0;
-  alertHR = alertSpO2 = false;
-  hrBuzzerPhase = spO2BuzzerPhase = false;
+  alertHR = alertSpO2 = alertTemp = false;
+  criticalHR = criticalSpO2 = criticalTemp = false;
+  hrBuzzerPhase = spO2BuzzerPhase = tempBuzzerPhase = false;
   noTone(BUZZER_HR_PIN);
   noTone(BUZZER_SPO2_PIN);
+  noTone(BUZZER_TEMP_PIN);
   digitalWrite(BUZZER_HR_PIN, LOW);
   digitalWrite(BUZZER_SPO2_PIN, LOW);
+  digitalWrite(BUZZER_TEMP_PIN, LOW);
 }
 
 #if !USE_SIMULATION
@@ -572,8 +577,9 @@ float readBodyTemp() {
 // =================================================================
 void evaluateHealth() {
   alertHR = alertSpO2 = alertTemp = false;
+  criticalHR = criticalSpO2 = criticalTemp = false;
 
-  if (manualAlertActive) { healthState = HEALTH_MANUAL_ALERT; return; }
+  if (manualAlertActive) { healthState = HEALTH_CRITICAL; return; }
   if (!fingerDetected)   { healthState = HEALTH_NO_FINGER;    return; }
 
   bool hrReady = currentBPM > 0;
@@ -592,6 +598,9 @@ void evaluateHealth() {
   alertHR = hrWarning || hrCritical;
   alertSpO2 = spo2Warning || spo2Critical;
   alertTemp = tempWarning || tempCritical;
+  criticalHR = hrCritical;
+  criticalSpO2 = spo2Critical;
+  criticalTemp = tempCritical;
 
   int criticalCount = (hrCritical ? 1 : 0) +
                       (spo2Critical ? 1 : 0) +
@@ -612,7 +621,14 @@ void evaluateHealth() {
 }
 
 void updateIndicators(unsigned long now) {
-  bool manual = (healthState == HEALTH_MANUAL_ALERT);
+  bool manual = manualAlertActive || (healthState == HEALTH_MANUAL_ALERT);
+
+  if (healthState != lastIndicatorState) {
+    redLedState = false;
+    lastRedLedToggle = now;
+    digitalWrite(RED_LED_PIN, LOW);
+    lastIndicatorState = healthState;
+  }
 
   // LEDs
   switch (healthState) {
@@ -627,25 +643,24 @@ void updateIndicators(unsigned long now) {
       digitalWrite(GREEN_LED_PIN, HIGH); digitalWrite(RED_LED_PIN, LOW);
       break;
     case HEALTH_WARNING:
-      digitalWrite(GREEN_LED_PIN, LOW); digitalWrite(RED_LED_PIN, HIGH);
+      digitalWrite(GREEN_LED_PIN, LOW);
+      if (now - lastRedLedToggle >= WARNING_LED_BLINK_INTERVAL) { lastRedLedToggle = now; redLedState = !redLedState; digitalWrite(RED_LED_PIN, redLedState); }
       break;
     case HEALTH_CRITICAL:
     case HEALTH_MANUAL_ALERT:
       digitalWrite(GREEN_LED_PIN, LOW);
-      if (now - lastRedLedToggle >= RED_LED_BLINK_INTERVAL) { lastRedLedToggle = now; redLedState = !redLedState; digitalWrite(RED_LED_PIN, redLedState); }
+      if (now - lastRedLedToggle >= CRITICAL_LED_BLINK_INTERVAL) { lastRedLedToggle = now; redLedState = !redLedState; digitalWrite(RED_LED_PIN, redLedState); }
       break;
   }
 
-  // Buzzers — beep in unison; each sounds only for its own critical vital (or SOS).
-  updateBuzzerTone(BUZZER_TEMP_PIN, manual || alertHR,
-    BUZZER_TEMP_FREQ, BUZZER_TEMP_INTERVAL_MS, now,
-    lastTempBuzzerToggle, tempBuzzerPhase);
-  updateBuzzerTone(BUZZER_SPO2_PIN, manual || alertSpO2,
-    BUZZER_SPO2_FREQ, BUZZER_SPO2_INTERVAL_MS, now,
-    lastSpO2BuzzerToggle, spO2BuzzerPhase);
-  updateBuzzerTone(BUZZER_HR_PIN, manual || alertTemp,
-    BUZZER_HR_FREQ, BUZZER_HR_INTERVAL_MS, now,
-    lastHrBuzzerToggle, hrBuzzerPhase);
+  // Warning alerts use short, widely spaced beeps to reduce average loudness.
+  // Critical alerts and SOS use a continuous tone at full duty.
+  updateBuzzerTone(BUZZER_TEMP_PIN, manual || alertHR, manual || criticalHR,
+    BUZZER_HR_FREQ, now, lastHrBuzzerToggle, hrBuzzerPhase);
+  updateBuzzerTone(BUZZER_SPO2_PIN, manual || alertSpO2, manual || criticalSpO2,
+    BUZZER_SPO2_FREQ, now, lastSpO2BuzzerToggle, spO2BuzzerPhase);
+  updateBuzzerTone(BUZZER_HR_PIN, manual || alertTemp, manual || criticalTemp,
+    BUZZER_TEMP_FREQ, now, lastTempBuzzerToggle, tempBuzzerPhase);
 }
 
 void allBuzzers(uint8_t level) {
@@ -659,8 +674,8 @@ void allBuzzers(uint8_t level) {
   digitalWrite(BUZZER_TEMP_PIN, level);
 }
 
-void updateBuzzerTone(uint8_t pin, bool active, int frequency,
-                      unsigned long interval, unsigned long now,
+void updateBuzzerTone(uint8_t pin, bool active, bool critical, int frequency,
+                      unsigned long now,
                       unsigned long &lastToggle, bool &phase) {
   if (!active) {
     phase = false;
@@ -669,14 +684,23 @@ void updateBuzzerTone(uint8_t pin, bool active, int frequency,
     return;
   }
 
-  if (now - lastToggle >= interval) {
-    lastToggle = now;
-    phase = !phase;
-    if (phase) tone(pin, frequency);
-    else {
-      noTone(pin);
-      digitalWrite(pin, LOW);
+  if (critical) {
+    if (!phase) {
+      tone(pin, frequency);
+      phase = true;
     }
+    return;
+  }
+
+  if (phase && now - lastToggle >= WARNING_BUZZER_ON_TIME_MS) {
+    noTone(pin);
+    digitalWrite(pin, LOW);
+    phase = false;
+    lastToggle = now;
+  } else if (!phase && now - lastToggle >= WARNING_BUZZER_INTERVAL_MS) {
+    lastToggle = now;
+    tone(pin, frequency);
+    phase = true;
   }
 }
 
@@ -1033,7 +1057,7 @@ const char* healthStateToString(HealthState state) {
     case HEALTH_NORMAL:       return "NORMAL";
     case HEALTH_WARNING:      return "WARNING";
     case HEALTH_CRITICAL:     return "CRITICAL";
-    case HEALTH_MANUAL_ALERT: return "MANUAL_ALERT";
+    case HEALTH_MANUAL_ALERT: return "CRITICAL";
     default:                  return "UNKNOWN";
   }
 }

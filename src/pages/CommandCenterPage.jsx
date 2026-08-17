@@ -3,9 +3,11 @@ import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Too
 import Icon from "../components/Icon";
 import { C, cardStyle, controlStyle, moduleLabel, pageStyle } from "../theme";
 import { buildAlerts, getVitalStatus } from "../utils/alertChecker";
-import { dedupeConsecutiveLogs, formatLastSeen, formatReading, formatSystemTimestamp, uniqueChartLabels } from "../utils/formatters";
+import { conditionForAlertId, conditionForLog } from "../utils/notifications";
+import { dedupeConsecutiveLogs, formatLastSeen, formatReading, formatSystemTimestamp, lastSeenValue, uniqueChartLabels } from "../utils/formatters";
 import { sortMinersActiveFirst } from "../utils/minerOrdering";
 import { mergeSensorSeries } from "../utils/sensorSeries";
+import { zeroBasedTenScale } from "../utils/chartScales";
 
 const TABS = [
   { key: "overview", label: "Overview", icon: "pulse" },
@@ -47,7 +49,16 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
     : selectedId;
   const selected = sorted.find((miner) => miner.id === effectiveSelectedId) || null;
   const alerts = useMemo(() => buildAlerts(miners, thresholds), [miners, thresholds]);
-  const minerAlerts = selected ? alerts.filter((a) => a.deviceId === selected.id && !dismissedAlertIds.includes(a.id)) : [];
+  const minerAlerts = selected
+    ? alerts
+      .filter((alert) => alert.deviceId === selected.id && !dismissedAlertIds.includes(alert.id))
+      .map((alert, index) => ({
+        ...alert,
+        timestamp: alertTimestamp(alert, selected, activityLogs),
+        originalIndex: index,
+      }))
+      .sort((a, b) => b.timestamp - a.timestamp || severityRank(b) - severityRank(a) || a.originalIndex - b.originalIndex)
+    : [];
 
   const online = miners.filter((miner) => miner.active && !miner.stale).length;
   const alerting = new Set(alerts.map((a) => a.deviceId)).size;
@@ -122,13 +133,16 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
                 {minerAlerts.length ? "Clear" : "Clear"}
               </button>
             </div>
-            <div className="cc-rail-alert-stack">
+            <div className="cc-rail-alert-stack" aria-live="polite">
           {minerAlerts.length > 0 && (
             <>
               {minerAlerts.map((a) => (
-                <div key={a.id} style={{ ...cardStyle, padding: "10px 12px", display: "flex", alignItems: "center", gap: 9, borderLeft: `3px solid ${a.severity === "critical" ? C.red : C.amber}`, background: `${a.severity === "critical" ? C.red : C.amber}0E` }}>
+                <div key={a.id} style={{ ...cardStyle, padding: "10px 12px", display: "flex", alignItems: "flex-start", gap: 9, borderRadius: 10, borderLeft: `3px solid ${a.severity === "critical" ? C.red : C.amber}`, background: `${a.severity === "critical" ? C.red : C.amber}0E` }}>
                   <Icon name="alert" size={14} color={a.severity === "critical" ? C.red : C.amber} />
-                  <span style={{ color: a.severity === "critical" ? C.red : C.amber, fontSize: 11, fontWeight: 900, flex: 1 }}>{a.message}</span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ color: a.severity === "critical" ? C.red : C.amber, fontSize: 11, fontWeight: 900, lineHeight: 1.35 }}>{a.message}</div>
+                    <time dateTime={a.timestamp ? new Date(a.timestamp).toISOString() : undefined} style={{ display: "block", color: C.textMuted, fontSize: 9, marginTop: 4 }}>{a.timestamp ? formatSystemTimestamp(a.timestamp) : "Just now"}</time>
+                  </div>
                   <button onClick={() => onDismissAlerts?.([a.id])} style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 16, lineHeight: 1 }} title="Dismiss">×</button>
                 </div>
               ))}
@@ -240,6 +254,18 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
 
 // ─── Fleet rail row ─────────────────────────────────────────────────────────
 
+function alertTimestamp(alert, miner, activityLogs) {
+  const condition = conditionForAlertId(alert.id);
+  const latestActivity = (activityLogs || [])
+    .filter((log) => log.deviceId === alert.deviceId && condition && conditionForLog(log) === condition)
+    .reduce((latest, log) => Math.max(latest, Number(log.timestamp || 0)), 0);
+  return latestActivity || Number(alert.timestamp || 0) || lastSeenValue(miner);
+}
+
+function severityRank(alert) {
+  return alert.severity === "critical" ? 0 : 1;
+}
+
 function FleetRow({ miner, active, hasAlert, onSelect }) {
   const dot = !miner.active ? C.offline : hasAlert ? C.red : C.green;
   return (
@@ -340,6 +366,8 @@ function OverviewTab({ miner, liveData, thresholds }) {
   }, [liveData, miner.id]);
   const live = miner.active && miner.finger !== false;
   const hasData = live && chartData.some((d) => d.hr != null || d.spo2 != null || d.temp != null);
+  const vitalScale = zeroBasedTenScale(chartData.flatMap((row) => [row.hr, row.spo2]), 140);
+  const temperatureScale = zeroBasedTenScale(chartData.map((row) => row.temp), 50);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 260px", gap: 14, alignItems: "stretch", height: "100%", minHeight: 0 }} className="cc-overview">
@@ -350,17 +378,16 @@ function OverviewTab({ miner, liveData, thresholds }) {
             <LineChart data={chartData} margin={{ top: 8, right: 22, left: 4, bottom: 26 }}>
               <CartesianGrid stroke={C.borderSoft} strokeDasharray="3 6" vertical={false} />
               <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 9 }} axisLine={false} tickLine={false} minTickGap={34} height={34} label={{ value: "Time", fill: C.textMuted, fontSize: 9, position: "insideBottom", offset: -5 }} />
-              <YAxis yAxisId="hr" domain={[40, 140]} tick={{ fill: C.red, fontSize: 10 }} axisLine={false} tickLine={false} width={42} label={{ value: "bpm", angle: -90, fill: C.red, fontSize: 10, position: "insideLeft" }} />
-              <YAxis yAxisId="spo2" orientation="right" domain={[80, 100]} tick={{ fill: C.oxygen, fontSize: 10 }} axisLine={false} tickLine={false} width={38} label={{ value: "%", angle: 90, fill: C.oxygen, fontSize: 10, position: "insideRight" }} />
-              <YAxis yAxisId="temp" orientation="right" domain={[34, 42]} hide />
+              <YAxis yAxisId="vital" domain={vitalScale.domain} ticks={vitalScale.ticks} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={42} label={{ value: "bpm / %", angle: -90, fill: C.textMuted, fontSize: 10, position: "insideLeft" }} />
+              <YAxis yAxisId="temp" orientation="right" domain={temperatureScale.domain} ticks={temperatureScale.ticks} tick={{ fill: C.teal, fontSize: 10 }} axisLine={false} tickLine={false} width={42} label={{ value: "°C", angle: 90, fill: C.teal, fontSize: 10, position: "insideRight" }} />
               <Tooltip
                 allowEscapeViewBox={{ x: false, y: false }}
                 wrapperStyle={{ maxWidth: "calc(100% - 12px)", zIndex: 5 }}
                 contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }}
               />
-              <ReferenceLine yAxisId="spo2" y={thresholds?.spo2Min ?? 80} stroke={C.amber} strokeDasharray="4 4" strokeOpacity={0.5} />
-              <Line yAxisId="hr" type="monotone" dataKey="hr" name="HR" stroke={C.red} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
-              <Line yAxisId="spo2" type="monotone" dataKey="spo2" name="SpO2" stroke={C.oxygen} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+              <ReferenceLine yAxisId="vital" y={thresholds?.spo2Min ?? 80} stroke={C.amber} strokeDasharray="4 4" strokeOpacity={0.5} />
+              <Line yAxisId="vital" type="monotone" dataKey="hr" name="HR" stroke={C.red} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+              <Line yAxisId="vital" type="monotone" dataKey="spo2" name="SpO2" stroke={C.oxygen} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
               <Line yAxisId="temp" type="monotone" dataKey="temp" name="Temperature" stroke={C.teal} strokeWidth={1.8} dot={false} isAnimationActive={false} connectNulls />
             </LineChart>
           </ResponsiveContainer>

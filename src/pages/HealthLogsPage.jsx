@@ -922,7 +922,6 @@ function SensorChart({ data, dataKey, name, color, domain, yLabel = "" }) {
                 minTickGap={34}
                 interval="preserveStartEnd"
                 height={38}
-                label={{ value: "Time", fill: C.textMuted, fontSize: 9, position: "insideBottom", offset: -6 }}
               />
               <YAxis
                 domain={domain || ["auto", "auto"]}
