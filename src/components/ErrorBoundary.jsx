@@ -41,8 +41,8 @@ export default class ErrorBoundary extends Component {
             </div>
           )}
           <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 16 }}>
-            <button onClick={this.reset} style={{ ...ghostButtonStyle, padding: "9px 16px" }}>Try Again</button>
-            <button onClick={() => window.location.reload()} style={{ ...ghostButtonStyle, padding: "9px 16px" }}>Reload Console</button>
+            <button type="button" onClick={this.reset} style={{ ...ghostButtonStyle, padding: "9px 16px" }}>Try Again</button>
+            <button type="button" onClick={() => window.location.reload()} style={{ ...ghostButtonStyle, padding: "9px 16px" }}>Reload Console</button>
           </div>
         </div>
       </div>

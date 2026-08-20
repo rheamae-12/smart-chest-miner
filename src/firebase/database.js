@@ -173,7 +173,7 @@ function firebaseRestUrl(path) {
   if (!firebaseDatabaseUrl) return "";
   const safePath = String(path)
     .split("/")
-    .map((seg) => seg.replace(/\.\./g, "").trim())
+    .map((seg) => seg.replaceAll("..", "").trim())
     .filter(Boolean)
     .join("/");
   const base = firebaseDatabaseUrl.replace(/\/$/, "");
@@ -231,7 +231,7 @@ async function migrateLegacyActivityLogs() {
   const snapshot = await get(ref(db, "activityLogs"));
   const rows = snapshot.val() || {};
   await Promise.all(Object.entries(rows).map(([id, row]) => saveActivityLog({
-    ...(row || {}),
+    ...row,
     id: `legacy-${id}`,
   })));
 }
@@ -241,7 +241,7 @@ async function migrateLegacyWifiHistory() {
   const snapshot = await get(ref(db, "wifiConnectionHistory"));
   const rows = snapshot.val() || {};
   await Promise.all(Object.entries(rows).map(([id, row]) => saveWifiHistoryRecord({
-    ...(row || {}),
+    ...row,
     id: row?.id || id,
   })));
 }
@@ -570,7 +570,7 @@ export async function updateSessionStatus(deviceId, sessionId, status, timestamp
     const currentStatus = String(current?.status || "").toLowerCase();
     if (isTerminalSessionStatus(currentStatus)) return;
     return {
-      ...(current || {}),
+      ...current,
       deviceId,
       sessionId: canonicalId,
       status: nextStatus,

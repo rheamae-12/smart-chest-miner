@@ -48,7 +48,7 @@ export default function SensorStatusPage({ miners = [] }) {
                 meta={`${maintenance.filter((item) => !item.healthy).length} need review`}
               />
             </div>
-            <div className="sensor-device-list-scroll hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
+            <div className="sensor-device-list-scroll table-scroll-x hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
               <div style={{ padding: 10, display: "grid", gap: 7 }}>
               {maintenance.length > 0 && (
                 <div className="maintenance-table-head sensor-device-column-header" style={{ display: "grid", gridTemplateColumns: "minmax(140px, 0.7fr) minmax(120px, 0.55fr) minmax(140px, 0.7fr) minmax(220px, 1.2fr)", gap: 12, padding: "0 12px 7px", color: C.textMuted, fontSize: 9, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>
@@ -86,6 +86,7 @@ export default function SensorStatusPage({ miners = [] }) {
 function SensorNode({ miner }) {
   const online = Boolean(miner.active && !miner.stale);
   const statusColor = online ? C.green : C.offline;
+  const metrics = sensorMetrics(miner, online);
   return (
     <article style={{ ...cardStyle, padding: 13, borderLeft: `3px solid ${statusColor}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
@@ -93,20 +94,58 @@ function SensorNode({ miner }) {
           <div style={{ color: C.text, fontSize: 14, fontWeight: 950, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{miner.name}</div>
           <div style={{ color: C.textMuted, fontSize: 10, marginTop: 3 }}>{miner.id} · {miner.location}</div>
         </div>
-        <span style={{ color: statusColor, fontSize: 10, fontWeight: 900 }}>{online ? "ONLINE" : miner.stale ? "STALE" : "OFFLINE"}</span>
+        <span style={{ color: statusColor, fontSize: 10, fontWeight: 900 }}>{sensorStatusLabel(online, miner.stale)}</span>
       </div>
       <div className="sensor-metric-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, marginTop: 12 }}>
-        <SensorMetric label="Heart rate" value={online && miner.hr > 0 ? `${formatReading(miner.hr, 0)} bpm` : "--"} color={online && miner.hr > 0 ? C.red : C.offline} state={online && miner.hr > 0 ? "Reading" : "No signal"} />
-        <SensorMetric label="SpO2" value={online && miner.spo2 > 0 ? `${formatReading(miner.spo2, 0)}%` : "--"} color={online && miner.spo2 > 0 ? C.oxygen : C.offline} state={online && miner.spo2 > 0 ? "Reading" : "No signal"} />
-        <SensorMetric label="Manual SOS" value={online ? (miner.manual_alert ? "Pressed" : "Clear") : "--"} color={online && miner.manual_alert ? C.red : online ? C.green : C.offline} state={online ? `${miner.button_press_count || 0} activations` : "No signal"} />
-        <SensorMetric label="Temperature" value={online && miner.temp > 0 ? `${formatReading(miner.temp, 1)}°C` : "--"} color={online && miner.temp > 0 ? C.teal : C.offline} state={online && miner.temp > 0 ? "Reading" : "No signal"} />
+        {metrics.map((metric) => <SensorMetric key={metric.label} {...metric} />)}
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, color: C.textMuted, fontSize: 11 }}>
-        <span>Contact: <b style={{ color: miner.finger === false ? C.amber : online ? C.green : C.offline }}>{miner.finger === false ? "Missing" : online ? "Valid" : "Offline"}</b></span>
+        <span>Contact: <b style={{ color: contactColor(miner.finger, online) }}>{contactLabel(miner.finger, online)}</b></span>
         <span>{formatLastSeen(miner.lastSeen)}</span>
       </div>
     </article>
   );
+}
+
+function sensorMetrics(miner, online) {
+  return [
+    readingMetric("Heart rate", miner.hr, online, C.red, "bpm", 0),
+    readingMetric("SpO2", miner.spo2, online, C.oxygen, "%", 0),
+    { label: "Manual SOS", value: manualSosLabel(online, miner.manual_alert), color: manualSosColor(online, miner.manual_alert), state: online ? `${miner.button_press_count || 0} activations` : "No signal" },
+    readingMetric("Temperature", miner.temp, online, C.teal, "\u00b0C", 1),
+  ];
+}
+
+function readingMetric(label, value, online, color, unit, digits) {
+  const numericValue = Number(value || 0);
+  if (!online || numericValue <= 0) return { label, value: "--", color: C.offline, state: "No signal" };
+  const suffix = unit === "%" ? "%" : ` ${unit}`;
+  return { label, value: `${formatReading(numericValue, digits)}${suffix}`, color, state: "Reading" };
+}
+
+function sensorStatusLabel(online, stale) {
+  if (online) return "ONLINE";
+  return stale ? "STALE" : "OFFLINE";
+}
+
+function manualSosLabel(online, pressed) {
+  if (!online) return "--";
+  return pressed ? "Pressed" : "Clear";
+}
+
+function manualSosColor(online, pressed) {
+  if (!online) return C.offline;
+  return pressed ? C.red : C.green;
+}
+
+function contactColor(finger, online) {
+  if (finger === false) return C.amber;
+  return online ? C.green : C.offline;
+}
+
+function contactLabel(finger, online) {
+  if (finger === false) return "Missing";
+  return online ? "Valid" : "Offline";
 }
 
 function FutureSensorNode() {
@@ -135,8 +174,8 @@ function buildMaintenanceItem(miner) {
   if (!miner.active) return { id: miner.id, miner: miner.name, healthy: false, color: C.offline, condition: "Offline", issue: "Device offline", action: "Check power, then confirm queued WiFi credentials." };
   if (miner.stale) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, condition: "Attention", issue: "Stale stream", action: "Restart the stream if last seen exceeds the timeout." };
   if (miner.finger === false) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, condition: "Attention", issue: "Contact missing", action: "Re-seat the strap and verify skin contact." };
-  if (!(miner.hr > 0) || !(miner.spo2 > 0)) return { id: miner.id, miner: miner.name, healthy: false, color: C.red, condition: "Attention", issue: "Optical sensor incomplete", action: "Inspect HR/SpO2 sensor placement and wiring." };
-  if (!(miner.temp > 0)) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, condition: "Attention", issue: "Temperature unavailable", action: "Inspect the probe and allow it to settle." };
+  if (miner.hr <= 0 || miner.spo2 <= 0) return { id: miner.id, miner: miner.name, healthy: false, color: C.red, condition: "Attention", issue: "Optical sensor incomplete", action: "Inspect HR/SpO2 sensor placement and wiring." };
+  if (miner.temp <= 0) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, condition: "Attention", issue: "Temperature unavailable", action: "Inspect the probe and allow it to settle." };
   if (miner.manual_alert) return { id: miner.id, miner: miner.name, healthy: false, color: C.amber, condition: "Good", issue: "Manual SOS active", action: "Review the alert in Alert Logs before closing the check." };
   return { id: miner.id, miner: miner.name, healthy: true, color: C.green, condition: "Excellent", issue: "All sensors reporting", action: "No maintenance action is required." };
 }

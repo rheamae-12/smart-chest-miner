@@ -40,7 +40,7 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
     });
   }, [sorted, search, connectionFilter]);
 
-  const selectedMiner = sorted.find((miner) => miner.id === selectedId);
+  const selectedMiner = sorted.some((miner) => miner.id === selectedId);
   const onlineMiner = sorted.find((miner) => miner.active && !miner.stale);
   // Entering the live monitor immediately shows the first online device. Keep
   // an operator's explicit selection stable, including when it is offline.
@@ -83,18 +83,19 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
                 )}
               </div>
             </div>
-            <div className="cc-miner-connection-filter" role="group" aria-label="Filter miners by connection status">
+            <fieldset className="cc-miner-connection-filter" style={{ border: 0, margin: 0, padding: 0 }}>
+              <legend className="sr-only">Filter miners by connection status</legend>
               {["all", "online", "offline"].map((filter) => (
                 <button
-                  key={filter}
                   type="button"
+                  key={filter}
                   className={connectionFilter === filter ? "is-active" : ""}
                   onClick={() => setConnectionFilter(filter)}
                 >
                   {filter[0].toUpperCase() + filter.slice(1)}
                 </button>
               ))}
-            </div>
+            </fieldset>
           </div>
           <div style={{ padding: "6px 8px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", alignItems: "center" }}>
             <input
@@ -130,7 +131,7 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
                 disabled={!minerAlerts.length}
                 style={{ background: "transparent", border: `1px solid ${minerAlerts.length ? C.amber : C.borderSoft}55`, borderRadius: 6, color: minerAlerts.length ? C.amber : C.textMuted, cursor: minerAlerts.length ? "pointer" : "default", fontSize: 10, fontWeight: 900, padding: "4px 7px", opacity: minerAlerts.length ? 1 : 0.7 }}
               >
-                {minerAlerts.length ? "Clear" : "Clear"}
+                Clear
               </button>
             </div>
             <div className="cc-rail-alert-stack" aria-live="polite">
@@ -143,7 +144,7 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
                     <div style={{ color: a.severity === "critical" ? C.red : C.amber, fontSize: 11, fontWeight: 900, lineHeight: 1.35 }}>{a.message}</div>
                     <time dateTime={a.timestamp ? new Date(a.timestamp).toISOString() : undefined} style={{ display: "block", color: C.textMuted, fontSize: 9, marginTop: 4 }}>{a.timestamp ? formatSystemTimestamp(a.timestamp) : "Just now"}</time>
                   </div>
-                  <button onClick={() => onDismissAlerts?.([a.id])} style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 16, lineHeight: 1 }} title="Dismiss">×</button>
+                  <button type="button" onClick={() => onDismissAlerts?.([a.id])} style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 16, lineHeight: 1 }} title="Dismiss">×</button>
                 </div>
               ))}
             </>
@@ -207,7 +208,7 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
                       <div key={a.id} style={{ ...cardStyle, padding: "9px 13px", display: "flex", alignItems: "center", gap: 10, borderLeft: `3px solid ${a.severity === "critical" ? C.red : C.amber}`, background: `${a.severity === "critical" ? C.red : C.amber}0E` }}>
                         <Icon name="alert" size={14} color={a.severity === "critical" ? C.red : C.amber} />
                         <span style={{ color: a.severity === "critical" ? C.red : C.amber, fontSize: 12, fontWeight: 900, flex: 1 }}>{a.message}</span>
-                        <button onClick={() => onDismissAlerts?.([a.id])} style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 16, lineHeight: 1 }} title="Dismiss">×</button>
+                        <button type="button" onClick={() => onDismissAlerts?.([a.id])} style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 16, lineHeight: 1 }} title="Dismiss">×</button>
                       </div>
                     ))}
                   </div>
@@ -217,23 +218,25 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
 
               <div style={{ ...cardStyle, display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", minHeight: 0, overflow: "hidden" }}>
                 <div style={{ display: "flex", gap: 4, padding: "10px 12px", borderBottom: `1px solid ${C.borderSoft}` }}>
-                  {TABS.map((t) => (
-                    <button
+                  {TABS.map((t) => {
+                    const tabBorder = tab === t.key ? `${C.primary}55` : "transparent";
+                    return <button
+                      type="button"
                       key={t.key}
                       onClick={() => setTab(t.key)}
                       style={{
                         display: "inline-flex", alignItems: "center", gap: 7,
                         padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 900,
                         cursor: "pointer",
-                        border: `1px solid ${tab === t.key ? `${C.primary}55` : "transparent"}`,
+                        border: `1px solid ${tabBorder}`,
                         background: tab === t.key ? `${C.primary}12` : "transparent",
                         color: tab === t.key ? C.primary : C.textMuted,
                       }}
                     >
                       <Icon name={t.icon} size={14} />
                       {t.label}
-                    </button>
-                  ))}
+                    </button>;
+                  })}
                 </div>
                 <div
                   className={`hide-scrollbar cc-tab-content cc-tab-${tab}`}
@@ -266,17 +269,121 @@ function severityRank(alert) {
   return alert.severity === "critical" ? 0 : 1;
 }
 
+function fleetDotColor(miner, hasAlert) {
+  if (!miner.active) return C.offline;
+  return hasAlert ? C.red : C.green;
+}
+
+function connectionLabel(online, stale) {
+  if (online) return "Online";
+  return stale ? "Stale signal" : "Offline";
+}
+
+function connectionShortLabel(miner) {
+  if (miner.active && !miner.stale) return "Online";
+  return miner.stale ? "Stale" : "Offline";
+}
+
+function contactValue(miner) {
+  if (!miner.active) return "--";
+  return miner.finger === false ? "No" : "Yes";
+}
+
+function contactColor(miner) {
+  if (!miner.active) return C.offline;
+  return miner.finger === false ? C.amber : C.green;
+}
+
+function contactStatus(miner) {
+  if (!miner.active) return "OFFLINE";
+  return miner.finger === false ? "WARNING" : "NORMAL";
+}
+
+function sosValue(miner) {
+  if (!miner.active) return "--";
+  return miner.manual_alert ? "Pressed" : "Clear";
+}
+
+function sosColor(miner) {
+  if (!miner.active) return C.offline;
+  return miner.manual_alert ? C.red : C.green;
+}
+
+function sosStatus(miner) {
+  if (!miner.active) return "OFFLINE";
+  return miner.manual_alert ? "PRESSED" : "NORMAL";
+}
+
+function contactIndicatorColor(miner) {
+  return contactColor(miner);
+}
+
+function contactIndicatorLabel(miner) {
+  if (!miner.active) return "Chest contact offline";
+  return miner.finger === false ? "Chest contact missing" : "Chest contact normal";
+}
+
+function contactIndicatorDetail(miner) {
+  if (!miner.active) return "Waiting for the device to reconnect";
+  return miner.finger === false ? "Re-seat the chest strap to restore readings" : "Sensor contact is stable";
+}
+
+function sosIndicatorLabel(miner) {
+  if (!miner.active) return "Manual SOS offline";
+  return miner.manual_alert ? "Manual SOS pressed" : "Manual SOS clear";
+}
+
+function temperatureIndicatorColor(miner) {
+  if (!miner.active) return C.offline;
+  return miner.temp > 0 ? C.teal : C.amber;
+}
+
+function temperatureIndicatorLabel(miner) {
+  if (!miner.active) return "Temperature offline";
+  return miner.temp > 0 ? `Temperature ${formatReading(miner.temp, 1)}\u00b0C` : "Temperature waiting";
+}
+
+function temperatureIndicatorDetail(miner) {
+  if (!miner.active) return "No current temperature signal";
+  return miner.temp > 0 ? "Within the live sensor stream" : "Waiting for a valid temperature";
+}
+
+function activityColor(log) {
+  if (log.severity === "critical") return C.red;
+  if (log.severity === "warning") return C.amber;
+  if (log.status === "online") return C.green;
+  return C.textMuted;
+}
+
+function signalConnectionValue(miner) {
+  if (miner.active && !miner.stale) return "Live stream active";
+  return miner.stale ? "Stale — no recent data" : "Offline";
+}
+
+function signalContactValue(miner) {
+  if (miner.finger === false) return "Not detected";
+  return miner.active ? "Detected" : "—";
+}
+
+function signalReadingValue(miner, key) {
+  if (!miner.active) return "—";
+  const value = Number(miner[key] || 0);
+  return value > 0 ? "Reporting" : "No reading";
+}
+
 function FleetRow({ miner, active, hasAlert, onSelect }) {
-  const dot = !miner.active ? C.offline : hasAlert ? C.red : C.green;
+  const dot = fleetDotColor(miner, hasAlert);
+  const activeBorder = active ? `${C.primary}45` : "transparent";
   return (
     <button
+      type="button"
       onClick={onSelect}
       className="cc-fleet-row"
       style={{
         width: "100%", textAlign: "left", cursor: "pointer",
         display: "grid", gridTemplateColumns: "auto 1fr auto", alignItems: "center", gap: 10,
         padding: "9px 11px", marginBottom: 4, borderRadius: 9,
-        border: `1px solid ${active ? `${C.primary}45` : "transparent"}`,
+        border: `1px solid ${activeBorder}`,
         background: active ? "linear-gradient(90deg, rgba(255,106,0,0.14), rgba(255,106,0,0.03))" : "transparent",
       }}
     >
@@ -314,7 +421,7 @@ function MinerHeader({ miner }) {
       <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 7, color, border: `1px solid ${color}45`, background: `${color}12`, borderRadius: 999, padding: "6px 12px", fontSize: 11, fontWeight: 900 }}>
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, boxShadow: `0 0 10px ${color}` }} className={online ? "dot-live" : undefined} />
-          {online ? "Online" : miner.stale ? "Stale signal" : "Offline"}
+          {connectionLabel(online, miner.stale)}
         </span>
         <span style={{ color: C.textMuted, fontSize: 11 }}>Last seen {formatLastSeen(miner.lastSeen)}</span>
       </div>
@@ -331,14 +438,14 @@ function VitalsRow({ miner, thresholds }) {
       <VitalTile label="Heart Rate" icon="heart" value={live ? formatReading(miner.hr, 0) : "--"} unit="bpm" color={C.red} status={live ? getVitalStatus(miner.hr, "hr", thresholds) : "OFFLINE"} />
       <VitalTile label="SpO2" icon="droplet" value={live ? formatReading(miner.spo2, 0) : "--"} unit="%" color={C.oxygen} status={live ? getVitalStatus(miner.spo2, "spo2", thresholds) : "OFFLINE"} />
       <VitalTile label="Temperature" icon="thermometer" value={live ? formatReading(miner.temp, 1) : "--"} unit="°C" color={C.teal} status={live ? getVitalStatus(miner.temp, "temp", thresholds) : "OFFLINE"} />
-      <VitalTile label="Chest Contact" icon="contact" value={miner.active ? (miner.finger === false ? "No" : "Yes") : "--"} color={!miner.active ? C.offline : miner.finger === false ? C.amber : C.green} status={!miner.active ? "OFFLINE" : miner.finger === false ? "WARNING" : "NORMAL"} />
-      <VitalTile label="Manual SOS" icon="siren" value={miner.active ? (miner.manual_alert ? "Pressed" : "Clear") : "--"} color={!miner.active ? C.offline : miner.manual_alert ? C.red : C.green} status={!miner.active ? "OFFLINE" : miner.manual_alert ? "PRESSED" : "NORMAL"} />
+      <VitalTile label="Chest Contact" icon="contact" value={contactValue(miner)} color={contactColor(miner)} status={contactStatus(miner)} />
+      <VitalTile label="Manual SOS" icon="siren" value={sosValue(miner)} color={sosColor(miner)} status={sosStatus(miner)} />
     </div>
   );
 }
 
 function VitalTile({ label, value, unit, color, status, icon }) {
-  const statusColor = status === "NORMAL" ? C.green : status === "OFFLINE" ? C.offline : status === "CRITICAL" || status === "HIGH" ? C.red : C.amber;
+  const statusColor = vitalStatusColor(status);
   return (
     <div className="card-shimmer" style={{ ...cardStyle, padding: 13, borderLeft: `3px solid ${color}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -356,6 +463,13 @@ function VitalTile({ label, value, unit, color, status, icon }) {
   );
 }
 
+function vitalStatusColor(status) {
+  if (status === "NORMAL") return C.green;
+  if (status === "OFFLINE") return C.offline;
+  if (status === "CRITICAL" || status === "HIGH") return C.red;
+  return C.amber;
+}
+
 // ─── Tabs ───────────────────────────────────────────────────────────────────
 
 function OverviewTab({ miner, liveData, thresholds }) {
@@ -364,8 +478,8 @@ function OverviewTab({ miner, liveData, thresholds }) {
     const labels = uniqueChartLabels(rows);
     return rows.map((row, index) => ({ ...row, time: labels[index] || row.time }));
   }, [liveData, miner.id]);
-  const live = miner.active && miner.finger !== false;
-  const hasData = live && chartData.some((d) => d.hr != null || d.spo2 != null || d.temp != null);
+  const live = isMinerLive(miner);
+  const hasData = hasChartData(live, chartData);
   const vitalScale = zeroBasedTenScale(chartData.flatMap((row) => [row.hr, row.spo2]), 140);
   const temperatureScale = zeroBasedTenScale(chartData.map((row) => row.temp), 50);
 
@@ -374,7 +488,7 @@ function OverviewTab({ miner, liveData, thresholds }) {
       <div className="cc-overview-readings" style={{ minWidth: 0, minHeight: 0 }}>
         <div style={{ color: C.text, fontSize: 14, fontWeight: 950, marginBottom: 10 }}>Live Readings</div>
         {hasData ? (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer className="cc-overview-chart" width="100%" height="100%">
             <LineChart data={chartData} margin={{ top: 8, right: 22, left: 4, bottom: 26 }}>
               <CartesianGrid stroke={C.borderSoft} strokeDasharray="3 6" vertical={false} />
               <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 9 }} axisLine={false} tickLine={false} minTickGap={34} height={34} label={{ value: "Time", fill: C.textMuted, fontSize: 9, position: "insideBottom", offset: -5 }} />
@@ -392,7 +506,7 @@ function OverviewTab({ miner, liveData, thresholds }) {
             </LineChart>
           </ResponsiveContainer>
         ) : (
-          <div className="cc-overview-empty" style={{ display: "grid", placeItems: "center", border: `1px dashed ${C.border}`, borderRadius: 10, color: C.textMuted, fontSize: 13, textAlign: "center", padding: 20 }}>
+          <div className="cc-overview-empty cc-overview-chart" style={{ display: "grid", placeItems: "center", border: `1px dashed ${C.border}`, borderRadius: 10, color: C.textMuted, fontSize: 13, textAlign: "center", padding: 20 }}>
             <div>
               <Icon name={miner.active ? "pulse" : "wifi"} size={24} color={miner.active ? C.amber : C.offline} />
               <div style={{ color: miner.active ? C.amber : C.offline, fontWeight: 900, marginTop: 10 }}>{miner.active ? "Waiting for valid readings" : "Device offline"}</div>
@@ -406,26 +520,23 @@ function OverviewTab({ miner, liveData, thresholds }) {
         <Indicator
           color={miner.active ? C.green : C.offline}
           label={miner.active ? "Readings online" : "Readings offline"}
-          detail={miner.active ? `Last contact ${formatLastSeen(miner.lastSeen)}` : `Last contact ${formatLastSeen(miner.lastSeen)}`}
+          detail={`Last contact ${formatLastSeen(miner.lastSeen)}`}
         />
-        <Indicator
-          color={!miner.active ? C.offline : miner.finger === false ? C.amber : C.green}
-          label={!miner.active ? "Chest contact offline" : miner.finger === false ? "Chest contact missing" : "Chest contact normal"}
-          detail={!miner.active ? "Waiting for the device to reconnect" : miner.finger === false ? "Re-seat the chest strap to restore readings" : "Sensor contact is stable"}
-        />
-        <Indicator
-          color={!miner.active ? C.offline : miner.manual_alert ? C.red : C.green}
-          label={!miner.active ? "Manual SOS offline" : miner.manual_alert ? "Manual SOS pressed" : "Manual SOS clear"}
-          detail={miner.active ? "Current latched SOS state" : "SOS state unavailable while offline"}
-        />
-        <Indicator
-          color={!miner.active ? C.offline : miner.temp > 0 ? C.teal : C.amber}
-              label={!miner.active ? "Temperature offline" : miner.temp > 0 ? `Temperature ${formatReading(miner.temp, 1)}°C` : "Temperature waiting"}
-          detail={!miner.active ? "No current temperature signal" : miner.temp > 0 ? "Within the live sensor stream" : "Waiting for a valid temperature"}
-        />
+        <Indicator color={contactIndicatorColor(miner)} label={contactIndicatorLabel(miner)} detail={contactIndicatorDetail(miner)} />
+        <Indicator color={sosColor(miner)} label={sosIndicatorLabel(miner)} detail={miner.active ? "Current latched SOS state" : "SOS state unavailable while offline"} />
+        <Indicator color={temperatureIndicatorColor(miner)} label={temperatureIndicatorLabel(miner)} detail={temperatureIndicatorDetail(miner)} />
       </div>
     </div>
   );
+}
+
+function isMinerLive(miner) {
+  return miner.active && miner.finger !== false;
+}
+
+function hasChartData(live, chartData) {
+  if (!live) return false;
+  return chartData.some((row) => row.hr != null || row.spo2 != null || row.temp != null);
 }
 
 function ActivityTab({ miner, activityLogs }) {
@@ -439,7 +550,7 @@ function ActivityTab({ miner, activityLogs }) {
   return (
     <div style={{ display: "grid", gap: 8 }}>
       {logs.map((log) => {
-        const color = log.severity === "critical" ? C.red : log.severity === "warning" ? C.amber : log.status === "online" ? C.green : C.textMuted;
+        const color = activityColor(log);
         return (
           <div key={log.id} style={{ border: `1px solid ${C.borderSoft}`, borderLeft: `3px solid ${color}`, borderRadius: 8, padding: "10px 13px", background: "rgba(255,255,255,0.02)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
@@ -457,11 +568,11 @@ function ActivityTab({ miner, activityLogs }) {
 
 function SignalTab({ miner }) {
   const rows = [
-    { label: "Connection", value: miner.active && !miner.stale ? "Live stream active" : miner.stale ? "Stale — no recent data" : "Offline", good: miner.active && !miner.stale },
-    { label: "Chest contact", value: miner.finger === false ? "Not detected" : miner.active ? "Detected" : "—", good: miner.active && miner.finger !== false },
-    { label: "Heart-rate sensor", value: miner.active ? (miner.hr > 0 ? "Reporting" : "No reading") : "—", good: miner.active && miner.hr > 0 },
-    { label: "SpO2 sensor", value: miner.active ? (miner.spo2 > 0 ? "Reporting" : "No reading") : "—", good: miner.active && miner.spo2 > 0 },
-    { label: "Body-temp sensor", value: miner.active ? (miner.temp > 0 ? "Reporting" : "No reading") : "—", good: miner.active && miner.temp > 0 },
+    { label: "Connection", value: signalConnectionValue(miner), good: miner.active && !miner.stale },
+    { label: "Chest contact", value: signalContactValue(miner), good: miner.active && miner.finger !== false },
+    { label: "Heart-rate sensor", value: signalReadingValue(miner, "hr"), good: miner.active && miner.hr > 0 },
+    { label: "SpO2 sensor", value: signalReadingValue(miner, "spo2"), good: miner.active && miner.spo2 > 0 },
+    { label: "Body-temp sensor", value: signalReadingValue(miner, "temp"), good: miner.active && miner.temp > 0 },
     { label: "Last reading", value: formatLastSeen(miner.lastSeen), good: miner.active },
   ];
   const healthy = rows.filter((row) => row.good).length;
@@ -500,7 +611,7 @@ function SignalTab({ miner }) {
           </div>
           <div className="cc-signal-readiness-detail">
             <span>Connection</span>
-            <strong>{miner.active && !miner.stale ? "Online" : miner.stale ? "Stale" : "Offline"}</strong>
+            <strong>{connectionShortLabel(miner)}</strong>
           </div>
           <div className="cc-signal-readiness-detail">
             <span>Chest contact</span>

@@ -4,7 +4,7 @@ const TICK_STEP = 10;
 // the largest value in the selected data set.
 export function zeroBasedTenScale(values = [], minimumMaximum = TICK_STEP) {
   const numericValues = values
-    .map((value) => Number(value))
+    .map(Number)
     .filter((value) => Number.isFinite(value) && value >= 0);
   const maximum = Math.max(Number(minimumMaximum) || TICK_STEP, ...numericValues, TICK_STEP);
   const upperBound = Math.ceil(maximum / TICK_STEP) * TICK_STEP;

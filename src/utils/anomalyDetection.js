@@ -17,7 +17,7 @@ export function analyzeSpo2Trend(points, { minSamples = 5, dropThreshold = 3, sl
   }
 
   const first = series[0].v;
-  const last = series[series.length - 1].v;
+  const last = series.at(-1).v;
   const netDrop = first - last;
 
   // Least-squares slope in %-points per minute.

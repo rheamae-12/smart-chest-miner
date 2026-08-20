@@ -170,6 +170,7 @@ function SettingField({ label, unit, value, hint }) {
 function Toggle({ value, onChange }) {
   return (
     <button
+      type="button"
       onClick={() => onChange(!value)}
       role="switch"
       aria-checked={value}

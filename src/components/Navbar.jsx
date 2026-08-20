@@ -9,13 +9,86 @@ import { formatSystemTimestamp } from "../utils/formatters";
 import { conditionForAlertId, conditionForLog, dedupeNotificationEvents } from "../utils/notifications";
 import { passwordRequirements, passwordStrength } from "../utils/password";
 import { ROLE_OPTIONS, isViewOnlyRole } from "../utils/roles";
+import { isValidEmail } from "../utils/validation";
 
 const CLEARED_NOTIFICATIONS_STORAGE_KEY = "smart-chest-miner-cleared-notifications";
 const HIDDEN_NOTIFICATIONS_STORAGE_KEY = "smart-chest-miner-hidden-notifications";
 const MAX_AVATAR_BYTES = 8 * 1024 * 1024;
+const PASSWORD_STRENGTH_SEGMENTS = ["length", "case", "number", "symbol"];
+
+function readAvatarFile(file, onError, onReady) {
+  const reader = new FileReader();
+  reader.onerror = () => onError("Could not read that file. Try another image.");
+  reader.onload = (event) => {
+    const image = new Image();
+    image.onerror = () => onError("That image appears to be corrupted.");
+    image.onload = () => {
+      const size = 200;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#15181a";
+      context.fillRect(0, 0, size, size);
+      const side = Math.min(image.width, image.height);
+      const sourceX = (image.width - side) / 2;
+      const sourceY = (image.height - side) / 2;
+      context.drawImage(image, sourceX, sourceY, side, side, 0, 0, size, size);
+      onReady(canvas.toDataURL("image/jpeg", 0.82));
+    };
+    image.src = event.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function saveAccountChanges(account, handlers) {
+  const next = {
+    name: account.name.trim() || "Admin",
+    email: account.email.trim().toLowerCase(),
+    role: account.role.trim() || "Supervisor",
+    shift: account.shift.trim() || "Night Shift",
+    photoURL: account.photoURL || "",
+  };
+  if (!isValidEmail(next.email)) {
+    handlers.setAccountError("Enter a valid account email address.");
+    return;
+  }
+  handlers.updateUser(next);
+  handlers.setAccount(next);
+  handlers.setAccountError("");
+  handlers.setAvatarError("");
+  handlers.setAccountSaved(true);
+}
+
+async function submitPasswordChange(user, pw, handlers) {
+  if (user?.source === "demo") {
+    handlers.setPwError("Demo accounts cannot change their password.");
+    return;
+  }
+  const current = pw.current.trim();
+  const next = pw.next.trim();
+  const confirm = pw.confirm.trim();
+  if (!current) { handlers.setPwError("Enter your current password."); return; }
+  if (!next) { handlers.setPwError("Enter a new password."); return; }
+  if (!passwordRequirements(next).every((requirement) => requirement.met)) { handlers.setPwError("New password does not meet all security requirements."); return; }
+  if (next !== confirm) { handlers.setPwError("Passwords do not match."); return; }
+  if (next === current) { handlers.setPwError("New password must differ from the current one."); return; }
+  handlers.setPwSaving(true);
+  handlers.setPwError("");
+  try {
+    await handlers.changePassword(current, next);
+    handlers.setPwSaved(true);
+    handlers.setPw({ current: "", next: "", confirm: "" });
+  } catch (error) {
+    handlers.setPwError(cleanPasswordError(error) || "Password change failed.");
+  } finally {
+    handlers.setPwSaving(false);
+  }
+}
 
 // Navbar — top app bar with page title, connection status pills, notifications, security, and account
-export default function Navbar({ miners, user, onLogout, usingRealtime, connectionError, activityLogs = [], thresholds, dismissedAlertIds = [], onDismissAlerts }) {
+// This component intentionally coordinates the independent top-bar and modal states.
+export default function Navbar({ miners, user, onLogout, usingRealtime, connectionError, activityLogs = [], thresholds, dismissedAlertIds = [], onDismissAlerts }) { // NOSONAR
   const { updateUser, changePassword, canManage } = useAuth();
   const [time, setTime] = useState(new Date());
   const [securityOpen, setSecurityOpen] = useState(false);
@@ -30,7 +103,9 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
   const [pwSaved, setPwSaved] = useState(false);
   const [pwSaving, setPwSaving] = useState(false);
   const fileInputRef = useRef(null);
+  const mobileHeaderMenuCloseRef = useRef(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [mobileHeaderMenuOpen, setMobileHeaderMenuOpen] = useState(false);
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [clearedNotifications, setClearedNotifications] = useState(() => readStoredStringArray(CLEARED_NOTIFICATIONS_STORAGE_KEY));
@@ -107,6 +182,21 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
   }, []);
 
   useEffect(() => {
+    if (!mobileHeaderMenuOpen) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setMobileHeaderMenuOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    window.requestAnimationFrame(() => mobileHeaderMenuCloseRef.current?.focus());
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [mobileHeaderMenuOpen]);
+
+  useEffect(() => {
     localStorage.setItem(CLEARED_NOTIFICATIONS_STORAGE_KEY, JSON.stringify(clearedNotifications));
   }, [clearedNotifications]);
 
@@ -114,26 +204,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
     localStorage.setItem(HIDDEN_NOTIFICATIONS_STORAGE_KEY, JSON.stringify(hiddenNotifications));
   }, [hiddenNotifications]);
 
-  const saveAccount = () => {
-    const next = {
-      name: account.name.trim() || "Admin",
-      email: account.email.trim().toLowerCase(),
-      role: account.role.trim() || "Supervisor",
-      shift: account.shift.trim() || "Night Shift",
-      photoURL: account.photoURL || "",
-    };
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email)) {
-      setAccountError("Enter a valid account email address.");
-      return;
-    }
-
-    updateUser(next);
-    setAccount(next);
-    setAccountError("");
-    setAvatarError("");
-    setAccountSaved(true);
-  };
+  const saveAccount = () => saveAccountChanges(account, { setAccount, setAccountError, setAccountSaved, setAvatarError, updateUser });
 
   // handleAvatarChange — validates the chosen file, then center-crops and downscales
   // it to a 200px square JPEG (base64). The result is *staged* into the form
@@ -154,31 +225,10 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
     }
 
     setAvatarError("");
-    const reader = new FileReader();
-    reader.onerror = () => setAvatarError("Could not read that file. Try another image.");
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onerror = () => setAvatarError("That image appears to be corrupted.");
-      img.onload = () => {
-        const SIZE = 200;
-        const canvas = document.createElement("canvas");
-        canvas.width = SIZE;
-        canvas.height = SIZE;
-        const ctx = canvas.getContext("2d");
-        // Fill first so transparent PNGs don't turn black when flattened to JPEG.
-        ctx.fillStyle = "#15181a";
-        ctx.fillRect(0, 0, SIZE, SIZE);
-        const side = Math.min(img.width, img.height);
-        const sx = (img.width - side) / 2;
-        const sy = (img.height - side) / 2;
-        ctx.drawImage(img, sx, sy, side, side, 0, 0, SIZE, SIZE);
-        const src = canvas.toDataURL("image/jpeg", 0.82);
-        setAccount((prev) => ({ ...prev, photoURL: src }));
-        setAccountSaved(false);
-      };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
+    readAvatarFile(file, setAvatarError, (photoURL) => {
+      setAccount((prev) => ({ ...prev, photoURL }));
+      setAccountSaved(false);
+    });
   };
 
   // removePhoto — stages photo removal; committed on Save Account.
@@ -189,41 +239,24 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
   };
 
   // handlePasswordChange — validates fields, enforces requirements, then calls changePassword
-  const handlePasswordChange = async () => {
-    if (user?.source === "demo") {
-      setPwError("Demo accounts cannot change their password.");
-      return;
-    }
-    const cur = pw.current.trim();
-    const next = pw.next.trim();
-    const confirm = pw.confirm.trim();
-    if (!cur) { setPwError("Enter your current password."); return; }
-    if (!next) { setPwError("Enter a new password."); return; }
-    const reqs = passwordRequirements(next);
-    if (!reqs.every((r) => r.met)) { setPwError("New password does not meet all security requirements."); return; }
-    if (next !== confirm) { setPwError("Passwords do not match."); return; }
-    if (next === cur) { setPwError("New password must differ from the current one."); return; }
-    setPwSaving(true);
-    setPwError("");
-    try {
-      await changePassword(cur, next);
-      setPwSaved(true);
-      setPw({ current: "", next: "", confirm: "" });
-    } catch (error) {
-      const msg = String(error.message || "Password change failed.")
-        .replace("Firebase: ", "")
-        .replace(/\s*\(auth\/[^)]+\)\.?/, "")
-        .trim();
-      setPwError(msg || "Password change failed.");
-    } finally {
-      setPwSaving(false);
-    }
-  };
+  const handlePasswordChange = () => submitPasswordChange(user, pw, { changePassword, setPw, setPwError, setPwSaved, setPwSaving });
 
   // markAllRead — marks every notification in the feed read (non-destructive; rows
   // stay visible, dimmed, and can be toggled back to unread).
   const markAllRead = () => {
     setClearedNotifications((items) => [...new Set([...items, ...feedEvents.map(notificationKey)])]);
+  };
+
+  const openAccountSettings = () => {
+    setAccount(accountFromUser(user));
+    setAccountError("");
+    setAvatarError("");
+    setAccountSaved(false);
+    setAccountTab("profile");
+    setPw({ current: "", next: "", confirm: "" });
+    setPwError("");
+    setPwSaved(false);
+    setAccountOpen(true);
   };
 
   return (
@@ -233,13 +266,13 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
           title="Security Status"
           onClose={() => setSecurityOpen(false)}
           actions={
-            <button onClick={() => setSecurityOpen(false)} style={{ ...primaryButtonStyle, padding: "9px 16px" }}>
+            <button type="button" onClick={() => setSecurityOpen(false)} style={{ ...primaryButtonStyle, padding: "9px 16px" }}>
               Done
             </button>
           }
         >
           <div style={{ display: "grid", gap: 10 }}>
-            <SecurityRow label="Session" value={user?.source === "firebase" ? "Authenticated account" : user?.source === "local" ? "Local account mode" : "Demo supervisor"} good />
+            <SecurityRow label="Session" value={sessionSecurityLabel(user)} good />
             <SecurityRow label="Access level" value={canManage ? "Full — can manage devices, settings & logs" : "View-only — monitoring access only"} good={canManage} />
             <SecurityRow label="Realtime source" value={usingRealtime ? "Live device stream active" : "Waiting for verified device data"} good={usingRealtime} />
             <SecurityRow label="Device alerts" value={`${alerts.length} condition${alerts.length === 1 ? "" : "s"} need review`} good={alerts.length === 0} />
@@ -255,7 +288,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
           className="notification-modal-panel"
           onClose={() => setNotificationsOpen(false)}
           actions={
-            <button onClick={() => setNotificationsOpen(false)} style={{ ...primaryButtonStyle, padding: "9px 16px" }}>
+            <button type="button" onClick={() => setNotificationsOpen(false)} style={{ ...primaryButtonStyle, padding: "9px 16px" }}>
               Done
             </button>
           }
@@ -294,7 +327,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
                   aria-label="Mark all notifications as read"
                   style={{ ...ghostButtonStyle, opacity: notificationCount ? 1 : 0.5, cursor: notificationCount ? "pointer" : "not-allowed" }}
                 >
-                  <Icon name="check" size={14} color={notificationCount ? C.textMuted : C.textMuted} />
+                  <Icon name="check" size={14} color={C.textMuted} />
                 </button>
                 <button
                   type="button"
@@ -336,10 +369,10 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
           onClose={() => setClearConfirmOpen(false)}
           actions={
             <>
-              <button onClick={() => setClearConfirmOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 16px" }}>
+              <button type="button" onClick={() => setClearConfirmOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 16px" }}>
                 Cancel
               </button>
-              <button onClick={clearAllNotifications} style={{ ...primaryButtonStyle, padding: "9px 16px", background: `${C.red}22`, borderColor: `${C.red}55`, color: C.red }}>
+              <button type="button" onClick={clearAllNotifications} style={{ ...primaryButtonStyle, padding: "9px 16px", background: `${C.red}22`, borderColor: `${C.red}55`, color: C.red }}>
                 Clear All
               </button>
             </>
@@ -366,42 +399,31 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
           <Modal
             title="Account Settings"
             onClose={() => { setAccountOpen(false); setAccountSaved(false); setPwSaved(false); }}
-            actions={
-              accountTab === "security" ? (
-                pwSaved ? (
-                  <button
-                    onClick={() => { setPwSaved(false); setAccountTab("profile"); }}
-                    style={{ ...primaryButtonStyle, padding: "9px 18px", background: `${C.green}22`, borderColor: `${C.green}55`, color: C.green }}
-                  >
-                    Done
-                  </button>
-                ) : (
-                  <>
-                    <button onClick={() => { setAccountTab("profile"); setPwError(""); }} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>Back</button>
-                    <button disabled={pwSaving || user?.source === "demo"} onClick={handlePasswordChange} style={{ ...primaryButtonStyle, padding: "9px 18px", opacity: pwSaving ? 0.7 : 1 }}>
-                      {pwSaving ? "Changing..." : "Change Password"}
-                    </button>
-                  </>
-                )
-              ) : accountSaved ? (
-                <button onClick={() => { setAccountOpen(false); setAccountSaved(false); }} style={{ ...primaryButtonStyle, padding: "9px 18px", background: `${C.green}22`, borderColor: `${C.green}55`, color: C.green }}>
-                  Close
-                </button>
-              ) : (
-                <>
-                  <button onClick={() => setAccountOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>Cancel</button>
-                  <button onClick={saveAccount} style={{ ...primaryButtonStyle, padding: "9px 18px" }}>Save Account</button>
-                </>
-              )
-            }
+            actions={(
+              <AccountModalActions
+                accountTab={accountTab}
+                accountSaved={accountSaved}
+                handlePasswordChange={handlePasswordChange}
+                onBack={() => { setAccountTab("profile"); setPwError(""); }}
+                onClose={() => setAccountOpen(false)}
+                onCloseSaved={() => { setAccountOpen(false); setAccountSaved(false); }}
+                onPasswordSaved={() => { setPwSaved(false); setAccountTab("profile"); }}
+                pwSaved={pwSaved}
+                pwSaving={pwSaving}
+                saveAccount={saveAccount}
+                user={user}
+              />
+            )}
           >
             <div style={{ display: "grid", gap: 14 }}>
               {/* Profile hero — avatar + live name/email + badges + photo controls */}
               <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", background: `linear-gradient(135deg, ${C.primary}10 0%, ${C.primary}04 100%)`, border: `1px solid ${C.primary}28`, borderRadius: 10 }}>
-                <div
+                <button
+                  type="button"
                   onClick={() => fileInputRef.current?.click()}
                   title="Click to change profile photo"
-                  style={{ width: 56, height: 56, borderRadius: "50%", background: `${C.primary}18`, border: `2px solid ${C.primary}45`, display: "grid", placeItems: "center", fontSize: 16, color: C.primary, fontWeight: 900, flexShrink: 0, cursor: "pointer", overflow: "hidden", position: "relative" }}
+                  aria-label="Change profile photo"
+                  style={{ width: 56, height: 56, padding: 0, borderRadius: "50%", background: `${C.primary}18`, border: `2px solid ${C.primary}45`, display: "grid", placeItems: "center", fontSize: 16, color: C.primary, fontWeight: 900, flexShrink: 0, cursor: "pointer", overflow: "hidden", position: "relative" }}
                 >
                   {account.photoURL
                     ? <img src={account.photoURL} alt="Profile" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
@@ -413,7 +435,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
                   >
                     <CameraIcon />
                   </div>
-                </div>
+                </button>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ color: C.text, fontSize: 15, fontWeight: 950, lineHeight: 1.2 }}>{account.name || "Admin"}</div>
                   <div style={{ color: C.textMuted, fontSize: 11, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.email}</div>
@@ -435,21 +457,23 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
               </div>
 
               {/* Avatar error / staged-change hint */}
-              {avatarError ? (
+              {avatarError && (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: `${C.amber}10`, border: `1px solid ${C.amber}35`, borderRadius: 7, marginTop: -4 }}>
                   <span style={{ color: C.amber, fontSize: 16, lineHeight: 1, fontWeight: 900 }}>!</span>
                   <span style={{ color: C.amber, fontSize: 11.5 }}>{avatarError}</span>
                 </div>
-              ) : account.photoURL !== (user?.photoURL || "") ? (
+              )}
+              {!avatarError && account.photoURL !== (user?.photoURL || "") && (
                 <div style={{ color: C.textMuted, fontSize: 11, marginTop: -4, paddingLeft: 2 }}>
                   Photo change is staged — click <strong style={{ color: C.text }}>Save Account</strong> to apply it.
                 </div>
-              ) : null}
+              )}
 
               {/* Tab switcher */}
               <div style={{ display: "flex", background: "rgba(255,255,255,0.04)", borderRadius: 8, padding: 3, gap: 2 }}>
                 {["profile", "security"].map((tab) => (
                   <button
+                    type="button"
                     key={tab}
                     onClick={() => { setAccountTab(tab); setPwError(""); setAccountError(""); }}
                     style={{ flex: 1, padding: "7px 0", borderRadius: 6, border: "none", background: accountTab === tab ? "rgba(255,255,255,0.09)" : "transparent", color: accountTab === tab ? C.text : C.textMuted, fontSize: 12, fontWeight: accountTab === tab ? 900 : 600, cursor: "pointer" }}
@@ -472,7 +496,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
                         value={account.role}
                         options={ROLE_OPTIONS}
                         disabled={user?.source === "firebase"}
-                        hint={user?.source === "firebase" ? "Managed by an administrator" : isViewOnlyRole(account.role) ? "Read-only access" : "Can manage devices, settings & logs"}
+                        hint={accountRoleHint(user, account.role)}
                         onChange={(role) => { setAccount({ ...account, role }); setAccountSaved(false); }}
                       />
                       <AccountField label="Assigned Shift" value={account.shift} onChange={(shift) => { setAccount({ ...account, shift }); setAccountSaved(false); }} />
@@ -522,9 +546,9 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
                             {/* Strength bar */}
                             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 3, flex: 1 }}>
-                                {[0, 1, 2, 3].map((i) => {
+                                {PASSWORD_STRENGTH_SEGMENTS.map((segment, index) => {
                                   const { score, color } = passwordStrength(pw.next);
-                                  return <div key={i} style={{ height: 4, borderRadius: 2, background: i < score ? color : `${C.borderSoft}`, transition: "background 0.2s" }} />;
+                                  return <div key={segment} style={{ height: 4, borderRadius: 2, background: index < score ? color : `${C.borderSoft}`, transition: "background 0.2s" }} />;
                                 })}
                               </div>
                               <span style={{ color: passwordStrength(pw.next).color, fontSize: 10, fontWeight: 900, minWidth: 56, textAlign: "right" }}>{passwordStrength(pw.next).label}</span>
@@ -609,7 +633,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
 
         {/* Live status cluster */}
         <div className="navbar-status" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Pill tone={usingRealtime ? "good" : "warn"}>{usingRealtime ? "Firebase live" : connectionError ? "Firebase notice" : "Awaiting data"}</Pill>
+          <Pill tone={usingRealtime ? "good" : "warn"}>{realtimeStatusLabel(usingRealtime, connectionError)}</Pill>
           <Pill tone={onlineCount > 0 ? "good" : "danger"}>{onlineCount}/{miners.length} online</Pill>
         </div>
 
@@ -626,9 +650,22 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
         {/* Actions */}
         <div className="navbar-actions" style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
+            type="button"
+            onClick={() => setMobileHeaderMenuOpen((current) => !current)}
+            className="nav-icon-btn mobile-menu-button"
+            aria-label={mobileHeaderMenuOpen ? "Close header menu" : "Open header menu"}
+            aria-expanded={mobileHeaderMenuOpen}
+            aria-controls="mobile-header-actions"
+            title={mobileHeaderMenuOpen ? "Close header menu" : "Open header menu"}
+            style={{ ...ghostButtonStyle, width: 36, height: 36, padding: 0, display: "grid", placeItems: "center", flexShrink: 0 }}
+          >
+            <Icon name="menu" size={18} />
+          </button>
+          <button
+            type="button"
             onClick={() => { setClearConfirmOpen(false); setNotificationsOpen(true); }}
             title="Miner notifications"
-            className="nav-icon-btn"
+            className="nav-icon-btn navbar-header-action"
             style={{ ...ghostButtonStyle, width: 36, height: 36, padding: 0, display: "grid", placeItems: "center", position: "relative", flexShrink: 0 }}
           >
             <BellIcon />
@@ -641,23 +678,14 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
               </span>
             )}
           </button>
-          <button onClick={() => setSecurityOpen(true)} className="nav-action-btn navbar-security" style={{ ...ghostButtonStyle, padding: "8px 12px", fontSize: 12, fontWeight: 800, height: 36 }}>
+          <button type="button" onClick={() => setSecurityOpen(true)} className="nav-action-btn navbar-security navbar-header-action" style={{ ...ghostButtonStyle, padding: "8px 12px", fontSize: 12, fontWeight: 800, height: 36 }}>
             Security
           </button>
           <button
-            onClick={() => {
-              setAccount(accountFromUser(user));
-              setAccountError("");
-              setAvatarError("");
-              setAccountSaved(false);
-              setAccountTab("profile");
-              setPw({ current: "", next: "", confirm: "" });
-              setPwError("");
-              setPwSaved(false);
-              setAccountOpen(true);
-            }}
+            type="button"
+            onClick={openAccountSettings}
             title={user?.email}
-            className="nav-avatar-btn"
+            className="nav-avatar-btn navbar-header-action"
             style={{ ...avatarStyle, width: 36, height: 36, cursor: "pointer", padding: 0, overflow: "hidden" }}
           >
             {user?.photoURL
@@ -665,14 +693,54 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
               : (initials || "AD")
             }
           </button>
-          <button onClick={onLogout} className="nav-action-btn nav-action-danger navbar-logout" style={{ ...ghostButtonStyle, padding: "8px 12px", fontSize: 12, fontWeight: 800, height: 36 }}>
+          <button type="button" onClick={onLogout} className="nav-action-btn nav-action-danger navbar-logout navbar-header-action" style={{ ...ghostButtonStyle, padding: "8px 12px", fontSize: 12, fontWeight: 800, height: 36 }}>
             <span className="navbar-logout-label">Logout</span>
             <span className="navbar-logout-icon" aria-hidden="true">↪</span>
           </button>
         </div>
       </header>
+      {mobileHeaderMenuOpen && (
+        <div className="mobile-header-menu-layer">
+          <button type="button" className="mobile-header-menu-backdrop" aria-label="Close header menu" onClick={() => setMobileHeaderMenuOpen(false)} />
+          <dialog id="mobile-header-actions" className="mobile-header-menu" open aria-label="Header actions">
+            <header className="mobile-header-menu-header">
+              <div>
+                <span>Header controls</span>
+                <strong>Quick actions</strong>
+              </div>
+              <button ref={mobileHeaderMenuCloseRef} type="button" className="mobile-header-menu-close" aria-label="Close header menu" onClick={() => setMobileHeaderMenuOpen(false)}>
+                <Icon name="close" size={17} />
+              </button>
+            </header>
+            <div className="mobile-header-menu-list">
+              <button type="button" className="mobile-header-menu-item" onClick={() => { setMobileHeaderMenuOpen(false); setClearConfirmOpen(false); setNotificationsOpen(true); }}>
+                <span className="mobile-header-menu-icon"><BellIcon /></span>
+               <span><strong>Miner Notifications</strong><small>{notificationSummary(notificationCount)}</small></span>
+              </button>
+              <button type="button" className="mobile-header-menu-item" onClick={() => { setMobileHeaderMenuOpen(false); setSecurityOpen(true); }}>
+                <span className="mobile-header-menu-icon"><Icon name="shield" size={17} /></span>
+                <span><strong>Security Status</strong><small>{canManage ? "Supervisor access" : "View-only access"}</small></span>
+              </button>
+              <button type="button" className="mobile-header-menu-item" onClick={() => { setMobileHeaderMenuOpen(false); openAccountSettings(); }}>
+                <span className="mobile-header-menu-icon"><Icon name="user" size={17} /></span>
+                <span><strong>Account Settings</strong><small>Profile and password controls</small></span>
+              </button>
+              <button type="button" className="mobile-header-menu-item is-danger" onClick={() => { setMobileHeaderMenuOpen(false); onLogout(); }}>
+                <span className="mobile-header-menu-icon"><span aria-hidden="true">↪</span></span>
+                <span><strong>Log Out</strong><small>End this console session</small></span>
+              </button>
+            </div>
+          </dialog>
+        </div>
+      )}
     </>
   );
+}
+
+function notificationSummary(count) {
+  if (!count) return "All caught up";
+  const alertLabel = count === 1 ? "alert" : "alerts";
+  return `${count} unread ${alertLabel}`;
 }
 
 // notificationKey — stable string key used to track which notifications have been cleared in localStorage
@@ -763,6 +831,81 @@ const avatarStyle = {
   flexShrink: 0,
 };
 
+function sessionSecurityLabel(user) {
+  if (user?.source === "firebase") return "Authenticated account";
+  if (user?.source === "local") return "Local account mode";
+  return "Demo supervisor";
+}
+
+function accountRoleHint(user, role) {
+  if (user?.source === "firebase") return "Managed by an administrator";
+  if (isViewOnlyRole(role)) return "Read-only access";
+  return "Can manage devices, settings & logs";
+}
+
+function realtimeStatusLabel(usingRealtime, connectionError) {
+  if (usingRealtime) return "Firebase live";
+  if (connectionError) return "Firebase notice";
+  return "Awaiting data";
+}
+
+function toneColor(tone) {
+  if (tone === "good") return C.green;
+  if (tone === "danger") return C.red;
+  return C.amber;
+}
+
+function notificationColor(event) {
+  if (event.severity === "critical") return C.red;
+  if (event.severity === "warning") return C.amber;
+  if (event.status === "online") return C.green;
+  return C.textMuted;
+}
+
+function cleanPasswordError(error) {
+  const rawMessage = String(error.message || "Password change failed.").replace("Firebase: ", "").trim();
+  const authMarker = rawMessage.indexOf("(auth/");
+  const withoutCode = authMarker >= 0 ? rawMessage.slice(0, authMarker).trim() : rawMessage;
+  return withoutCode.endsWith(".") ? withoutCode.slice(0, -1) : withoutCode;
+}
+
+function AccountModalActions({ accountTab, accountSaved, handlePasswordChange, onBack, onClose, onCloseSaved, onPasswordSaved, pwSaved, pwSaving, saveAccount, user }) {
+  if (accountTab === "security") {
+    if (pwSaved) {
+      return (
+        <button
+          type="button"
+          onClick={onPasswordSaved}
+          style={{ ...primaryButtonStyle, padding: "9px 18px", background: `${C.green}22`, borderColor: `${C.green}55`, color: C.green }}
+        >
+          Done
+        </button>
+      );
+    }
+    return (
+      <>
+        <button type="button" onClick={onBack} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>Back</button>
+        <button type="button" disabled={pwSaving || user?.source === "demo"} onClick={handlePasswordChange} style={{ ...primaryButtonStyle, padding: "9px 18px", opacity: pwSaving ? 0.7 : 1 }}>
+          {pwSaving ? "Changing..." : "Change Password"}
+        </button>
+      </>
+    );
+  }
+  if (accountSaved) {
+    return (
+      <button type="button" onClick={onCloseSaved} style={{ ...primaryButtonStyle, padding: "9px 18px", background: `${C.green}22`, borderColor: `${C.green}55`, color: C.green }}>
+        Close
+      </button>
+    );
+  }
+  return (
+    <>
+      <button type="button" onClick={onClose} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>Cancel</button>
+      <button type="button" onClick={saveAccount} style={{ ...primaryButtonStyle, padding: "9px 18px" }}>Save Account</button>
+    </>
+  );
+}
+
 // readStoredStringArray — safely reads a JSON string array from localStorage; returns [] on error
 function readStoredStringArray(key) {
   try {
@@ -775,7 +918,7 @@ function readStoredStringArray(key) {
 
 // Pill — status pill with a glowing dot; tone: "good" | "warn" | "danger"
 function Pill({ children, tone }) {
-  const color = tone === "good" ? C.green : tone === "danger" ? C.red : C.amber;
+  const color = toneColor(tone);
   return (
     <div style={{ display: "inline-flex", alignItems: "center", gap: 7, border: `1px solid ${color}45`, background: `${color}12`, color, borderRadius: 999, padding: "7px 10px", fontSize: 11, fontWeight: 900, whiteSpace: "nowrap" }}>
       <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, boxShadow: `0 0 12px ${color}` }} />
@@ -810,19 +953,16 @@ const NOTIFICATION_ICONS = { alert: "alert", status: "contact" };
 // clickable (opens it and marks it read), with an explicit read/unread toggle.
 // Read rows are dimmed; unread rows show a dot.
 function NotificationRow({ event, read, onOpen, onToggleRead, onClear }) {
-  const color = event.severity === "critical" ? C.red : event.severity === "warning" ? C.amber : event.status === "online" ? C.green : C.textMuted;
+  const color = notificationColor(event);
+  const borderColor = read ? `${color}55` : color;
   const label = event.severity || event.status || "info";
   const iconName = NOTIFICATION_ICONS[event.source] || (event.severity === "critical" ? "alert" : "clock");
   return (
     <div
       className="notification-row"
-      onClick={onOpen}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === "Enter") onOpen(); }}
       style={{
         border: `1px solid ${C.borderSoft}`,
-        borderLeft: `3px solid ${read ? `${color}55` : color}`,
+        borderLeft: `3px solid ${borderColor}`,
         padding: 12,
         background: read ? "transparent" : "rgba(255,255,255,0.04)",
         borderRadius: 7,
@@ -832,16 +972,22 @@ function NotificationRow({ event, read, onOpen, onToggleRead, onClear }) {
       }}
     >
       <div className="notification-row-main" style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
-        <div className="notification-row-title" style={{ display: "flex", gap: 8, alignItems: "start", minWidth: 0 }}>
+        <button
+          type="button"
+          className="notification-row-title"
+          onClick={onOpen}
+          style={{ display: "flex", gap: 8, alignItems: "start", minWidth: 0, border: 0, padding: 0, background: "transparent", color: C.text, textAlign: "left", cursor: "pointer" }}
+        >
           <span style={{ marginTop: 1, flexShrink: 0, position: "relative" }}>
             <Icon name={iconName} size={14} color={color} />
             {!read && <span style={{ position: "absolute", top: -3, right: -3, width: 7, height: 7, borderRadius: "50%", background: color, boxShadow: `0 0 6px ${color}` }} />}
           </span>
           <div style={{ color: C.text, fontSize: 12, fontWeight: read ? 700 : 900, lineHeight: 1.35, minWidth: 0 }}>{event.title}</div>
-        </div>
+        </button>
         <div className="notification-row-actions" style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
           <div style={{ color, border: `1px solid ${color}55`, background: `${color}14`, borderRadius: 999, padding: "3px 7px", fontSize: 9, fontWeight: 900, textTransform: "uppercase", whiteSpace: "nowrap" }}>{label}</div>
           <button
+            type="button"
             onClick={(e) => { e.stopPropagation(); onToggleRead(); }}
             title={read ? "Mark as unread" : "Mark as read"}
             aria-label={read ? "Mark as unread" : "Mark as read"}
@@ -852,6 +998,7 @@ function NotificationRow({ event, read, onOpen, onToggleRead, onClear }) {
               : <Icon name="check" size={13} color={C.green} />}
           </button>
           <button
+            type="button"
             onClick={(e) => { e.stopPropagation(); onClear(); }}
             title="Clear notification"
             aria-label="Clear notification"

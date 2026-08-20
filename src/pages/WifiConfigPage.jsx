@@ -72,11 +72,7 @@ export default function WifiConfigPage({ miners }) {
   );
 
   // Fix: preserve orphaned device ID when editing a record whose device was removed
-  const selectedDeviceId = miners.some((miner) => miner.id === form.deviceId)
-    ? form.deviceId
-    : editingRecord && form.deviceId
-      ? form.deviceId
-      : latestMinerId;
+  const selectedDeviceId = resolveSelectedDeviceId(miners, form.deviceId, editingRecord, latestMinerId);
 
   const selectedMiner = miners.find((miner) => miner.id === selectedDeviceId);
 
@@ -192,8 +188,8 @@ export default function WifiConfigPage({ miners }) {
           onClose={closeModal}
           actions={
             <>
-              <button onClick={closeModal} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>Cancel</button>
-              <button onClick={confirm ? save : requestSave} style={{ ...primaryButtonStyle, padding: "9px 15px" }}>{confirm ? "Confirm" : "Save"}</button>
+              <button type="button" onClick={closeModal} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>Cancel</button>
+              <button type="button" onClick={confirm ? save : requestSave} style={{ ...primaryButtonStyle, padding: "9px 15px" }}>{confirm ? "Confirm" : "Save"}</button>
             </>
           }
         >
@@ -263,8 +259,8 @@ export default function WifiConfigPage({ miners }) {
           onClose={() => setDeleteRecord(null)}
           actions={
             <>
-              <button onClick={() => setDeleteRecord(null)} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>Cancel</button>
-              <button onClick={confirmDelete} style={{ ...primaryButtonStyle, padding: "9px 15px" }}>Confirm Delete</button>
+              <button type="button" onClick={() => setDeleteRecord(null)} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>Cancel</button>
+              <button type="button" onClick={confirmDelete} style={{ ...primaryButtonStyle, padding: "9px 15px" }}>Confirm Delete</button>
             </>
           }
         >
@@ -287,7 +283,7 @@ export default function WifiConfigPage({ miners }) {
         {pageAlert && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 14px", background: `${C.green}14`, border: `1px solid ${C.green}44`, borderRadius: 10, color: C.green, fontSize: 13, fontWeight: 800 }}>
             <span>{pageAlert}</span>
-            <button onClick={() => setPageAlert("")} style={{ background: "none", border: "none", cursor: "pointer", color: C.green, fontSize: 16, lineHeight: 1, padding: 0 }}>×</button>
+            <button type="button" onClick={() => setPageAlert("")} style={{ background: "none", border: "none", cursor: "pointer", color: C.green, fontSize: 16, lineHeight: 1, padding: 0 }}>×</button>
           </div>
         )}
         <PageHeader
@@ -299,13 +295,13 @@ export default function WifiConfigPage({ miners }) {
             <>
               <StatusPill label={`${allRows.filter((row) => row.config).length} connection rows`} color={C.primary} />
               <StatusPill label={`${miners.filter((miner) => miner.active && !miner.stale).length} online`} color={C.green} />
-              {canManage && <button onClick={openModal} style={{ ...primaryButtonStyle, padding: "9px 13px", fontSize: 12 }}>Assign Connection</button>}
+              {canManage && <button type="button" onClick={openModal} style={{ ...primaryButtonStyle, padding: "9px 13px", fontSize: 12 }}>Assign Connection</button>}
             </>
           }
         />
 
         <FilterToolbar
-          summary={`WiFi queue Â· ${rows.length} of ${allRows.length} devices shown`}
+          summary={`WiFi queue · ${rows.length} of ${allRows.length} devices shown`}
           activeCount={Number(statusFilter !== "all") + Number(Boolean(search.trim()))}
           onReset={() => { setStatusFilter("all"); setSearch(""); }}
         >
@@ -334,7 +330,7 @@ export default function WifiConfigPage({ miners }) {
                 <Indicator label="Pending = queued until the device applies it" color={C.amber} />
               </div>
             </div>
-            <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
+            <div className="hide-scrollbar table-scroll-x" style={{ overflow: "auto", minHeight: 0 }}>
               <div className="table-header-sticky" style={tableHeader}>
                 <span>Device</span>
                 <span>Status</span>
@@ -413,15 +409,17 @@ function Indicator({ label, color }) {
 
 // IconButton — 30×30 square icon button for Edit (pencil) and Delete (trash) WiFi rows
 function IconButton({ children, danger, disabled, onClick, title }) {
+  const borderColor = danger ? `${C.red}44` : C.borderSoft;
   return (
     <button
+      type="button"
       disabled={disabled}
       onClick={onClick}
       title={title}
       style={{
         width: 30,
         height: 30,
-        border: `1px solid ${danger ? `${C.red}44` : C.borderSoft}`,
+        border: `1px solid ${borderColor}`,
         borderRadius: 7,
         background: danger ? `${C.red}0A` : "transparent",
         color: danger ? C.red : C.textDim,
@@ -458,6 +456,12 @@ function EyeOffIcon() {
 }
 
 // buildRows — merges history records + legacy device configs + unconfigured miners into a sortable table list
+function resolveSelectedDeviceId(miners, formDeviceId, editingRecord, latestMinerId) {
+  if (miners.some((miner) => miner.id === formDeviceId)) return formDeviceId;
+  if (editingRecord && formDeviceId) return formDeviceId;
+  return latestMinerId;
+}
+
 function buildRows(miners, history, configs, search, statusFilter = "all") {
   const minerById = new Map(miners.map((miner) => [miner.id, miner]));
   const historyRows = Object.entries(history || {}).map(([id, config]) => {

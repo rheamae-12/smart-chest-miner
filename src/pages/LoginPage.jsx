@@ -5,6 +5,15 @@ import { firebaseConfigured } from "../firebase/config";
 import logo from "../assets/smart-chest-miner-logo.png";
 import { C, cardStyle, controlStyle, primaryButtonStyle } from "../theme";
 import { passwordMeetsPolicy, passwordRequirements, passwordStrength } from "../utils/password";
+import { isValidEmail } from "../utils/validation";
+
+const PASSWORD_STRENGTH_SEGMENTS = ["length", "case", "number", "symbol"];
+const PULSE_WAVE_KEYS = [
+  "wave-01", "wave-02", "wave-03", "wave-04", "wave-05", "wave-06",
+  "wave-07", "wave-08", "wave-09", "wave-10", "wave-11", "wave-12",
+  "wave-13", "wave-14", "wave-15", "wave-16", "wave-17", "wave-18",
+  "wave-19", "wave-20", "wave-21", "wave-22", "wave-23", "wave-24",
+];
 
 export default function LoginPage() {
   const [mode, setMode] = useState("login");
@@ -21,7 +30,7 @@ export default function LoginPage() {
     setLocalError("");
     setLocalMessage("");
     const email = form.email.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!isValidEmail(email)) {
       setLocalError("Enter a valid email address.");
       return;
     }
@@ -58,7 +67,7 @@ export default function LoginPage() {
     setLocalError("");
     setLocalMessage("");
     const email = form.email.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!isValidEmail(email)) {
       setLocalError("Enter your account email above first, then tap Forgot password.");
       return;
     }
@@ -115,7 +124,7 @@ export default function LoginPage() {
             <LivePulseInline />
 
             <div style={{ display: "grid", gap: 14 }}>
-              {mode === "signup" && <Field label="Full Name" value={form.name} autoComplete="name" onChange={(name) => setForm({ ...form, name })} placeholder="Juan Dela Cruz" />}
+              {mode === "signup" && <Field label="Full Name" value={form.name} autoComplete="name" onChange={(name) => setForm({ ...form, name })} placeholder="Juan Cruz" />}
               <Field label="Email" value={form.email} autoComplete="email" onChange={(email) => setForm({ ...form, email })} placeholder="admin@smartchestminer.io" />
               <Field label="Password" type="password" value={form.password} autoComplete={mode === "login" ? "current-password" : "new-password"} onChange={(password) => setForm({ ...form, password })} placeholder={mode === "login" ? "password" : "create a strong password"} onEnter={submit} />
               {mode === "signup" && form.password && <PasswordStrength password={form.password} />}
@@ -129,9 +138,9 @@ export default function LoginPage() {
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginTop: 12 }}>
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 8, color: C.textMuted, fontSize: 11, cursor: "pointer" }}>
                   <input type="checkbox" checked={remember} onChange={() => setRemember((value) => !value)} style={{ minHeight: 0 }} />
-                  Remember me
+                  <span>Remember me</span>
                 </label>
-                <button onClick={forgotPassword} style={{ border: "none", background: "transparent", color: C.primary, cursor: "pointer", padding: 0, fontSize: 11, fontWeight: 800 }}>
+                <button type="button" onClick={forgotPassword} style={{ border: "none", background: "transparent", color: C.primary, cursor: "pointer", padding: 0, fontSize: 11, fontWeight: 800 }}>
                   Forgot password?
                 </button>
               </div>
@@ -141,16 +150,17 @@ export default function LoginPage() {
             {localMessage && <Notice tone="good">{localMessage}</Notice>}
 
             <button
+              type="button"
               disabled={busy || (mode === "signup" && (!passwordMeetsPolicy(form.password) || form.password !== form.confirm || form.name.trim().length < 2))}
               onClick={submit}
               style={{ ...primaryButtonStyle, width: "100%", padding: 12, marginTop: 18, fontSize: 14, opacity: busy ? 0.7 : 1 }}
             >
-              {busy ? "Checking..." : mode === "login" ? "Open Dashboard" : "Create Account"}
+              {submitButtonLabel(busy, mode)}
             </button>
 
             <div style={{ display: "flex", justifyContent: "center", gap: 6, color: C.textMuted, fontSize: 12, marginTop: 16 }}>
               <span>{mode === "login" ? "Don't have an account?" : "Already have an account?"}</span>
-              <button onClick={switchMode} style={{ border: "none", background: "transparent", color: C.primary, cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 900 }}>
+              <button type="button" onClick={switchMode} style={{ border: "none", background: "transparent", color: C.primary, cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 900 }}>
                 {mode === "login" ? "Sign up" : "Sign in"}
               </button>
             </div>
@@ -162,6 +172,16 @@ export default function LoginPage() {
       </div>
     </div>
   );
+}
+
+function submitButtonLabel(busy, mode) {
+  if (busy) return "Checking...";
+  return mode === "login" ? "Open Dashboard" : "Create Account";
+}
+
+function fieldInputType(isPassword, show, type) {
+  if (!isPassword) return type;
+  return show ? "text" : "password";
 }
 
 function Logo({ size }) {
@@ -185,7 +205,7 @@ function Field({ label, value, onChange, type = "text", placeholder, autoComplet
       <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6, letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
       <div style={{ position: "relative" }}>
         <input
-          type={isPassword ? (show ? "text" : "password") : type}
+          type={fieldInputType(isPassword, show, type)}
           placeholder={placeholder}
           value={value}
           autoComplete={autoComplete}
@@ -237,8 +257,8 @@ function PasswordStrength({ password }) {
     <div style={{ display: "grid", gap: 8, marginTop: -4 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 3, flex: 1 }}>
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} style={{ height: 4, borderRadius: 2, background: i < score ? color : C.borderSoft, transition: "background 0.2s" }} />
+          {PASSWORD_STRENGTH_SEGMENTS.map((segment, index) => (
+            <div key={segment} style={{ height: 4, borderRadius: 2, background: index < score ? color : C.borderSoft, transition: "background 0.2s" }} />
           ))}
         </div>
         <span style={{ color, fontSize: 10, fontWeight: 900, minWidth: 50, textAlign: "right" }}>{label}</span>
@@ -301,8 +321,8 @@ function LivePulseInline() {
         <span className="login-live-dot" />
       </div>
       <div className="login-wave compact" aria-hidden="true">
-        {Array.from({ length: 24 }).map((_, index) => (
-          <span key={index} style={{ height: `${8 + Math.abs(Math.sin(index * 0.72)) * 24}px`, animationDelay: `${index * 0.045}s` }} />
+        {PULSE_WAVE_KEYS.map((key, index) => (
+          <span key={key} style={{ height: `${8 + Math.abs(Math.sin(index * 0.72)) * 24}px`, animationDelay: `${index * 0.045}s` }} />
         ))}
       </div>
     </div>

@@ -17,7 +17,7 @@ export function canonicalSessionId(deviceId, sessionId = "", timestamp = 0) {
   const legacyPrefix = `${normalizedDeviceId}-`;
 
   if (normalizedDeviceId && value.startsWith(lifecyclePrefix)) {
-    const match = value.slice(lifecyclePrefix.length).match(/^(\d+)/);
+    const match = /^(\d+)/.exec(value.slice(lifecyclePrefix.length));
     if (match) return createSessionId(normalizedDeviceId, match[1]);
   }
 
@@ -31,7 +31,7 @@ export function canonicalSessionId(deviceId, sessionId = "", timestamp = 0) {
 
 export function sessionSummaryKey(deviceId, sessionId = "", fallback = "") {
   const canonical = canonicalSessionId(deviceId, sessionId, fallback);
-  const match = canonical.match(SESSION_ID_PATTERN);
+  const match = SESSION_ID_PATTERN.exec(canonical);
   if (match) return match[1];
   return String(canonical || fallback || "").replace(/[.#$]/g, "_").replaceAll("[", "_").replaceAll("]", "_").replaceAll("/", "_");
 }

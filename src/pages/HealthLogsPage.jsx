@@ -1,12 +1,11 @@
 import { useMemo, useState } from "react";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import FilterToolbar, { FilterField, FilterTabs } from "../components/FilterToolbar";
 import Modal from "../components/Modal";
 import { C, cardStyle, controlStyle, ghostButtonStyle, pageStyle, primaryButtonStyle } from "../theme";
 import { DEFAULT_THRESHOLDS, getVitalStatus } from "../utils/alertChecker";
 import { countMinuteReadings } from "../utils/analyticsReadings";
 import { DATE_RANGE_OPTIONS, isWithinDateRange, resolveDateRange } from "../utils/filtering";
-import { average, compactTimestamp, formatReading, formatSystemTimestamp, lastSeenValue, uniqueChartLabels } from "../utils/formatters";
+import { average, compactTimestamp, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 import { compareMinersActiveFirst } from "../utils/minerOrdering";
 import { countVitalAlertLogs, countVitalAlertsInRows } from "../utils/sessionAlertCounter";
 
@@ -50,7 +49,6 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, s
   }, [combinedAnalytics, dateRange]);
 
   const sessions = useMemo(() => buildSessions(visibleMiners, scopedAnalytics, activityLogs, thresholds, sessionData, dateRange), [activityLogs, dateRange, scopedAnalytics, sessionData, thresholds, visibleMiners]);
-  const chartData = useMemo(() => buildChartData(visibleMiners, scopedAnalytics), [scopedAnalytics, visibleMiners]);
   const readingCount = useMemo(
     () => countMinuteReadings(visibleMiners.flatMap((miner) => (scopedAnalytics[miner.id] || []).map((row) => ({ ...row, minerId: miner.id })))),
     [scopedAnalytics, visibleMiners],
@@ -84,8 +82,8 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, s
           }}
           actions={
             <>
-              <button disabled={clearing} onClick={() => setClearOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 15px", opacity: clearing ? 0.5 : 1 }}>Cancel</button>
-              <button disabled={clearing} onClick={confirmClear} style={{ ...primaryButtonStyle, padding: "9px 15px", opacity: clearing ? 0.75 : 1 }}>{clearing ? "Clearing..." : "Confirm Clear"}</button>
+              <button type="button" disabled={clearing} onClick={() => setClearOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 15px", opacity: clearing ? 0.5 : 1 }}>Cancel</button>
+              <button type="button" disabled={clearing} onClick={confirmClear} style={{ ...primaryButtonStyle, padding: "9px 15px", opacity: clearing ? 0.75 : 1 }}>{clearing ? "Clearing..." : "Confirm Clear"}</button>
             </>
           }
         >
@@ -139,17 +137,12 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, s
           <Summary label="Readings Logged" value={readingCount} unit="minute records" color={C.amber} />
         </section>
 
-        <section className="health-content-grid" style={{ display: "grid", gridTemplateRows: "minmax(0, 220px) minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
-            <div className="cc-vitals health-chart-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, minHeight: 0, height: "100%" }}>
-              <SensorChart data={chartData} dataKey="hr" name="Heart Rate" color={C.red} yLabel="bpm" />
-              <SensorChart data={chartData} dataKey="spo2" name="SpO2" color={C.oxygen} domain={dynamicDomain(chartData, "spo2", 2)} yLabel="%" />
-              <SensorChart data={chartData} dataKey="temp" name="Temperature" color={C.teal} domain={dynamicDomain(chartData, "temp", 0.4)} yLabel="°C" />
-            </div>
-
+        <section className="health-content-grid" style={{ display: "grid", gridTemplateRows: "minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
             <div style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto 1fr" }}>
               <div style={{ padding: "14px 16px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
                 <PanelHeader title="Mining Session Logs" meta="Session time, duration, vital ranges, SOS, alerts, status" />
                 <button
+                  type="button"
                   disabled={!sessions.length || !onClearHealthLogs}
                   onClick={() => {
                     setClearError("");
@@ -160,7 +153,7 @@ export default function HealthLogsPage({ miners, analyticsData, liveData = {}, s
                   Clear All Logs
                 </button>
               </div>
-              <div className="health-session-table-scroll hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
+              <div className="health-session-table-scroll table-scroll-x hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
                 <div className="health-session-table-header table-header-sticky" style={tableHeader}>
                   <span>Miner</span>
                   <span>Session Time</span>
@@ -222,8 +215,8 @@ export function buildSessions(miners, analyticsData, activityLogs, thresholds, s
 
     const groups = rows.reduce((sessions, row) => {
       const timestamp = Number(row.timestamp || 0);
-      const current = sessions[sessions.length - 1];
-      const previous = current?.[current.length - 1];
+      const current = sessions.at(-1);
+      const previous = current?.at(-1);
       const currentSessionId = current?.[0]?.sessionId || "";
       const rowSessionId = row.sessionId || "";
       // Older persisted readings could receive a synthetic session ID based
@@ -250,7 +243,7 @@ export function buildSessions(miners, analyticsData, activityLogs, thresholds, s
     return groups
       .map((sessionRows, index) => {
         const first = sessionRows[0];
-        const last = sessionRows[sessionRows.length - 1];
+        const last = sessionRows.at(-1);
         // Only the newest group of a currently-live miner is "in progress" — and
         // only if its last reading is genuinely recent. A past date-range filter
         // can make the newest in-range group old, which must not show IN PROGRESS.
@@ -277,15 +270,7 @@ export function buildSessions(miners, analyticsData, activityLogs, thresholds, s
           countVitalAlertLogs(activityLogs, miner.id, Number(first.timestamp), sessionEndTimestamp),
         );
         const alerts = detectSessionAlerts(miner, sessionRows, thresholds);
-        const sessionStatus = active
-          ? "ongoing"
-          : ["completed", "interrupted", "offline"].includes(recordedStatus)
-            ? recordedStatus
-            : isCurrentSession && miner.offlineConcern
-              ? "interrupted"
-              : isCurrentSession && (!miner.active || miner.stale)
-                ? "offline"
-                : "completed";
+        const sessionStatus = resolveLiveSessionStatus(active, recordedStatus, isCurrentSession, miner);
 
         return {
           id: `${miner.id}-${first.timestamp}-${index}`,
@@ -297,6 +282,8 @@ export function buildSessions(miners, analyticsData, activityLogs, thresholds, s
           alertCount,
           alerts,
           sortTimestamp: sessionEndTimestamp,
+          startTimestamp: Number(first.timestamp),
+          endTimestamp: sessionEndTimestamp,
           start: formatSystemTimestamp(first.timestamp),
           end: active ? "Now" : formatSystemTimestamp(last.timestamp),
           duration: formatDuration(Number(first.timestamp), sessionEndTimestamp),
@@ -322,9 +309,7 @@ function buildStoredSessions(miner, storedRows, activityLogs, thresholds, analyt
     // summary status must never overwrite a newer Interrupted/Completed choice.
     const explicitStatus = String(statusLog?.status || summary.status || summary.sessionStatus || "").toLowerCase();
     const active = !explicitStatus && miner.active && Date.now() - endTimestamp < SESSION_GAP_MS * 2;
-    const sessionStatus = ["completed", "interrupted", "offline", "ongoing"].includes(explicitStatus)
-      ? explicitStatus
-      : active ? "ongoing" : "completed";
+    const sessionStatus = resolveStoredSessionStatus(explicitStatus, active);
     const manualPressCount = countLoggedSosPresses(activityLogs, miner.id, startTimestamp, endTimestamp)
       || Number(summary.manualPressCount || 0);
     const matchingRows = analyticsRows.filter((row) => {
@@ -351,6 +336,8 @@ function buildStoredSessions(miner, storedRows, activityLogs, thresholds, analyt
       alertCount,
       alerts: summary.alerts || detectSummaryAlerts(summary, thresholds),
       sortTimestamp: endTimestamp,
+      startTimestamp,
+      endTimestamp,
       start: formatSystemTimestamp(startTimestamp),
       end: active ? "Now" : formatSystemTimestamp(endTimestamp),
       duration: formatDuration(startTimestamp, active ? Math.max(endTimestamp, lastSeenValue(miner)) : endTimestamp),
@@ -359,6 +346,19 @@ function buildStoredSessions(miner, storedRows, activityLogs, thresholds, analyt
       temp: storedRange(summary, "temp", avgTemp, 1),
     };
   }).sort((a, b) => sessionSortValue(b) - sessionSortValue(a));
+}
+
+function resolveLiveSessionStatus(active, recordedStatus, isCurrentSession, miner) {
+  if (active) return "ongoing";
+  if (["completed", "interrupted", "offline"].includes(recordedStatus)) return recordedStatus;
+  if (isCurrentSession && miner.offlineConcern) return "interrupted";
+  if (isCurrentSession && (!miner.active || miner.stale)) return "offline";
+  return "completed";
+}
+
+function resolveStoredSessionStatus(explicitStatus, active) {
+  if (["completed", "interrupted", "offline", "ongoing"].includes(explicitStatus)) return explicitStatus;
+  return active ? "ongoing" : "completed";
 }
 
 function hydrateStoredSummaries(summaries, analyticsRows) {
@@ -408,7 +408,7 @@ function hydrateStoredSummaries(summaries, analyticsRows) {
 }
 
 function sessionStartFromId(sessionId) {
-  const match = String(sessionId || "").match(/-session-(\d+)(?:-|$)/);
+  const match = /-session-(\d+)(?:-|$)/.exec(String(sessionId || ""));
   return match ? Number(match[1]) : 0;
 }
 
@@ -417,10 +417,10 @@ function coalesceStoredSessionSummaries(deviceId, rows, activityLogs = []) {
   [...rows]
     .sort((a, b) => Number(a.startTimestamp || a.timestamp || 0) - Number(b.startTimestamp || b.timestamp || 0))
     .forEach((row) => {
-      const current = groups[groups.length - 1];
+      const current = groups.at(-1);
       const currentEnd = Number(current?.endTimestamp || current?.timestamp || 0);
       const rowStart = Number(row.startTimestamp || row.timestamp || 0);
-      const sameSession = current && current.sessionId && row.sessionId && current.sessionId === row.sessionId;
+      const sameSession = current?.sessionId && row.sessionId && current.sessionId === row.sessionId;
       const legacyPerReading = current && isPerReadingSessionId(deviceId, {
         timestamp: current.startTimestamp || current.timestamp,
         sessionId: current.sessionId,
@@ -448,7 +448,7 @@ function coalesceStoredSessionSummaries(deviceId, rows, activityLogs = []) {
         return;
       }
 
-      groups[groups.length - 1] = mergeStoredSessionSummaries(current, row, deviceId);
+      groups.splice(-1, 1, mergeStoredSessionSummaries(current, row, deviceId));
     });
   return groups;
 }
@@ -473,9 +473,9 @@ function mergeStoredSessionSummaries(first, next, deviceId = "") {
     const nextValue = Number(next[key] || 0);
     if (!firstValue) return nextValue;
     if (!nextValue) return firstValue;
-    return totalCount > 0
-      ? Number(((firstValue * firstCount + nextValue * nextCount) / totalCount).toFixed(key === "avgTemp" ? 1 : 0))
-      : nextValue;
+    if (totalCount <= 0) return nextValue;
+    const digits = key === "avgTemp" ? 1 : 0;
+    return Number(((firstValue * firstCount + nextValue * nextCount) / totalCount).toFixed(digits));
   };
   return {
     ...first,
@@ -547,7 +547,7 @@ function storedRange(summary, key, fallback, digits) {
   const averageValue = Number(summary[`avg${key[0].toUpperCase()}${key.slice(1)}`] || fallback);
   const min = Number(summary[`${key}Min`] || averageValue);
   const max = Number(summary[`${key}Max`] || averageValue);
-  if (!(averageValue > 0) && !(min > 0) && !(max > 0)) return { avg: "--", min: "--", max: "--" };
+  if (averageValue <= 0 && min <= 0 && max <= 0) return { avg: "--", min: "--", max: "--" };
   return {
     avg: formatReading(averageValue || (min + max) / 2, digits),
     min: formatReading(min, digits),
@@ -631,9 +631,8 @@ function countManualPresses(miner, rows, activityLogs, startTimestamp, endTimest
     const count = Number(row.button_press_count ?? row.buttonPressCount ?? 0);
     return count === minCount && count > 0 && row.manual_alert;
   });
-  const counterPresses = buttonCounts.length
-    ? Math.max(0, maxCount - minCount + (firstCountIsPress ? 1 : 0))
-    : 0;
+  const firstPressBonus = firstCountIsPress ? 1 : 0;
+  const counterPresses = buttonCounts.length ? Math.max(0, maxCount - minCount + firstPressBonus) : 0;
   const analyticsPresses = rows.filter((row, index, all) => {
     if (!row.manual_alert) return false;
     const previous = all[index - 1];
@@ -670,7 +669,7 @@ function buildMinerOptions(miners, analyticsData, liveData) {
   [...Object.keys(analyticsData || {}), ...Object.keys(liveData || {})].forEach((id) => {
     if (!id || byId.has(id)) return;
     const rows = analyticsData[id] || [];
-    const latest = rows[rows.length - 1] || {};
+    const latest = rows.at(-1) || {};
     byId.set(id, {
       id,
       name: latest.miner || id,
@@ -716,7 +715,7 @@ function findLatestMinerId(miners, analyticsData, liveData) {
 }
 
 function mergeAnalyticsWithLive(miners, analyticsData, liveData) {
-  const merged = { ...(analyticsData || {}) };
+  const merged = { ...analyticsData };
   miners.forEach((miner) => {
     const rows = [...(merged[miner.id] || []), ...liveRowsForMiner(miner, liveData[miner.id] || {})];
     const current = liveRowFromMiner(miner);
@@ -829,46 +828,37 @@ function detectSessionAlerts(miner, rows, thresholds) {
 
 function detectSensorSpike(miner, rows, thresholds) {
   const validRows = rows.filter((row) => Number(row.hr) > 0 || Number(row.spo2) > 0);
-  const latest = validRows[validRows.length - 1] || miner;
+  const latest = validRows.at(-1) || miner;
   const hr = Number(latest.hr || miner.hr || 0);
   const spo2 = Number(latest.spo2 || miner.spo2 || 0);
-
   const temp = Number(latest.temp || miner.temp || 0);
-  if (hr >= thresholds.hrCriticalMin) return { sensor: "Heart Rate", label: `HR critical spike: ${formatReading(hr, 0)} bpm`, color: C.red };
-  if (hr > thresholds.hrMax) return { sensor: "Heart Rate", label: `HR high spike: ${formatReading(hr, 0)} bpm`, color: C.amber };
-  if (hr > 0 && hr < thresholds.hrMin) return { sensor: "Heart Rate", label: `HR low spike: ${formatReading(hr, 0)} bpm`, color: C.amber };
-  if (spo2 > 0 && spo2 < thresholds.spo2CriticalMin) return { sensor: "SpO2", label: `SpO2 critical spike: ${formatReading(spo2, 0)}%`, color: C.red };
-  if (spo2 > 0 && spo2 < thresholds.spo2Min) return { sensor: "SpO2", label: `SpO2 low spike: ${formatReading(spo2, 0)}%`, color: C.amber };
-  if (temp > 0 && (temp <= thresholds.tempCriticalMin || temp >= thresholds.tempCriticalMax)) return { sensor: "Temperature", label: `Temperature critical: ${formatReading(temp, 1)}°C`, color: C.red };
-  if (temp > 0 && temp > thresholds.tempMax) return { sensor: "Temperature", label: `Temperature high: ${formatReading(temp, 1)}°C`, color: C.amber };
-  if (temp > 0 && temp < thresholds.tempMin) return { sensor: "Temperature", label: `Temperature low: ${formatReading(temp, 1)}°C`, color: C.amber };
+  return latestSensorSpike(hr, spo2, temp, thresholds) || trendSensorSpike(validRows) || { sensor: "No Spike", label: "HR and SpO2 stable", color: C.green };
+}
 
-  for (let index = 1; index < validRows.length; index += 1) {
-    const previous = validRows[index - 1];
-    const current = validRows[index];
+function latestSensorSpike(hr, spo2, temp, thresholds) {
+  const checks = [
+    [hr >= thresholds.hrCriticalMin, { sensor: "Heart Rate", label: `HR critical spike: ${formatReading(hr, 0)} bpm`, color: C.red }],
+    [hr > thresholds.hrMax, { sensor: "Heart Rate", label: `HR high spike: ${formatReading(hr, 0)} bpm`, color: C.amber }],
+    [hr > 0 && hr < thresholds.hrMin, { sensor: "Heart Rate", label: `HR low spike: ${formatReading(hr, 0)} bpm`, color: C.amber }],
+    [spo2 > 0 && spo2 < thresholds.spo2CriticalMin, { sensor: "SpO2", label: `SpO2 critical spike: ${formatReading(spo2, 0)}%`, color: C.red }],
+    [spo2 > 0 && spo2 < thresholds.spo2Min, { sensor: "SpO2", label: `SpO2 low spike: ${formatReading(spo2, 0)}%`, color: C.amber }],
+    [temp > 0 && (temp <= thresholds.tempCriticalMin || temp >= thresholds.tempCriticalMax), { sensor: "Temperature", label: `Temperature critical: ${formatReading(temp, 1)}°C`, color: C.red }],
+    [temp > 0 && temp > thresholds.tempMax, { sensor: "Temperature", label: `Temperature high: ${formatReading(temp, 1)}°C`, color: C.amber }],
+    [temp > 0 && temp < thresholds.tempMin, { sensor: "Temperature", label: `Temperature low: ${formatReading(temp, 1)}°C`, color: C.amber }],
+  ];
+  return checks.find(([matches]) => matches)?.[1] || null;
+}
+
+function trendSensorSpike(rows) {
+  for (let index = 1; index < rows.length; index += 1) {
+    const previous = rows[index - 1];
+    const current = rows[index];
     const hrJump = Math.abs(Number(current.hr || 0) - Number(previous.hr || 0));
     const spo2Drop = Number(previous.spo2 || 0) - Number(current.spo2 || 0);
-
     if (hrJump >= 15) return { sensor: "Heart Rate", label: `HR spike detected: ${formatReading(current.hr, 0)} bpm`, color: C.amber };
     if (spo2Drop >= 4) return { sensor: "SpO2", label: `SpO2 drop detected: ${formatReading(current.spo2, 0)}%`, color: C.amber };
   }
-
-  return { sensor: "No Spike", label: "HR and SpO2 stable", color: C.green };
-}
-
-function buildChartData(miners, analyticsData) {
-  const rows = miners
-    .flatMap((miner) => (analyticsData[miner.id] || []).map((row) => ({ ...row, miner: miner.name })))
-    .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
-    .slice(-36);
-  const labels = uniqueChartLabels(rows);
-  return rows.map((row, index) => ({
-      timestamp: Number(row.timestamp || 0),
-      time: labels[index] || compactTimestamp(row.timestamp),
-      hr: Number(row.hr) || null,
-      spo2: Number(row.spo2) || null,
-      temp: Number(row.temp) || null,
-    }));
+  return null;
 }
 
 function Summary({ label, value, unit, color }) {
@@ -888,72 +878,6 @@ function PanelHeader({ title, meta }) {
       <div style={{ color: C.textMuted, fontSize: 10 }}>{meta}</div>
     </div>
   );
-}
-
-// SensorChart — single-sensor trend (small multiple). Shows that sensor's average
-// over the selected range plus a filled area chart for just that reading.
-function SensorChart({ data, dataKey, name, color, domain, yLabel = "" }) {
-  const valid = (data || []).filter((row) => Number(row[dataKey]) > 0);
-  const gradientId = `sensor-${dataKey}`;
-  return (
-    <div style={{ ...cardStyle, padding: 13, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 9 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}`, flexShrink: 0 }} />
-          <span style={{ color: C.text, fontSize: 13, fontWeight: 950 }}>{name}</span>
-        </div>
-      </div>
-              <div className="health-chart-frame" style={{ minHeight: 0, height: "auto", border: `1px solid ${C.borderSoft}`, borderRadius: 8, background: "#151515", padding: 6 }}>
-                {valid.length ? (
-          <ResponsiveContainer key={`${dataKey}-${data.length}-${data[0]?.timestamp || 0}-${data[data.length - 1]?.timestamp || 0}`} width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 8, right: 10, left: 2, bottom: 28 }}>
-              <defs>
-                <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={color} stopOpacity={0.32} />
-                  <stop offset="100%" stopColor={color} stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke={C.borderSoft} vertical={false} />
-              <XAxis
-                dataKey="time"
-                tick={{ fill: C.textMuted, fontSize: 9 }}
-                axisLine={false}
-                tickLine={false}
-                minTickGap={34}
-                interval="preserveStartEnd"
-                height={38}
-              />
-              <YAxis
-                domain={domain || ["auto", "auto"]}
-                tick={{ fill: C.textMuted, fontSize: 9 }}
-                axisLine={false}
-                tickLine={false}
-                width={34}
-                label={{ value: yLabel, angle: -90, fill: C.textMuted, fontSize: 9, position: "insideLeft" }}
-              />
-              <Tooltip
-                allowEscapeViewBox={{ x: false, y: false }}
-                wrapperStyle={{ maxWidth: "calc(100% - 12px)", zIndex: 5 }}
-                contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }}
-              />
-              <Area type="monotone" dataKey={dataKey} name={name} stroke={color} fill={`url(#${gradientId})`} strokeWidth={2} dot={valid.length < 2 ? { r: 3 } : false} isAnimationActive={false} connectNulls />
-            </AreaChart>
-          </ResponsiveContainer>
-        ) : (
-          <div style={{ height: "100%", display: "grid", placeItems: "center", color: C.textMuted, fontSize: 12 }}>No data yet</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function dynamicDomain(data, key, padding = 1) {
-  const values = (data || []).map((row) => Number(row[key])).filter((value) => Number.isFinite(value) && value > 0);
-  if (!values.length) return ["auto", "auto"];
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  if (min === max) return [Number((min - padding).toFixed(1)), Number((max + padding).toFixed(1))];
-  return [Number((min - padding).toFixed(1)), Number((max + padding).toFixed(1))];
 }
 
 function StatusText({ session }) {

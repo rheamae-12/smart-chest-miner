@@ -52,6 +52,7 @@ export default function DevicesPage({ miners, setMiners, onActivityLog }) {
   };
   const activeFilterCount = Number(Boolean(search.trim())) + Number(status !== "all");
   const statusLabel = STATUS_FILTERS.find((option) => option.value === status)?.label || "All devices";
+  const searchSummary = search.trim() ? ` · “${search.trim()}”` : "";
 
   const openRegister = () => {
     setFormError("");
@@ -121,13 +122,13 @@ export default function DevicesPage({ miners, setMiners, onActivityLog }) {
       } else if (type === "edit") {
         await updateDevice(payload.id, { name: payload.name, location: payload.location });
         setMiners((prev) => prev.map((m) => (m.id === payload.id ? { ...m, name: payload.name, location: payload.location } : m)));
-        await persist(() => (onActivityLog || writeActivityLog)({ deviceId: payload.id, miner: payload.name, type: "crud", status: "updated", severity: "info", title: "Device updated", detail: `${payload.name} registry details were updated.` }), "");
+        await persist(() => (onActivityLog || writeActivityLog)({ deviceId: payload.id, miner: payload.name, type: "crud", status: "updated", severity: "info", title: "Device updated", detail: `${payload.name} registry details were updated.` }));
         showNotice(`${payload.name} updated successfully.`);
 
       } else if (type === "remove") {
         await removeDevice(payload.id);
         setMiners((prev) => prev.filter((m) => m.id !== payload.id));
-        await persist(() => (onActivityLog || writeActivityLog)({ deviceId: payload.id, miner: payload.name, type: "crud", status: "removed", severity: "warning", title: "Device removed", detail: `${payload.name} was removed from the miner registry.` }), "");
+        await persist(() => (onActivityLog || writeActivityLog)({ deviceId: payload.id, miner: payload.name, type: "crud", status: "removed", severity: "warning", title: "Device removed", detail: `${payload.name} was removed from the miner registry.` }));
         showNotice(`${payload.name} removed.`);
       }
 
@@ -181,13 +182,7 @@ export default function DevicesPage({ miners, setMiners, onActivityLog }) {
                 onClick={executeConfirmed}
                 disabled={submitting}
               >
-                {submitting
-                  ? "Processing..."
-                  : confirmModal.type === "remove"
-                  ? "Remove Device"
-                  : confirmModal.type === "register"
-                  ? "Register"
-                  : "Save Changes"}
+                {confirmActionLabel(submitting, confirmModal.type)}
               </Button>
             </>
           }
@@ -213,7 +208,7 @@ export default function DevicesPage({ miners, setMiners, onActivityLog }) {
         />
 
         <FilterToolbar
-          summary={`${statusLabel} · ${filtered.length} of ${miners.length} shown${search.trim() ? ` · “${search.trim()}”` : ""}`}
+          summary={`${statusLabel} · ${filtered.length} of ${miners.length} shown${searchSummary}`}
           activeCount={activeFilterCount}
           onReset={() => { setSearch(""); setStatus("all"); }}
         >
@@ -248,7 +243,7 @@ export default function DevicesPage({ miners, setMiners, onActivityLog }) {
               <div style={{ color: C.text, fontSize: 14, fontWeight: 900 }}>Registered Miners</div>
               <div style={{ color: C.textMuted, fontSize: 11 }}>{filtered.length} shown</div>
             </div>
-              <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
+              <div className="hide-scrollbar table-scroll-x" style={{ overflow: "auto", minHeight: 0 }}>
               <div className="table-header-sticky" style={tableHeader}>
                 <span>Device</span>
                 <span>Miner</span>
@@ -265,7 +260,7 @@ export default function DevicesPage({ miners, setMiners, onActivityLog }) {
                   </div>
                   <div>
                     <div style={{ color: C.text, fontWeight: 900 }}>{miner.name}</div>
-                    <StatusBadge status={miner.stale ? "stale" : miner.active ? "online" : "offline"} detail={`Last seen ${formatLastSeen(miner.lastSeen)}`} />
+                    <StatusBadge status={deviceStatus(miner)} detail={`Last seen ${formatLastSeen(miner.lastSeen)}`} />
                   </div>
                   <div style={{ display: "grid", gap: 4 }}>
                     <span style={{ color: C.red, fontWeight: 900 }}>HR {miner.active ? formatReading(miner.hr, 0) : "--"} bpm</span>
@@ -273,8 +268,8 @@ export default function DevicesPage({ miners, setMiners, onActivityLog }) {
                     <span style={{ color: C.teal, fontWeight: 900 }}>Temp {miner.active && miner.temp > 0 ? `${formatReading(miner.temp, 1)}°C` : "--"}</span>
                   </div>
                   <div style={{ display: "grid", gap: 4 }}>
-                    <StatePill label={miner.finger === false ? "No contact" : miner.active ? "Contact normal" : "No signal"} color={miner.finger === false ? C.amber : miner.active ? C.green : C.offline} />
-                    <StatePill label={miner.active ? `Manual SOS ${miner.manual_alert ? "pressed" : "clear"} (${miner.button_press_count || 0})` : "Manual SOS offline"} color={!miner.active ? C.offline : miner.manual_alert ? C.red : C.green} />
+                    <StatePill label={deviceContactLabel(miner)} color={deviceContactColor(miner)} />
+                    <StatePill label={deviceSosLabel(miner)} color={deviceSosColor(miner)} />
                   </div>
                   <LastSeenCell miner={miner} />
                   <span style={{ display: "flex", gap: 6 }}>
@@ -311,6 +306,49 @@ export default function DevicesPage({ miners, setMiners, onActivityLog }) {
   );
 }
 
+function confirmActionLabel(submitting, type) {
+  if (submitting) return "Processing...";
+  if (type === "remove") return "Remove Device";
+  if (type === "register") return "Register";
+  return "Save Changes";
+}
+
+function deviceStatus(miner) {
+  if (miner.stale) return "stale";
+  return miner.active ? "online" : "offline";
+}
+
+function deviceContactLabel(miner) {
+  if (miner.finger === false) return "No contact";
+  return miner.active ? "Contact normal" : "No signal";
+}
+
+function deviceContactColor(miner) {
+  if (miner.finger === false) return C.amber;
+  return miner.active ? C.green : C.offline;
+}
+
+function deviceSosLabel(miner) {
+  if (!miner.active) return "Manual SOS offline";
+  const state = miner.manual_alert ? "pressed" : "clear";
+  return `Manual SOS ${state} (${miner.button_press_count || 0})`;
+}
+
+function deviceSosColor(miner) {
+  if (!miner.active) return C.offline;
+  return miner.manual_alert ? C.red : C.green;
+}
+
+function confirmIconLabel(isRemove, type) {
+  if (isRemove) return "DEL";
+  return type === "register" ? "NEW" : "UPD";
+}
+
+function buttonTextColor(primary, danger) {
+  if (primary) return C.text;
+  return danger ? C.red : C.textDim;
+}
+
 // persist — fire-and-forget activity log write; failure is non-fatal and silently ignored
 async function persist(action) {
   try { await action(); } catch { /* activity log failure is non-fatal */ }
@@ -320,7 +358,7 @@ async function persist(action) {
 function ConfirmBody({ modal }) {
   const isRemove = modal.type === "remove";
   const accentColor = isRemove ? C.red : C.primary;
-  const iconLabel = isRemove ? "DEL" : modal.type === "register" ? "NEW" : "UPD";
+  const iconLabel = confirmIconLabel(isRemove, modal.type);
   return (
     <div>
       <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
@@ -380,12 +418,13 @@ function Field({ label, value, onChange, placeholder, disabled }) {
 function Button({ children, primary, danger, compact, disabled, onClick }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
       style={{
         ...(primary ? primaryButtonStyle : ghostButtonStyle),
         padding: compact ? "5px 10px" : "9px 15px",
-        color: primary ? C.text : danger ? C.red : C.textDim,
+        color: buttonTextColor(primary, danger),
         fontWeight: primary ? 900 : 800,
         fontSize: compact ? 11 : 13,
         whiteSpace: "nowrap",
@@ -402,15 +441,17 @@ function Button({ children, primary, danger, compact, disabled, onClick }) {
 // IconButton — 30×30 square icon button used for Edit (pencil) and Remove (trash) actions
 function IconButton({ children, danger, title, onClick }) {
   const color = danger ? C.red : C.textDim;
+  const borderColor = danger ? `${C.red}44` : C.border;
   return (
     <button
+      type="button"
       onClick={onClick}
       title={title}
       style={{
         width: 30,
         height: 30,
         borderRadius: 7,
-        border: `1px solid ${danger ? `${C.red}44` : C.border}`,
+        border: `1px solid ${borderColor}`,
         background: danger ? `${C.red}0A` : "rgba(255,255,255,0.04)",
         color,
         cursor: "pointer",

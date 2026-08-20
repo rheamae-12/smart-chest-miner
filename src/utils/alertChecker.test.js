@@ -3,8 +3,8 @@ import { DEFAULT_THRESHOLDS, buildAlerts, getVitalStatus } from "./alertChecker"
 
 describe("getVitalStatus", () => {
   it("returns null for missing/zero readings", () => {
-    expect(getVitalStatus(0, "hr")).toBe(null);
-    expect(getVitalStatus(undefined, "spo2")).toBe(null);
+    expect(getVitalStatus(0, "hr")).toBeNull();
+    expect(getVitalStatus(undefined, "spo2")).toBeNull();
   });
 
   it("classifies heart rate against thresholds", () => {
