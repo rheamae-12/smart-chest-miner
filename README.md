@@ -1,4 +1,4 @@
-# Smart Chest Miner
+# Smart MinerGuard
 
 Real-time miner vital monitoring and session analytics console built with React, Vite, and Firebase.
 

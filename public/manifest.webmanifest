@@ -1,6 +1,6 @@
 {
-  "name": "Smart Chest Miner",
-  "short_name": "ChestMiner",
+  "name": "Smart MinerGuard",
+  "short_name": "MinerGuard",
   "description": "Real-time miner vitals monitoring and emergency incident console.",
   "start_url": "/",
   "scope": "/",

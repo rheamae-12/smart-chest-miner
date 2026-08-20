@@ -1047,6 +1047,49 @@ export function useMinerSystem(enabled) {
   const lastConcernRef = useRef({}); // { deviceId: bool } — concern state at last active reading
   const promptedSessionRef = useRef(new Set());
   const activeSessionIdRef = useRef({});
+  const wasEnabledRef = useRef(Boolean(enabled));
+
+  const resetRuntimeAfterLogout = useCallback(() => {
+    // Auth logout must create a clean monitoring runtime. Keeping the previous
+    // analytics refs alive allowed the next login to briefly combine the old
+    // timeline with the new subscription and change the selected graph.
+    const fallbackMiners = firebaseConfigured ? [] : (readStoredSystem()?.miners || []);
+    setMiners(fallbackMiners);
+    setLiveData({});
+    setAnalyticsData({});
+    setSessionData({});
+    setActivityLogs([]);
+    setSessionPrompts([]);
+    setUsingRealtime(false);
+    setConnectionError("");
+
+    minersRef.current = fallbackMiners;
+    realtimeAnalyticsRef.current = {};
+    historicalAnalyticsRef.current = {};
+    historicalReadingKeysRef.current.clear();
+    historicalReadingSessionRef.current = {};
+    historicalSummaryTimestampRef.current = {};
+    historicalReadyRef.current = false;
+    activityLogsRef.current = [];
+    sessionDataRef.current = {};
+    persistedHistoryRef.current = {};
+    previousStatusRef.current = {};
+    knownStatusDeviceIdsRef.current.clear();
+    emittedEventRef.current.clear();
+    metadataOverridesRef.current = {};
+    archivedDeviceIdsRef.current.clear();
+    lastConcernRef.current = {};
+    promptedSessionRef.current.clear();
+    activeSessionIdRef.current = {};
+    hasDeviceSnapshotRef.current = false;
+    lastTrimRef.current = 0;
+  }, []);
+
+  useEffect(() => {
+    if (wasEnabledRef.current && !enabled) resetRuntimeAfterLogout();
+    wasEnabledRef.current = Boolean(enabled);
+  }, [enabled, resetRuntimeAfterLogout]);
+
   const sessionDeviceKey = [...new Set([
     ...miners.map((miner) => miner.id),
     ...Object.keys(analyticsData || {}),

@@ -272,7 +272,9 @@ export function buildSessions(miners, analyticsData, activityLogs, thresholds, s
         const sessionStatus = resolveLiveSessionStatus(active, recordedStatus, isCurrentSession, miner);
 
         return {
-          id: `${miner.id}-${first.timestamp}-${index}`,
+          // A session selector must survive data hydration and auth remounts;
+          // the array index is not part of the session identity.
+          id: `${miner.id}-${sessionId}`,
           deviceId: miner.id,
           sessionId,
           name: miner.name,

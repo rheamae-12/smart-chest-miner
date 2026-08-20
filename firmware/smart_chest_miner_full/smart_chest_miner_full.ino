@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  Smart Chest Miner — ESP32 Firmware (Full Hardware Build)
+ *  Smart MinerGuard — ESP32 Firmware (Full Hardware Build)
  * ============================================================
  *
  * OVERVIEW
@@ -234,7 +234,7 @@ void setup() {
   Serial.begin(115200);
   delay(500);
   Serial.println("\n========================================");
-  Serial.println("  Smart Chest Miner - FULL hardware");
+  Serial.println("  Smart MinerGuard - FULL hardware");
   Serial.println("========================================");
 
   pinMode(BUZZER_HR_PIN, OUTPUT);
@@ -309,7 +309,7 @@ void drawBootScreen(const char* status, const char* detail) {
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
   display.setCursor(9, 0);
-  display.print("SMART CHEST MINER");
+  display.print("SMART MINERGUARD");
   display.drawLine(0, 11, 127, 11, SSD1306_WHITE);
   display.setTextSize(2);
   display.setCursor(18, 21);

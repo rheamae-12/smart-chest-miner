@@ -83,12 +83,12 @@ export function useAlertNotifications(alerts) {
     if (newCritical.length > 0) {
       if (pushEnabled) {
         playAlertBeep(true);
-        fireNotification("Smart Chest Miner — Critical Alert", newCritical.map((a) => a.message).join("\n"), true);
+        fireNotification("Smart MinerGuard — Critical Alert", newCritical.map((a) => a.message).join("\n"), true);
       }
     } else if (newWarning.length > 0) {
       if (pushEnabled) {
         playAlertBeep(false);
-        fireNotification("Smart Chest Miner — Warning", newWarning.map((a) => a.message).join("\n"), false);
+        fireNotification("Smart MinerGuard — Warning", newWarning.map((a) => a.message).join("\n"), false);
       }
     }
 

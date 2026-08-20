@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { C, cardStyle, pageStyle } from "../theme";
 import { formatLastSeen, formatReading, lastSeenValue } from "../utils/formatters";
+import { readStoredValue, writeStoredValue } from "../utils/safeStorage";
 
 const MANUAL_HEALTH_STORAGE_KEY = "smart-chest-miner:manual-sensor-health";
 const MANUAL_HEALTH_COMPONENTS = [
@@ -26,11 +27,7 @@ export default function SensorStatusPage({ miners = [] }) {
   const maintenance = fleet.map(buildMaintenanceItem);
   const [manualAssessments, setManualAssessments] = useState(readManualAssessments);
   useEffect(() => {
-    try {
-      window.sessionStorage.setItem(MANUAL_HEALTH_STORAGE_KEY, JSON.stringify(manualAssessments));
-    } catch {
-      // Session storage can be unavailable in private or restricted browser contexts.
-    }
+    writeStoredValue(MANUAL_HEALTH_STORAGE_KEY, manualAssessments);
   }, [manualAssessments]);
   const futureSlots = fleet.length < 2 ? 1 : 0;
   const nodeColumns = Math.min(Math.max(fleet.length + futureSlots, 2), 3);
@@ -225,14 +222,20 @@ function MaintenanceRow({ item }) {
 }
 
 function readManualAssessments() {
-  if (typeof window === "undefined") return {};
-  try {
-    const stored = window.sessionStorage.getItem(MANUAL_HEALTH_STORAGE_KEY);
-    const parsed = stored ? JSON.parse(stored) : {};
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
+  const stored = readStoredValue(MANUAL_HEALTH_STORAGE_KEY, null);
+  if (stored && typeof stored === "object" && !Array.isArray(stored)) return stored;
+
+  // Migrate assessments created by the earlier session-only implementation.
+  // The manual review belongs to the device, so it should survive an auth
+  // logout/login cycle and a browser restart until an operator resets it.
+  if (typeof window !== "undefined") {
+    const legacy = readStoredValue(MANUAL_HEALTH_STORAGE_KEY, null, window.sessionStorage);
+    if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
+      writeStoredValue(MANUAL_HEALTH_STORAGE_KEY, legacy);
+      return legacy;
+    }
   }
+  return {};
 }
 
 function ManualSensorHealthPanel({ miners, assessments, onChange, onReset }) {

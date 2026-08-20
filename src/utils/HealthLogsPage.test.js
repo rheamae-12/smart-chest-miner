@@ -47,6 +47,19 @@ describe("buildSessions", () => {
     expect(sessions.find((session) => session.sessionStatus === "ongoing")?.id).toContain(String(secondTimestamp));
   });
 
+  it("uses the lifecycle ID instead of the array position for fallback sessions", () => {
+    const start = 1_700_050_000_000;
+    const sessionId = `SCM-001-session-${start}`;
+    const sessions = buildSessions(
+      [{ id: "SCM-001", name: "Miner 1", active: false, stale: false, lastSeen: new Date(start + 60_000) }],
+      { "SCM-001": [{ timestamp: start, sessionId, hr: 82, spo2: 98, temp: 36.5 }] },
+      [],
+      DEFAULT_THRESHOLDS,
+    );
+
+    expect(sessions[0].id).toBe(`SCM-001-${sessionId}`);
+  });
+
   it("does not turn legacy per-reading session IDs into duplicate rows", () => {
     const firstTimestamp = 1_700_100_000_000;
     vi.spyOn(Date, "now").mockReturnValue(firstTimestamp + 120_000);

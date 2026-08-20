@@ -1,4 +1,4 @@
-# Smart Chest Miner — Hardware Notes
+# Smart MinerGuard — Hardware Notes
 
 Engineering notes for the ESP32 device that feeds the dashboard. Covers the
 circuit review, required fixes, the Firebase data contract the firmware must

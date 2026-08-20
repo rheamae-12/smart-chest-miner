@@ -112,7 +112,7 @@ export default function LoginPage() {
             <div style={{ position: "relative" }}>
             <div style={{ display: "grid", placeItems: "center", textAlign: "center", marginBottom: 24 }}>
               <Logo size={58} />
-              <div style={{ color: C.text, fontSize: 18, fontWeight: 950, marginTop: 12 }}>Smart Chest Miner</div>
+              <div style={{ color: C.text, fontSize: 18, fontWeight: 950, marginTop: 12 }}>Smart MinerGuard</div>
               <div style={{ color: C.textMuted, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 4 }}>Secure sensor access</div>
             </div>
 
@@ -165,7 +165,7 @@ export default function LoginPage() {
               </button>
             </div>
 
-            <div style={{ color: C.textMuted, fontSize: 10, textAlign: "center", marginTop: 22 }}>Smart Chest Miner © 2026</div>
+            <div style={{ color: C.textMuted, fontSize: 10, textAlign: "center", marginTop: 22 }}>Smart MinerGuard © 2026</div>
 
             </div>
           </div>
@@ -187,7 +187,7 @@ function fieldInputType(isPassword, show, type) {
 function Logo({ size }) {
   return (
     <div style={{ width: size, height: size, borderRadius: 12, background: C.text, border: `1px solid rgba(255,106,0,0.42)`, display: "grid", placeItems: "center", overflow: "hidden", boxShadow: "0 0 24px rgba(255,106,0,0.2)", flexShrink: 0 }}>
-      <img src={logo} alt="Smart Chest Miner" style={{ width: "92%", height: "92%", objectFit: "contain" }} />
+      <img src={logo} alt="Smart MinerGuard" style={{ width: "92%", height: "92%", objectFit: "contain" }} />
     </div>
   );
 }

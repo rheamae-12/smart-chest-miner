@@ -56,7 +56,7 @@ export default function Sidebar() {
         <LogoMark compact={collapsed} />
         {!collapsed && (
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 950, color: C.text, lineHeight: 1, letterSpacing: "0.01em" }}>Smart Chest</div>
+            <div style={{ fontSize: 14, fontWeight: 950, color: C.text, lineHeight: 1, letterSpacing: "0.01em" }}>Smart MinerGuard</div>
             <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 6 }}>
               <span className="dot-live" style={{ width: 6, height: 6, borderRadius: "50%", background: C.green, boxShadow: `0 0 8px ${C.green}`, flexShrink: 0 }} />
               <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.14em", textTransform: "uppercase", fontWeight: 800 }}>Vitals Active</span>
@@ -191,7 +191,7 @@ function LogoMark({ compact }) {
         boxShadow: "0 0 28px rgba(255,106,0,0.22)",
       }}
     >
-      <img src={logo} alt="Smart Chest Miner" style={{ width: "92%", height: "92%", objectFit: "contain" }} />
+      <img src={logo} alt="Smart MinerGuard" style={{ width: "92%", height: "92%", objectFit: "contain" }} />
     </div>
   );
 }

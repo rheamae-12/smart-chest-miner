@@ -111,7 +111,7 @@ export default function App() {
             </>
           }
         >
-          <div style={{ color: C.textDim, fontSize: 13, lineHeight: 1.6 }}>Log out of the Smart Chest Miner console? Live device monitoring will stop for this browser session.</div>
+          <div style={{ color: C.textDim, fontSize: 13, lineHeight: 1.6 }}>Log out of the Smart MinerGuard console? Live device monitoring will stop for this browser session.</div>
         </Modal>
       )}
       {sosWarning && (

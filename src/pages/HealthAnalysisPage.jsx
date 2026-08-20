@@ -28,7 +28,12 @@ export default function HealthAnalysisPage({ miners = [], analyticsData = {}, li
   const selectedMiner = sortedMiners.find((miner) => miner.id === currentId) || null;
   const sessionOptions = useMemo(() => {
     if (!selectedMiner) return [];
-    const rows = normalizeRows(selectedMiner, analyticsData[selectedMiner.id], liveData[selectedMiner.id]);
+    // Build the session list from persisted analytics whenever it exists.
+    // Realtime samples are intentionally only a fallback here; otherwise a
+    // logout/login hydration race can temporarily create a different "latest"
+    // session before historical data finishes loading.
+    const persistedRows = analyticsData[selectedMiner.id] || [];
+    const rows = normalizeRows(selectedMiner, persistedRows, persistedRows.length ? {} : liveData[selectedMiner.id]);
     const built = buildSessions(
       [selectedMiner],
       { [selectedMiner.id]: rows },
@@ -71,7 +76,7 @@ export default function HealthAnalysisPage({ miners = [], analyticsData = {}, li
   );
   const sessionChart = useMemo(
     () => selectedMiner && selectedSession
-      ? buildSessionChartData(selectedMiner, selectedSession, analyticsData[selectedMiner.id], liveData[selectedMiner.id], activityLogs, thresholds)
+      ? buildSessionChartData(selectedMiner, selectedSession, analyticsData[selectedMiner.id], selectedSession.active ? liveData[selectedMiner.id] : {}, activityLogs, thresholds)
       : emptySessionChart(),
     [activityLogs, analyticsData, liveData, selectedMiner, selectedSession, thresholds],
   );

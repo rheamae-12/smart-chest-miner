@@ -626,7 +626,7 @@ export default function Navbar({ miners, user, onLogout, usingRealtime, connecti
         <div className="navbar-title" style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
           <div style={{ width: 3, height: 32, borderRadius: 3, background: C.primaryGradient, boxShadow: "0 0 14px rgba(255,106,0,0.45)", flexShrink: 0 }} />
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 9.5, color: C.primary, letterSpacing: "0.16em", textTransform: "uppercase", fontWeight: 900 }}>Smart Chest Miner</div>
+            <div style={{ fontSize: 9.5, color: C.primary, letterSpacing: "0.16em", textTransform: "uppercase", fontWeight: 900 }}>Smart MinerGuard</div>
             <div style={{ fontSize: 18, fontWeight: 950, color: C.text, marginTop: 1, lineHeight: 1.1, letterSpacing: "0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pageLabels[pathname] || "Live Monitoring"}</div>
           </div>
         </div>
