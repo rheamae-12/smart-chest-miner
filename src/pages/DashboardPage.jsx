@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import AlertBanner from "../components/AlertBanner";
 import Icon from "../components/Icon";
 import StatCard from "../components/StatCard";
 import { C, cardStyle, pageStyle } from "../theme";
@@ -13,24 +12,20 @@ export default function DashboardPage({
   miners = [],
   liveData = {},
   thresholds,
-  dismissedAlertIds = [],
-  onDismissAlerts,
 }) {
   const fleet = useMemo(
     () => sortMinersActiveFirst(miners),
     [miners],
   );
   const alerts = useMemo(() => buildAlerts(miners, thresholds), [miners, thresholds]);
-  const visibleAlerts = alerts.filter((alert) => !dismissedAlertIds.includes(alert.id));
+  const visibleAlerts = alerts;
   const activeMiners = miners.filter((miner) => miner.active && !miner.stale);
   const readyCount = activeMiners.filter((miner) => !miner.manual_alert).length;
   const averageTemp = average(activeMiners.map((miner) => miner.temp));
 
   return (
     <div className="dashboard-page" style={pageStyle}>
-      <div className="dashboard-layout page-layout" style={{ display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr) auto", gap: 12, height: "100%", minHeight: 0 }}>
-        <AlertBanner miners={miners} thresholds={thresholds} dismissedAlertIds={dismissedAlertIds} onDismissAlerts={onDismissAlerts} />
-
+      <div className="dashboard-layout page-layout" style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 12, height: "100%", minHeight: 0 }}>
         <section className="dashboard-stats" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
           <StatCard label="Active Miners" value={activeMiners.length} unit={`/${miners.length}`} color={activeMiners.length ? C.green : C.offline} sub={`${readyCount} with SOS clear`} />
           <StatCard label="Average HR" value={formatReading(average(activeMiners.map((miner) => miner.hr)), 0)} unit="bpm" color={C.red} sub="active devices only" />

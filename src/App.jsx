@@ -22,7 +22,6 @@ const HealthAnalysisPage = lazy(() => import("./pages/HealthAnalysisPage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const SensorStatusPage = lazy(() => import("./pages/SensorStatusPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
-const WifiConfigPage = lazy(() => import("./pages/WifiConfigPage"));
 const AlertHistoryPage = lazy(() => import("./pages/AlertHistoryPage"));
 
 export default function App() {
@@ -184,7 +183,7 @@ export default function App() {
                 />
                 <Route
                   path="/dashboard"
-                  element={<DashboardPage miners={system.miners} liveData={system.liveData} thresholds={system.thresholds} dismissedAlertIds={dismissedAlertIds} onDismissAlerts={dismissAlerts} />}
+                  element={<DashboardPage miners={system.miners} liveData={system.liveData} thresholds={system.thresholds} />}
                 />
                 <Route
                   path="/analytics"
@@ -205,10 +204,6 @@ export default function App() {
                 <Route
                   path="/sensor-status"
                   element={<SensorStatusPage miners={system.miners} activityLogs={system.activityLogs} onClearActivityLogs={canManage ? system.clearActivityLogs : undefined} />}
-                />
-                <Route
-                  path="/wifi-config"
-                  element={<WifiConfigPage miners={system.miners} />}
                 />
                 <Route
                   path="/settings"

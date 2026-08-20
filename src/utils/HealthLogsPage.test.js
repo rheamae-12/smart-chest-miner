@@ -242,6 +242,27 @@ describe("buildSessions", () => {
     expect(sessions[0].spo2.avg).toBe("98");
   });
 
+  it("does not downgrade a stored reading count when only part of the raw history is loaded", () => {
+    const start = 1_700_650_000_000;
+    const sessionId = `SCM-001-session-${start}`;
+    const sessions = buildSessions(
+      [{ id: "SCM-001", name: "Miner 1", active: false, stale: false, lastSeen: new Date(start + 60_000) }],
+      {
+        "SCM-001": [
+          { timestamp: start, sessionId, hr: 82, spo2: 98, temp: 36.4 },
+          { timestamp: start + 60_000, sessionId, hr: 84, spo2: 98, temp: 36.5 },
+          { timestamp: start + 120_000, sessionId, hr: 86, spo2: 98, temp: 36.6 },
+        ],
+      },
+      [],
+      DEFAULT_THRESHOLDS,
+      { "SCM-001": [{ sessionId, startTimestamp: start, endTimestamp: start + 17 * 60_000, readingCount: 33, avgHr: 84, avgSpo2: 98, avgTemp: 36.5, status: "completed" }] },
+    );
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].readingCount).toBe(33);
+  });
+
   it("collapses a legacy summary alias beside its lifecycle summary", () => {
     const start = 1_700_700_000_000;
     const sessions = buildSessions(

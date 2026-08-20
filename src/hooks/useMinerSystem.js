@@ -246,6 +246,23 @@ function filterStoredPrompts(current, mapped) {
   return current.filter((prompt) => !promptMatchesStoredStatus(prompt, mapped[prompt.deviceId]));
 }
 
+function hasTerminalStoredSession(deviceId, sessionId, timestamp, storedSessions = []) {
+  const promptSessionId = canonicalSessionId(deviceId, sessionId, timestamp);
+  return (storedSessions || []).some((row) => (
+    row.sessionId
+    && canonicalSessionId(deviceId, row.sessionId, timestamp) === promptSessionId
+    && isTerminalSessionStatus(row.status)
+  ));
+}
+
+function isRecentUnresolvedStaleMiner(miner, staleSeconds) {
+  if (!miner || miner.active || !miner.stale) return false;
+  const timestamp = miner.lastSeen?.getTime?.() || Number(miner.lastSeen) || 0;
+  if (!timestamp) return false;
+  const age = Date.now() - timestamp;
+  return age > staleSeconds * 1000 && age <= SESSION_GAP_MS * 2;
+}
+
 function staleMinersFrom(miners, staleSeconds) {
   const staleMiners = [];
   for (const miner of miners) {
@@ -369,10 +386,14 @@ function mapAnalyticsValue(value, maxPoints = MAX_ANALYTICS_POINTS) {
   const data = {};
   Object.entries(value || {}).forEach(([deviceId, rows]) => {
     const entries = Array.isArray(rows)
-      ? rows.map((row, index) => [row?.id || row?.timestamp || index, row])
+      ? rows.map((row, index) => [row?.id || `${row?.timestamp || "row"}-${index}`, row])
       : Object.entries(rows || {});
     const sortedRows = entries
-      .map(([key, row]) => ({ ...row, timestamp: normalizeTimestamp(row?.timestamp) || normalizeTimestamp(key) }))
+      .map(([key, row]) => ({
+        ...row,
+        sourceId: String(row?.id || key || ""),
+        timestamp: normalizeTimestamp(row?.timestamp) || normalizeTimestamp(key),
+      }))
       .filter((row) => {
         const timestamp = normalizeTimestamp(row.timestamp);
         const hr = toReading(row.hr ?? row.heartRate);
@@ -399,6 +420,7 @@ function mapAnalyticsValue(value, maxPoints = MAX_ANALYTICS_POINTS) {
           button_pressed: toBoolean(row.button_pressed ?? row.buttonPressed, false),
           button_press_count: toReading(row.button_press_count ?? row.buttonPressCount),
           sessionId: row.sessionId || "",
+          sourceId: row.sourceId || "",
           status: row.status || "online",
           timestamp,
         };
@@ -428,24 +450,53 @@ function mapSessionSummaries(value) {
 
 export function mergeAnalyticsData(...sources) {
   const merged = {};
-  sources.forEach((source) => {
+  sources.forEach((source, sourceIndex) => {
     Object.entries(source || {}).forEach(([deviceId, rows]) => {
-      const byTimestamp = new Map((merged[deviceId] || []).map((row) => [Number(row.timestamp), row]));
+      const currentRows = merged[deviceId] || [];
       (rows || []).forEach((row) => {
         const timestamp = Number(row.timestamp || 0);
-        if (timestamp > 0) {
-          const previous = byTimestamp.get(timestamp);
+        if (timestamp <= 0) return;
+
+        const incoming = { ...row, _mergeSource: sourceIndex };
+        const matchingIndex = currentRows.findIndex((candidate) => (
+          Number(candidate.timestamp || 0) === timestamp
+          && analyticsRowsShouldMerge(candidate, incoming, sourceIndex)
+        ));
+        if (matchingIndex >= 0) {
           // Realtime rows may not carry the Firestore-assigned sessionId.
-          // Preserve it when the same timestamp is merged again.
-          byTimestamp.set(timestamp, previous
-            ? mergeAnalyticsRow(previous, row)
-            : row);
+          // Preserve it when the same timestamp is merged again, while still
+          // retaining distinct samples that share a timestamp in one source.
+          currentRows[matchingIndex] = mergeAnalyticsRow(currentRows[matchingIndex], incoming);
+        } else {
+          currentRows.push(incoming);
         }
       });
-      merged[deviceId] = [...byTimestamp.values()].sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+      merged[deviceId] = currentRows
+        .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
+        .map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => key !== "_mergeSource")));
     });
   });
   return merged;
+}
+
+function analyticsRowsShouldMerge(previous, next, sourceIndex) {
+  if (previous.sourceId && next.sourceId && previous.sourceId === next.sourceId) return true;
+  if (analyticsRowFingerprint(previous) === analyticsRowFingerprint(next)) return true;
+  if (!previous.sourceId && !next.sourceId) return true;
+  return previous._mergeSource !== sourceIndex;
+}
+
+function analyticsRowFingerprint(row) {
+  return [
+    Number(row.hr || 0),
+    Number(row.spo2 || 0),
+    Number(row.temp || 0),
+    row.finger === false ? "0" : "1",
+    row.manual_alert ? "1" : "0",
+    row.button_pressed ? "1" : "0",
+    Number(row.button_press_count || 0),
+    String(row.sessionId || ""),
+  ].join("|");
 }
 
 function mergeAnalyticsRow(previous, next) {
@@ -457,6 +508,7 @@ function mergeAnalyticsRow(previous, next) {
     spo2: positiveValue(next.spo2, previous.spo2),
     temp: positiveValue(next.temp, previous.temp),
     sessionId: next.sessionId || previous.sessionId || "",
+    sourceId: next.sourceId || previous.sourceId || "",
     manual_alert: Boolean(next.manual_alert || previous.manual_alert),
     button_pressed: Boolean(next.button_pressed || previous.button_pressed),
     button_press_count: Math.max(Number(previous.button_press_count || 0), Number(next.button_press_count || 0)),
@@ -1124,6 +1176,21 @@ export function useMinerSystem(enabled) {
   useEffect(() => {
     minersRef.current = miners;
   }, [miners]);
+
+  // A device can already be marked stale when the app is opened or when the
+  // user navigates back to it. In that case there is no online -> offline
+  // transition left for the interval detector to observe. Restore the prompt
+  // for a recent unresolved session, while terminal sessions remain silent.
+  useEffect(() => {
+    if (!enabled) return;
+    miners.forEach((miner) => {
+      if (!isRecentUnresolvedStaleMiner(miner, staleSeconds)) return;
+      const timestamp = miner.lastSeen?.getTime?.() || Number(miner.lastSeen) || 0;
+      const sessionId = sharedSessionIdFor(miner.id, timestamp);
+      if (!sessionId || hasTerminalStoredSession(miner.id, sessionId, timestamp, sessionData[miner.id])) return;
+      queueSessionPrompt(miner, sessionId);
+    });
+  }, [enabled, miners, queueSessionPrompt, sessionData, sharedSessionIdFor, staleSeconds]);
 
   const updateMiners = (updater) => {
     setMiners((prev) => {

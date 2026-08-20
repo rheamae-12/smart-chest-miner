@@ -1,8 +1,18 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { C, cardStyle, pageStyle } from "../theme";
 import { formatLastSeen, formatReading, lastSeenValue } from "../utils/formatters";
 
-// Dedicated sensor diagnostics. General events remain in Alert History and Command Center.
+const MANUAL_HEALTH_STORAGE_KEY = "smart-chest-miner:manual-sensor-health";
+const MANUAL_HEALTH_COMPONENTS = [
+  { key: "connection", label: "Device connection" },
+  { key: "freshness", label: "Data freshness" },
+  { key: "contact", label: "Chest contact" },
+  { key: "heartRate", label: "Heart-rate sensor" },
+  { key: "spo2", label: "SpO2 sensor" },
+  { key: "temperature", label: "Temperature sensor" },
+];
+
+// Manual sensor health review. General events remain in Alert History and Command Center.
 export default function SensorStatusPage({ miners = [] }) {
   const fleet = useMemo(
     () => [...miners].sort((a, b) => {
@@ -14,8 +24,34 @@ export default function SensorStatusPage({ miners = [] }) {
   const isOnline = (miner) => miner.active && !miner.stale;
   const active = miners.filter(isOnline).length;
   const maintenance = fleet.map(buildMaintenanceItem);
+  const [manualAssessments, setManualAssessments] = useState(readManualAssessments);
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(MANUAL_HEALTH_STORAGE_KEY, JSON.stringify(manualAssessments));
+    } catch {
+      // Session storage can be unavailable in private or restricted browser contexts.
+    }
+  }, [manualAssessments]);
   const futureSlots = fleet.length < 2 ? 1 : 0;
   const nodeColumns = Math.min(Math.max(fleet.length + futureSlots, 2), 3);
+
+  const updateManualAssessment = (minerId, componentKey, value) => {
+    setManualAssessments((current) => ({
+      ...current,
+      [minerId]: {
+        ...(current[minerId] || {}),
+        [componentKey]: { value: Number(value), reviewed: true },
+      },
+    }));
+  };
+
+  const resetManualAssessment = (minerId) => {
+    setManualAssessments((current) => {
+      const next = { ...current };
+      delete next[minerId];
+      return next;
+    });
+  };
 
   return (
     <div style={pageStyle}>
@@ -31,7 +67,7 @@ export default function SensorStatusPage({ miners = [] }) {
         <section style={{ display: "grid", gap: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ color: C.text, fontSize: 15, fontWeight: 950 }}>Sensor nodes</div>
-            <Indicator color={active ? C.green : C.offline} label="Diagnostics update automatically" />
+            <Indicator color={active ? C.green : C.offline} label="Live signal status updates automatically" />
           </div>
           <div className="sensor-nodes-grid hide-scrollbar" style={{ display: "grid", gridTemplateColumns: `repeat(${nodeColumns}, minmax(310px, 1fr))`, gridTemplateRows: "auto", gap: 10, overflowX: "auto", overflowY: "hidden", minWidth: 0 }}>
             {fleet.map((miner) => <SensorNode key={miner.id} miner={miner} />)}
@@ -65,18 +101,12 @@ export default function SensorStatusPage({ miners = [] }) {
             </div>
           </div>
 
-          <div className="diagnostic-guide-panel" style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
-            <div className="diagnostic-guide-header"><PanelHeader title="Diagnostic guide" subtitle="Recommended recovery sequence." /></div>
-            <div className="diagnostic-guide-body hide-scrollbar" style={{ overflow: "auto", minHeight: 0, padding: "8px 14px 14px" }}>
-              <GuideStep number="01" title="Restore connection" text="Confirm power and WiFi before evaluating individual sensors." />
-              <GuideStep number="02" title="Verify chest contact" text="Poor contact can suppress both HR and SpO2 while the device remains online." />
-              <GuideStep number="03" title="Validate readings" text="Wait for stable HR, SpO2, and temperature values before clearing a warning." />
-              <GuideStep number="04" title="Check the power source" text="Confirm the battery is charged and the device is receiving a stable power connection." />
-              <GuideStep number="05" title="Inspect sensor placement" text="Look for loose leads, blocked optical sensors, or a temperature probe that is not seated correctly." />
-              <GuideStep number="06" title="Review device configuration" text="Confirm the device ID, assigned miner, WiFi profile, and reporting interval match the registry." />
-              <GuideStep number="07" title="Observe recovery" text="Keep the device under observation until readings remain stable and the condition returns to Good or Excellent." />
-            </div>
-          </div>
+          <ManualSensorHealthPanel
+            miners={fleet}
+            assessments={manualAssessments}
+            onChange={updateManualAssessment}
+            onReset={resetManualAssessment}
+          />
         </section>
       </div>
     </div>
@@ -194,6 +224,125 @@ function MaintenanceRow({ item }) {
   );
 }
 
+function readManualAssessments() {
+  if (typeof window === "undefined") return {};
+  try {
+    const stored = window.sessionStorage.getItem(MANUAL_HEALTH_STORAGE_KEY);
+    const parsed = stored ? JSON.parse(stored) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function ManualSensorHealthPanel({ miners, assessments, onChange, onReset }) {
+  const reviewedDevices = miners.filter((miner) => manualAssessmentSummary(assessments[miner.id]).reviewed > 0).length;
+  return (
+    <div className="manual-sensor-health-panel" style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
+      <div className="manual-sensor-health-header">
+        <PanelHeader title="Manual sensor health" subtitle="Drag each bar to record the condition you checked." meta={`${reviewedDevices}/${miners.length} reviewed`} />
+      </div>
+      <div className="manual-sensor-health-list hide-scrollbar">
+        {miners.length
+          ? miners.map((miner) => (
+            <ManualSensorHealthRow
+              key={miner.id}
+              miner={miner}
+              assessment={assessments[miner.id] || {}}
+              onChange={onChange}
+              onReset={onReset}
+            />
+          ))
+          : <EmptyState text="Register a device to begin manual sensor health checks." />}
+      </div>
+    </div>
+  );
+}
+
+function ManualSensorHealthRow({ miner, assessment, onChange, onReset }) {
+  const summary = manualAssessmentSummary(assessment);
+  return (
+    <article className="manual-sensor-health-row">
+      <div className="manual-sensor-health-row-top">
+        <div>
+          <strong>{miner.name}</strong>
+          <span>{miner.id} · {summary.reviewed}/{MANUAL_HEALTH_COMPONENTS.length} checks recorded</span>
+        </div>
+        <span className="manual-sensor-health-score" style={{ color: summary.color, borderColor: `${summary.color}55`, background: `${summary.color}12` }}>{summary.display}</span>
+      </div>
+      <div className="manual-sensor-health-checks">
+        {MANUAL_HEALTH_COMPONENTS.map((component) => (
+          <ManualSensorHealthBar
+            key={component.key}
+            component={component}
+            entry={assessment[component.key]}
+            onChange={(value) => onChange(miner.id, component.key, value)}
+          />
+        ))}
+      </div>
+      <div className="manual-sensor-health-row-footer">
+        <span>{summary.reviewed ? `${summary.reviewed} of ${MANUAL_HEALTH_COMPONENTS.length} checks set` : "No manual checks set yet"}</span>
+        <button type="button" className="manual-sensor-health-reset" onClick={() => onReset(miner.id)} disabled={!summary.reviewed}>Reset</button>
+      </div>
+    </article>
+  );
+}
+
+function ManualSensorHealthBar({ component, entry, onChange }) {
+  const reviewed = Boolean(entry?.reviewed);
+  const value = clampManualValue(entry?.value);
+  const status = manualValueStatus(value, reviewed);
+
+  return (
+    <label className="manual-sensor-health-check">
+      <div className="manual-sensor-health-check-top">
+        <span>{component.label}</span>
+        <strong style={{ color: status.color }}>{status.label}</strong>
+      </div>
+      <div className="manual-sensor-health-range-wrap">
+        <span>Low</span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value={value}
+          aria-label={`${component.label} manual health status`}
+          onChange={(event) => onChange(event.target.value)}
+          style={{ "--manual-health-fill": `${reviewed ? value : 0}%`, "--manual-health-color": status.color }}
+        />
+        <span>Good</span>
+      </div>
+      <div className="manual-sensor-health-check-foot"><span>{reviewed ? `${value}%` : "Drag to set"}</span><span>{status.helper}</span></div>
+    </label>
+  );
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function manualAssessmentSummary(assessment = {}) {
+  const entries = MANUAL_HEALTH_COMPONENTS.map((component) => assessment[component.key]).filter((entry) => entry?.reviewed);
+  const reviewed = entries.length;
+  if (!reviewed) return { reviewed: 0, display: "Not reviewed", color: C.offline };
+  const average = Math.round(entries.reduce((total, entry) => total + clampManualValue(entry.value), 0) / reviewed);
+  const status = manualValueStatus(average, reviewed === MANUAL_HEALTH_COMPONENTS.length);
+  return { reviewed, display: reviewed === MANUAL_HEALTH_COMPONENTS.length ? `${average}% · ${status.label}` : `${reviewed}/${MANUAL_HEALTH_COMPONENTS.length} set`, color: status.color };
+}
+
+function clampManualValue(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return 0;
+  return Math.max(0, Math.min(100, Math.round(numericValue)));
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function manualValueStatus(value, reviewed) {
+  if (!reviewed) return { label: "Not reviewed", helper: "Set status", color: C.offline };
+  if (value < 25) return { label: "Critical", helper: "Needs action", color: C.red };
+  if (value < 50) return { label: "Poor", helper: "Inspect", color: C.amber };
+  if (value < 75) return { label: "Fair", helper: "Watch", color: C.cyan };
+  return { label: "Good", helper: "Acceptable", color: C.green };
+}
+
 function PanelHeader({ title, subtitle, meta }) {
   return (
     <div style={{ padding: "12px 15px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", gap: 12 }}>
@@ -202,18 +351,6 @@ function PanelHeader({ title, subtitle, meta }) {
         <div style={{ color: C.textMuted, fontSize: 10.5, marginTop: 3 }}>{subtitle}</div>
       </div>
       {meta && <span style={{ color: C.textMuted, fontSize: 10, whiteSpace: "nowrap" }}>{meta}</span>}
-    </div>
-  );
-}
-
-function GuideStep({ number, title, text }) {
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "30px 1fr", gap: 10, padding: "11px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
-      <span style={{ color: C.primary, fontSize: 10, fontWeight: 950 }}>{number}</span>
-      <div>
-        <div style={{ color: C.text, fontSize: 11.5, fontWeight: 900 }}>{title}</div>
-        <div style={{ color: C.textMuted, fontSize: 10.5, lineHeight: 1.45, marginTop: 3 }}>{text}</div>
-      </div>
     </div>
   );
 }

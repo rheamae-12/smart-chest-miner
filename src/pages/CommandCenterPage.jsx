@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Link } from "react-router-dom";
 import Icon from "../components/Icon";
 import { C, cardStyle, controlStyle, moduleLabel, pageStyle } from "../theme";
 import { buildAlerts, getVitalStatus } from "../utils/alertChecker";
@@ -59,6 +60,8 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
       }))
       .sort((a, b) => b.timestamp - a.timestamp || severityRank(b) - severityRank(a) || a.originalIndex - b.originalIndex)
     : [];
+  const historyAlerts = useMemo(() => buildMinerAlertHistory(activityLogs, selected?.id), [activityLogs, selected?.id]);
+  const hasAlertHistory = historyAlerts.length > 0;
 
   const online = miners.filter((miner) => miner.active && !miner.stale).length;
   const alerting = new Set(alerts.map((a) => a.deviceId)).size;
@@ -123,19 +126,27 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
           </div>
           </div>
           <div className="cc-alert-card" style={{ ...cardStyle, minHeight: 0, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
-            <div style={{ padding: "11px 13px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <div style={moduleLabel}>Alerts</div>
-              <button
-                type="button"
-                onClick={() => onDismissAlerts?.(minerAlerts.map((alert) => alert.id))}
-                disabled={!minerAlerts.length}
-                style={{ background: "transparent", border: `1px solid ${minerAlerts.length ? C.amber : C.borderSoft}55`, borderRadius: 6, color: minerAlerts.length ? C.amber : C.textMuted, cursor: minerAlerts.length ? "pointer" : "default", fontSize: 10, fontWeight: 900, padding: "4px 7px", opacity: minerAlerts.length ? 1 : 0.7 }}
-              >
-                Clear
-              </button>
+            <div className="cc-alert-header">
+              <div>
+                <div style={moduleLabel}>{hasAlertHistory ? "Alert history" : "Alerts"}</div>
+                {hasAlertHistory && <div className="cc-alert-history-count">{historyAlerts.length} recorded alert{historyAlerts.length === 1 ? "" : "s"}</div>}
+              </div>
+              {hasAlertHistory ? (
+                <Link className="cc-alert-history-link" to="/alert-history">Review history <span aria-hidden="true">→</span></Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onDismissAlerts?.(minerAlerts.map((alert) => alert.id))}
+                  disabled={!minerAlerts.length}
+                  style={{ background: "transparent", border: `1px solid ${minerAlerts.length ? C.amber : C.borderSoft}55`, borderRadius: 6, color: minerAlerts.length ? C.amber : C.textMuted, cursor: minerAlerts.length ? "pointer" : "default", fontSize: 10, fontWeight: 900, padding: "4px 7px", opacity: minerAlerts.length ? 1 : 0.7 }}
+                >
+                  Clear
+                </button>
+              )}
             </div>
             <div className="cc-rail-alert-stack" aria-live="polite">
-          {minerAlerts.length > 0 && (
+          {hasAlertHistory && historyAlerts.map((entry) => <RailHistoryAlertCard key={entry.id} entry={entry} />)}
+          {!hasAlertHistory && minerAlerts.length > 0 && (
             <>
               {minerAlerts.map((a) => (
                 <div key={a.id} style={{ ...cardStyle, padding: "10px 12px", display: "flex", alignItems: "flex-start", gap: 9, borderRadius: 10, borderLeft: `3px solid ${a.severity === "critical" ? C.red : C.amber}`, background: `${a.severity === "critical" ? C.red : C.amber}0E` }}>
@@ -149,7 +160,7 @@ export default function CommandCenterPage({ miners = [], liveData = {}, activity
               ))}
             </>
           )}
-          {!minerAlerts.length && (
+          {!hasAlertHistory && !minerAlerts.length && (
             <div className="cc-alert-empty">
               <Icon name="check" size={16} color={C.green} />
               <span>No active alerts</span>
@@ -263,6 +274,42 @@ function alertTimestamp(alert, miner, activityLogs) {
     .filter((log) => log.deviceId === alert.deviceId && condition && conditionForLog(log) === condition)
     .reduce((latest, log) => Math.max(latest, Number(log.timestamp || 0)), 0);
   return latestActivity || Number(alert.timestamp || 0) || lastSeenValue(miner);
+}
+
+function buildMinerAlertHistory(activityLogs, deviceId) {
+  if (!deviceId) return [];
+  return [...(activityLogs || [])]
+    .filter((log) => log.deviceId === deviceId && isRecordedAlertLog(log))
+    .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
+    .map((log, index) => ({
+      id: log.id || `${deviceId}-history-${log.timestamp || index}`,
+      miner: log.miner || deviceId,
+      title: log.title || (log.type === "manual_alert" ? "Manual SOS activation" : "Alert recorded"),
+      detail: log.detail || (log.type === "status" ? "Device offline" : "Threshold event"),
+      severity: log.severity === "critical" ? "critical" : "warning",
+      timestamp: Number(log.timestamp || 0),
+    }))
+    .slice(0, 24);
+}
+
+function isRecordedAlertLog(log = {}) {
+  if (log.type === "status" && log.status === "online") return false;
+  if (log.severity === "info") return false;
+  return log.type === "vital" || log.type === "manual_alert" || (log.type === "status" && log.status === "offline");
+}
+
+function RailHistoryAlertCard({ entry }) {
+  const color = entry.severity === "critical" ? C.red : C.amber;
+  return (
+    <div className="cc-rail-history-entry" style={{ borderColor: `${color}35`, borderLeftColor: color, background: `${color}08` }}>
+      <span className="cc-rail-history-entry-main">
+        <span style={{ color }}>Recorded - {entry.severity}</span>
+        <strong>{entry.miner}: {entry.title}</strong>
+        <small>{entry.detail}</small>
+      </span>
+      <time dateTime={entry.timestamp ? new Date(entry.timestamp).toISOString() : undefined}>{formatSystemTimestamp(entry.timestamp)}</time>
+    </div>
+  );
 }
 
 function severityRank(alert) {

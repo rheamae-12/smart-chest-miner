@@ -108,6 +108,19 @@ describe("mergeAnalyticsData", () => {
       sessionId: "session-1",
     });
   });
+
+  it("keeps distinct same-timestamp samples when they have different source IDs", () => {
+    const timestamp = 1_700_000_000_000;
+    const merged = mergeAnalyticsData({
+      "SCM-001": [
+        { timestamp, sourceId: "sample-a", hr: 82, spo2: 97, temp: 36.5 },
+        { timestamp, sourceId: "sample-b", hr: 104, spo2: 98, temp: 36.8 },
+      ],
+    });
+
+    expect(merged["SCM-001"]).toHaveLength(2);
+    expect(merged["SCM-001"].map((row) => row.hr)).toEqual([82, 104]);
+  });
 });
 
 describe("session IDs", () => {

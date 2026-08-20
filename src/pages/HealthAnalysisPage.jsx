@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import PageHeader from "../components/PageHeader";
 import { C, cardStyle, controlStyle, pageStyle } from "../theme";
 import { DEFAULT_THRESHOLDS, getVitalStatus } from "../utils/alertChecker";
 import { DATE_RANGE_OPTIONS, isWithinDateRange, resolveDateRange } from "../utils/filtering";
-import { average, formatLastSeen, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
+import { average, compactTimestamp, formatLastSeen, formatReading, formatSystemTimestamp, lastSeenValue, uniqueChartLabels } from "../utils/formatters";
 import { compareMinersActiveFirst } from "../utils/minerOrdering";
 import { buildSessions } from "./HealthLogsPage";
 
@@ -13,13 +14,15 @@ const METRICS = [
   { key: "temp", label: "Temperature", unit: "°C", color: C.teal, digits: 1 },
 ];
 
+const MAX_SESSION_X_AXIS_VALUES = 6;
+
 export default function HealthAnalysisPage({ miners = [], analyticsData = {}, liveData = {}, sessionData = {}, activityLogs = [], thresholds = DEFAULT_THRESHOLDS }) {
   const [selectedId, setSelectedId] = useState("");
   const [rangePreset, setRangePreset] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [throughDateTime, setThroughDateTime] = useState("");
-  const [selectedSessionId, setSelectedSessionId] = useState("all");
+  const [selectedSessionId, setSelectedSessionId] = useState("");
   const sortedMiners = useMemo(() => [...miners].sort(compareMinersActiveFirst), [miners]);
   const currentId = sortedMiners.some((miner) => miner.id === selectedId) ? selectedId : sortedMiners[0]?.id || "";
   const selectedMiner = sortedMiners.find((miner) => miner.id === currentId) || null;
@@ -36,7 +39,9 @@ export default function HealthAnalysisPage({ miners = [], analyticsData = {}, li
     );
     return built.sort((a, b) => Number(b.sortTimestamp || 0) - Number(a.sortTimestamp || 0));
   }, [activityLogs, analyticsData, liveData, selectedMiner, sessionData, thresholds]);
-  const effectiveSessionId = sessionOptions.some((session) => session.id === selectedSessionId) ? selectedSessionId : "all";
+  const effectiveSessionId = sessionOptions.some((session) => session.id === selectedSessionId)
+    ? selectedSessionId
+    : sessionOptions[0]?.id || "";
   const selectedSession = sessionOptions.find((session) => session.id === effectiveSessionId) || null;
   const presetDateRange = useMemo(() => resolveDateRange(rangePreset, { from: dateFrom, to: dateTo }), [dateFrom, dateTo, rangePreset]);
   const dateTimeRange = useMemo(() => rangeThroughDateTime(throughDateTime), [throughDateTime]);
@@ -48,7 +53,9 @@ export default function HealthAnalysisPage({ miners = [], analyticsData = {}, li
     ),
     [dateTimeRange, presetDateRange, selectedSession],
   );
-  const rangeLabel = DATE_RANGE_OPTIONS.find((option) => option.value === rangePreset)?.label || "All time";
+  const rangeLabel = selectedSession
+    ? `${selectedSession.id === sessionOptions[0]?.id ? "Latest session" : "Selected session"} · ${DATE_RANGE_OPTIONS.find((option) => option.value === rangePreset)?.label || "All time"}`
+    : DATE_RANGE_OPTIONS.find((option) => option.value === rangePreset)?.label || "All time";
   const summaries = useMemo(
     () => sortedMiners.map((miner) => ({
       miner,
@@ -62,6 +69,12 @@ export default function HealthAnalysisPage({ miners = [], analyticsData = {}, li
       : emptyAnalysis(),
     [activityLogs, analyticsData, dateRange, liveData, selectedMiner, thresholds],
   );
+  const sessionChart = useMemo(
+    () => selectedMiner && selectedSession
+      ? buildSessionChartData(selectedMiner, selectedSession, analyticsData[selectedMiner.id], liveData[selectedMiner.id], activityLogs, thresholds)
+      : emptySessionChart(),
+    [activityLogs, analyticsData, liveData, selectedMiner, selectedSession, thresholds],
+  );
 
   return (
     <div style={pageStyle}>
@@ -70,15 +83,6 @@ export default function HealthAnalysisPage({ miners = [], analyticsData = {}, li
           label="Personnel health review"
           title="Health Analysis"
           subtitle="Sensor-pattern findings to support an early wellbeing check for each miner."
-          right={(
-            <label className="health-analysis-selector">
-              <span>Review personnel</span>
-              <select value={currentId} onChange={(event) => setSelectedId(event.target.value)} style={{ ...controlStyle, minWidth: 230 }}>
-                {sortedMiners.length === 0 && <option value="">No personnel registered</option>}
-                {sortedMiners.map((miner) => <option key={miner.id} value={miner.id}>{miner.name} ({miner.id})</option>)}
-              </select>
-            </label>
-          )}
         />
 
         <section className="health-analysis-filterbar" aria-label="Health analysis date filter">
@@ -100,9 +104,10 @@ export default function HealthAnalysisPage({ miners = [], analyticsData = {}, li
           )}
           <label className="health-analysis-date-field health-analysis-session-field">
             <span>Session</span>
-            <select value={effectiveSessionId} onChange={(event) => setSelectedSessionId(event.target.value)} style={{ ...controlStyle, minWidth: 220 }}>
-              <option value="all">All sessions</option>
-              {sessionOptions.map((session) => <option key={session.id} value={session.id}>{session.start} · {session.duration} · {capitalize(session.sessionStatus)}</option>)}
+            <select value={effectiveSessionId} onChange={(event) => setSelectedSessionId(event.target.value)} style={{ ...controlStyle, minWidth: 250 }}>
+              {sessionOptions.length === 0 ? <option value="">No sessions available</option> : sessionOptions.map((session) => (
+                <option key={session.id} value={session.id}>{session.start} · {session.duration} · {capitalize(session.sessionStatus)}</option>
+              ))}
             </select>
           </label>
           <label className="health-analysis-date-field health-analysis-datetime-field">
@@ -156,14 +161,15 @@ export default function HealthAnalysisPage({ miners = [], analyticsData = {}, li
                   </div>
                   <div className="health-analysis-stat-grid">
                     <AnalysisStat label="Readings analyzed" value={selectedAnalysis.sampleCount} color={C.cyan} />
-                    <AnalysisStat label="Flagged readings" value={selectedAnalysis.flaggedCount} color={selectedAnalysis.posture.color} />
+                    <AnalysisStat label="Readings with flags" value={selectedAnalysis.flaggedCount} color={selectedAnalysis.posture.color} />
                     <AnalysisStat label="SOS activations" value={selectedAnalysis.sosCount} color={selectedAnalysis.sosCount ? C.red : C.green} />
-                    <AnalysisStat label="Pattern" value={selectedAnalysis.behaviorLabel} color={C.primary} />
                   </div>
                 </section>
 
+                <SessionTrendCard session={selectedSession} chart={sessionChart} />
+
                 <section style={{ ...cardStyle, padding: 15 }}>
-                  <PanelHeader title="Findings and recommended checks" subtitle="Prioritized from the selected personnel’s recorded sensor behavior." meta={`${selectedAnalysis.findings.length} finding${selectedAnalysis.findings.length === 1 ? "" : "s"}`} />
+                  <PanelHeader title="Findings and next checks" subtitle="Exact signals that need attention, with the next action beside each one." meta={`${selectedAnalysis.findings.length} finding${selectedAnalysis.findings.length === 1 ? "" : "s"}`} />
                   <FactorLegend />
                   <div className="health-analysis-findings">
                     {selectedAnalysis.findings.map((finding) => <FindingCard key={finding.id} finding={finding} />)}
@@ -171,22 +177,10 @@ export default function HealthAnalysisPage({ miners = [], analyticsData = {}, li
                 </section>
 
                 <section style={{ ...cardStyle, padding: 15 }}>
-                  <PanelHeader title="Reading behavior" subtitle="How the recorded signals behaved during available sessions." meta={selectedAnalysis.windowLabel} />
+                  <PanelHeader title="Reading behavior" subtitle={`Metric cards use all ${selectedAnalysis.sampleCount} readings. The status preview below shows the latest ${Math.min(18, selectedAnalysis.sampleCount)}.`} meta={selectedAnalysis.windowLabel} />
                   <div className="health-analysis-metric-grid">
                     {METRICS.map((metric) => <BehaviorMetric key={metric.key} metric={metric} data={selectedAnalysis.metrics[metric.key]} />)}
                   </div>
-                  <div className="health-analysis-sample-strip" aria-label="Recent reading status sequence">
-                    <span className="health-analysis-sample-label">Recent sequence</span>
-                    {selectedAnalysis.samples.length ? selectedAnalysis.samples.map((sample) => (
-                      <span key={sample.key} title={sample.label} className="health-analysis-sample" style={{ background: sample.color }} />
-                    )) : <span style={{ color: C.textMuted, fontSize: 11 }}>No usable samples yet</span>}
-                    <span className="health-analysis-sample-caption">oldest → newest</span>
-                  </div>
-                </section>
-
-                <section className="health-analysis-method" style={{ ...cardStyle, padding: 14 }}>
-                  <div style={{ color: C.text, fontSize: 12, fontWeight: 900 }}>How this review is formed</div>
-                  <div style={{ color: C.textMuted, fontSize: 10.5, lineHeight: 1.5, marginTop: 5 }}>The console compares valid HR, SpO2, and temperature samples with the configured thresholds, then looks for repeated out-of-range values, SOS activity, contact gaps, and directional change. A “stable” result means no pattern was detected in the available data; it does not mean a person is medically cleared.</div>
                 </section>
               </>
             )}
@@ -195,6 +189,206 @@ export default function HealthAnalysisPage({ miners = [], analyticsData = {}, li
       </div>
     </div>
   );
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function buildSessionChartData(miner, session, analyticsRows = [], liveSeries = {}, activityLogs = [], thresholds = DEFAULT_THRESHOLDS) {
+  if (!miner || !session) return emptySessionChart();
+
+  const start = Number(session.startTimestamp || 0);
+  const end = Number(session.endTimestamp || session.sortTimestamp || 0);
+  const sessionKey = String(session.sessionId || "");
+  const allRows = normalizeRows(miner, analyticsRows, liveSeries);
+  const rows = allRows
+    .filter((row) => {
+      const timestamp = Number(row.timestamp || 0);
+      const sameSession = sessionKey && row.sessionId && row.sessionId === sessionKey;
+      const inWindow = timestamp >= start && (!end || timestamp <= end);
+      return sameSession || inWindow;
+    })
+    .filter((row) => row.hr > 0 || row.spo2 > 0 || row.temp > 0);
+  const logs = (activityLogs || [])
+    .filter((log) => log.deviceId === miner.id && isSessionAlertLog(log))
+    .filter((log) => {
+      const timestamp = Number(log.timestamp || 0);
+      return timestamp >= start && (!end || timestamp <= end) || Boolean(sessionKey && log.sessionId === sessionKey);
+    })
+    .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+  const labels = uniqueChartLabels(rows);
+  const chartRows = rows.map((row, index) => ({
+    ...row,
+    time: labels[index] || compactTimestamp(row.timestamp),
+    hr: row.hr > 0 ? row.hr : null,
+    spo2: row.spo2 > 0 ? row.spo2 : null,
+    temp: row.temp > 0 ? row.temp : null,
+    statuses: Object.fromEntries(METRICS.map((metric) => [metric.key, getVitalStatus(row[metric.key], metric.key, thresholds)])),
+    indicators: rowIndicators(row, thresholds),
+  }));
+
+  logs.forEach((log) => {
+    if (!chartRows.length) return;
+    const timestamp = Number(log.timestamp || 0);
+    const nearestIndex = chartRows.reduce((closest, row, index) => (
+      Math.abs(Number(row.timestamp) - timestamp) < Math.abs(Number(chartRows[closest].timestamp) - timestamp) ? index : closest
+    ), 0);
+    const indicator = indicatorFromAlertLog(log);
+    chartRows[nearestIndex].indicators = addUniqueIndicator(chartRows[nearestIndex].indicators, indicator);
+    chartRows[nearestIndex].statuses = { ...chartRows[nearestIndex].statuses, [indicator.metric]: indicator.status || chartRows[nearestIndex].statuses[indicator.metric] };
+  });
+
+  const indicators = chartRows.flatMap((row) => row.indicators);
+  return {
+    rows: chartRows,
+    xAxisTicks: evenlySpacedTicks(chartRows, MAX_SESSION_X_AXIS_VALUES),
+    recordedReadingCount: Math.max(Number(session.readingCount || 0), chartRows.length),
+    flaggedPointCount: chartRows.filter((row) => row.indicators.length > 0).length,
+    criticalCount: indicators.filter((indicator) => indicator.severity === "critical").length,
+    warningCount: indicators.filter((indicator) => indicator.severity === "warning").length,
+  };
+}
+
+function SessionTrendCard({ session, chart }) {
+  const recordedReadingCount = Number(chart.recordedReadingCount || chart.rows.length);
+  const hasUnavailableReadings = Boolean(session && recordedReadingCount > chart.rows.length);
+  return (
+    <section className="health-analysis-session-chart" style={{ ...cardStyle, padding: 15 }}>
+      <PanelHeader
+        title="Session reading timeline"
+        subtitle={session ? "Hover any point to see the readings and the warning or critical signals recorded there." : "Select a session above to inspect its readings and alert points."}
+        meta={session
+          ? hasUnavailableReadings
+            ? `${recordedReadingCount} recorded · ${chart.rows.length} plotted`
+            : `${chart.rows.length} readings`
+          : "No session selected"}
+      />
+      {!session ? (
+        <EmptyState title="Choose a session to inspect" text="The chart will show up to six time labels while keeping every recorded point available on hover." />
+      ) : chart.rows.length === 0 ? (
+        <EmptyState title="No raw readings in this session" text="A session summary exists, but there are no timestamped sensor readings available for the chart." />
+      ) : (
+        <>
+          <div className="health-analysis-session-chart-frame">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chart.rows} margin={{ top: 12, right: 28, left: 0, bottom: 20 }}>
+                <CartesianGrid stroke={C.borderSoft} vertical={false} />
+                <XAxis dataKey="time" ticks={chart.xAxisTicks} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={18} height={28} />
+                <YAxis yAxisId="vital" domain={chartDomain(chart.rows, ["hr", "spo2"], 10, [0, 120])} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={42} allowDecimals={false} label={{ value: "bpm / %", angle: -90, fill: C.textMuted, fontSize: 10, position: "insideLeft" }} />
+                <YAxis yAxisId="temp" orientation="right" domain={chartDomain(chart.rows, ["temp"], 2, [20, 40])} tick={{ fill: C.teal, fontSize: 10 }} axisLine={false} tickLine={false} width={40} allowDecimals label={{ value: "°C", angle: 90, fill: C.teal, fontSize: 10, position: "insideRight" }} />
+                <Tooltip content={<SessionTooltip />} cursor={{ stroke: C.primary, strokeDasharray: "4 4" }} />
+                <Line yAxisId="vital" type="monotone" dataKey="hr" name="Heart rate" stroke={C.red} strokeWidth={2.5} connectNulls dot={(props) => <SessionStatusDot {...props} metricKey="hr" />} isAnimationActive={false} />
+                <Line yAxisId="vital" type="monotone" dataKey="spo2" name="SpO2" stroke={C.oxygen} strokeWidth={2.5} connectNulls dot={(props) => <SessionStatusDot {...props} metricKey="spo2" />} isAnimationActive={false} />
+                <Line yAxisId="temp" type="monotone" dataKey="temp" name="Temperature" stroke={C.teal} strokeWidth={2.5} connectNulls dot={(props) => <SessionStatusDot {...props} metricKey="temp" />} isAnimationActive={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="health-analysis-session-chart-footer">
+            <span>{chart.flaggedPointCount} reading point{chart.flaggedPointCount === 1 ? "" : "s"} with attention signals</span>
+            <span><b style={{ color: C.red }}>HR</b> · <b style={{ color: C.oxygen }}>SpO2</b> · <b style={{ color: C.teal }}>Temp</b> · <b style={{ color: C.red }}>{chart.criticalCount} critical</b> · <b style={{ color: C.amber }}>{chart.warningCount} warning</b> · {MAX_SESSION_X_AXIS_VALUES} time labels max</span>
+          </div>
+          {hasUnavailableReadings && (
+            <div className="health-analysis-session-chart-note">
+              The session record contains {recordedReadingCount} readings, but only {chart.rows.length} timestamped sensor points are available to plot. The missing points need to be restored from the source history.
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function SessionTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const row = payload.find((entry) => entry?.payload)?.payload;
+  if (!row) return null;
+  return (
+    <div className="health-analysis-session-tooltip">
+      <strong>{formatSystemTimestamp(row.timestamp)}</strong>
+      <div className="health-analysis-tooltip-values">
+        {METRICS.map((metric) => (
+          <span key={metric.key} style={{ color: metric.color }}>
+            {metric.label}: {formatReading(row[metric.key], metric.digits)} {metric.unit}
+          </span>
+        ))}
+      </div>
+      <div className="health-analysis-tooltip-indicators">
+        <span className="health-analysis-tooltip-label">Recorded indicators</span>
+        {row.indicators.length ? row.indicators.map((indicator, index) => (
+          <span key={`${indicator.key}-${index}`} style={{ color: indicator.severity === "critical" ? C.red : C.amber }}>
+            {indicator.severity === "critical" ? "Critical" : "Warning"}: {indicator.label}{indicator.detail ? ` — ${indicator.detail}` : ""}
+          </span>
+        )) : <span>Within configured review bands</span>}
+      </div>
+    </div>
+  );
+}
+
+function SessionStatusDot({ cx, cy, payload, metricKey, stroke }) {
+  if (!Number.isFinite(cx) || !Number.isFinite(cy) || payload?.[metricKey] == null) return null;
+  const status = payload.statuses?.[metricKey];
+  const flagged = ["LOW", "HIGH", "CRITICAL"].includes(status);
+  const color = status === "CRITICAL" ? C.red : flagged ? C.amber : stroke;
+  return <circle cx={cx} cy={cy} r={flagged ? 5 : 2.3} fill={flagged ? color : stroke} fillOpacity={flagged ? 1 : 0.9} stroke={flagged ? C.bg0 : "none"} strokeWidth={flagged ? 2 : 0} />;
+}
+
+function emptySessionChart() {
+  return { rows: [], xAxisTicks: [], recordedReadingCount: 0, flaggedPointCount: 0, criticalCount: 0, warningCount: 0 };
+}
+
+function rowIndicators(row, thresholds) {
+  return METRICS.reduce((indicators, metric) => {
+    const status = getVitalStatus(row[metric.key], metric.key, thresholds);
+    if (!["LOW", "HIGH", "CRITICAL"].includes(status)) return indicators;
+    return [...indicators, {
+      key: `${metric.key}:${status}`,
+      metric: metric.key,
+      status,
+      severity: status === "CRITICAL" ? "critical" : "warning",
+      label: `${metric.label} ${status === "HIGH" ? "high" : status === "LOW" ? "low" : "critical"}`,
+      detail: `${formatReading(row[metric.key], metric.digits)} ${metric.unit}`,
+    }];
+  }, []);
+}
+
+function indicatorFromAlertLog(log) {
+  const text = `${log.title || ""} ${log.detail || ""}`.toLowerCase();
+  const metric = text.includes("spo2") ? "spo2" : text.includes("temp") ? "temp" : "hr";
+  const status = String(log.status || "").toUpperCase();
+  const severity = log.type === "manual_alert" || log.severity === "critical" ? "critical" : "warning";
+  return {
+    key: `log:${log.id || log.timestamp || log.title}`,
+    metric,
+    status: ["LOW", "HIGH", "CRITICAL"].includes(status) ? status : undefined,
+    severity,
+    label: log.type === "manual_alert" ? "Manual SOS activation" : log.title || `${metric.toUpperCase()} alert`,
+    detail: log.reading != null ? `${log.reading} ${log.unit || ""}`.trim() : log.detail || "Recorded alert event",
+  };
+}
+
+function addUniqueIndicator(indicators, indicator) {
+  const duplicate = indicators.some((current) => (
+    current.key === indicator.key
+      || (current.metric === indicator.metric && current.status && indicator.status && current.status === indicator.status)
+  ));
+  return duplicate ? indicators : [...indicators, indicator];
+}
+
+function isSessionAlertLog(log = {}) {
+  return log.type === "vital" || log.type === "manual_alert";
+}
+
+function chartDomain(rows, keys, padding, fallback) {
+  const values = rows.flatMap((row) => keys.map((key) => Number(row[key] || 0))).filter((value) => value > 0);
+  if (!values.length) return fallback;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return [Math.max(0, min - padding), max + padding || min + padding];
+}
+
+function evenlySpacedTicks(rows, maxCount) {
+  if (rows.length <= maxCount) return rows.map((row) => row.time);
+  const indexes = new Set([0, rows.length - 1]);
+  for (let index = 1; index < maxCount - 1; index += 1) indexes.add(Math.round((index * (rows.length - 1)) / (maxCount - 1)));
+  return [...indexes].sort((a, b) => a - b).map((index) => rows[index].time);
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -221,7 +415,6 @@ export function buildHealthFindings(miner, analyticsRows = [], liveSeries = {}, 
     sosCount,
     behaviorLabel: behaviorLabel(metrics, validRows.length),
     windowLabel: validRows.length > 1 ? `${formatWindow(validRows[0].timestamp)} → ${formatWindow(lastValidRow.timestamp)}` : "Available window",
-    samples: validRows.slice(-18).map((row) => ({ key: `${row.timestamp}-${row.hr}-${row.spo2}-${row.temp}`, label: sampleLabel(row, thresholds), color: sampleColor(row, thresholds) })),
   };
 }
 
@@ -245,48 +438,48 @@ function buildSosFindings({ sosCount }) {
   return [{
     id: "manual-sos",
     severity: "critical",
-    title: "Manual SOS activation recorded",
+    title: "Manual SOS recorded",
     reading: `${sosCount} activation${sosCount === 1 ? "" : "s"}`,
-    context: "An SOS is an urgent human signal and cannot be explained by sensor values alone.",
-    factors: "The person may need immediate assistance, or the button may have been activated accidentally.",
+    context: `${sosCount} manual SOS activation${sosCount === 1 ? " was" : "s were"} recorded in this review window. Sensor readings cannot explain or dismiss an SOS.` ,
+    factors: "Treat this as a human safety signal first; accidental activation is also possible.",
     action: "Check the miner immediately and follow the site emergency response procedure.",
   }];
 }
 
 function buildSpo2Findings({ metrics }) {
   if (metrics.spo2.criticalCount > 0) {
-    return [{ id: "spo2-critical", severity: "critical", title: "Marked SpO2 concern", reading: `${metrics.spo2.criticalCount} critical sample${metrics.spo2.criticalCount === 1 ? "" : "s"}`, context: `Lowest recorded value: ${formatReading(metrics.spo2.min, 0)}%.`, factors: "May be associated with breathing difficulty, acute illness, or unreliable sensor contact.", action: "Verify placement and assess the person immediately; escalate persistent or symptomatic readings to a clinician or emergency response." }];
+    return [{ id: "spo2-critical", severity: "critical", title: "SpO2 crossed the critical threshold", reading: `${metrics.spo2.criticalCount} sample${metrics.spo2.criticalCount === 1 ? "" : "s"} · min ${formatReading(metrics.spo2.min, 0)}%`, context: `${metrics.spo2.criticalCount} SpO2 sample${metrics.spo2.criticalCount === 1 ? " was" : "s were"} below the critical threshold.`, factors: "Low oxygen values can also be caused by poor optical contact or movement, so confirm the signal.", action: "Verify placement and assess the person immediately; escalate persistent or symptomatic readings." }];
   }
   if (metrics.spo2.lowCount > 0) {
-    return [{ id: "spo2-low", severity: "warning", title: "Repeated low SpO2 pattern", reading: `${metrics.spo2.lowCount} low sample${metrics.spo2.lowCount === 1 ? "" : "s"}`, context: `Average ${formatReading(metrics.spo2.average, 0)}% across ${metrics.spo2.count} valid samples.`, factors: "May reflect exertion, breathing strain, environmental conditions, or poor optical contact.", action: "Pause and re-check after confirming a stable sensor fit. Escalate if it persists or symptoms are present." }];
+    return [{ id: "spo2-low", severity: "warning", title: "SpO2 is below the review range", reading: `${metrics.spo2.lowCount} sample${metrics.spo2.lowCount === 1 ? "" : "s"} · avg ${formatReading(metrics.spo2.average, 0)}%`, context: `${metrics.spo2.lowCount} of ${metrics.spo2.count} valid SpO2 samples were below the configured review range.`, factors: "Exertion, breathing strain, environmental conditions, or poor optical contact can produce this pattern.", action: "Pause, confirm a stable sensor fit, and repeat the reading during rest." }];
   }
   return [];
 }
 
 function buildHeartRateFindings({ metrics }) {
   if (metrics.hr.criticalCount > 0) {
-    return [{ id: "hr-critical", severity: "critical", title: "Critical heart-rate sample", reading: `${metrics.hr.criticalCount} critical sample${metrics.hr.criticalCount === 1 ? "" : "s"}`, context: `Peak recorded value: ${formatReading(metrics.hr.max, 0)} bpm.`, factors: "May be associated with intense exertion, heat stress, dehydration, pain, anxiety, or another acute condition.", action: "Stop work, assess the person, and follow the medical escalation protocol for persistent or symptomatic readings." }];
+    return [{ id: "hr-critical", severity: "critical", title: "Heart rate crossed the critical threshold", reading: `${metrics.hr.criticalCount} sample${metrics.hr.criticalCount === 1 ? "" : "s"} · max ${formatReading(metrics.hr.max, 0)} bpm`, context: `${metrics.hr.criticalCount} heart-rate sample${metrics.hr.criticalCount === 1 ? " was" : "s were"} at or above the configured critical threshold.`, factors: "Workload, heat, dehydration, stress, or sensor noise can affect the reading.", action: "Stop work, assess the person, and repeat the reading with good sensor contact." }];
   }
   if (metrics.hr.highCount > 0 || metrics.hr.lowCount > 0) {
     const direction = metrics.hr.highCount >= metrics.hr.lowCount ? "elevated" : "low";
-    return [{ id: "hr-out-of-range", severity: "warning", title: `${direction[0].toUpperCase()}${direction.slice(1)} heart-rate pattern`, reading: `${metrics.hr.outOfRangeCount} out-of-range sample${metrics.hr.outOfRangeCount === 1 ? "" : "s"}`, context: `Observed range: ${formatReading(metrics.hr.min, 0)}–${formatReading(metrics.hr.max, 0)} bpm.`, factors: "Readings can shift with workload, heat, hydration, stress, recovery, medication, or an underlying condition.", action: "Allow a rest re-check with good contact and review the pattern with a qualified health professional if it remains unusual." }];
+    return [{ id: "hr-out-of-range", severity: "warning", title: `${direction[0].toUpperCase()}${direction.slice(1)} heart-rate readings`, reading: `${metrics.hr.outOfRangeCount} sample${metrics.hr.outOfRangeCount === 1 ? "" : "s"} · ${formatReading(metrics.hr.min, 0)}–${formatReading(metrics.hr.max, 0)} bpm`, context: `${metrics.hr.outOfRangeCount} of ${metrics.hr.count} valid heart-rate samples were outside the configured review range.`, factors: "The pattern may follow workload, heat, hydration, stress, recovery, or sensor contact.", action: "Allow a rest re-check with good contact and escalate the pattern if it remains unusual." }];
   }
   return [];
 }
 
 function buildTemperatureFindings({ metrics }) {
   if (metrics.temp.criticalCount > 0) {
-    return [{ id: "temp-critical", severity: "critical", title: "Critical temperature sample", reading: `${metrics.temp.criticalCount} critical sample${metrics.temp.criticalCount === 1 ? "" : "s"}`, context: `Observed range: ${formatReading(metrics.temp.min, 1)}–${formatReading(metrics.temp.max, 1)}°C.`, factors: "May be associated with heat or cold exposure, illness, or probe placement error.", action: "Move the person to a safer environment, verify the probe, and use the site heat/cold response protocol." }];
+    return [{ id: "temp-critical", severity: "critical", title: "Temperature crossed the critical threshold", reading: `${metrics.temp.criticalCount} sample${metrics.temp.criticalCount === 1 ? "" : "s"} · ${formatReading(metrics.temp.min, 1)}–${formatReading(metrics.temp.max, 1)}°C`, context: `${metrics.temp.criticalCount} temperature sample${metrics.temp.criticalCount === 1 ? " was" : "s were"} outside the configured critical band.`, factors: "Heat or cold exposure, illness, or probe placement can affect the signal.", action: "Move the person to a safer environment, verify the probe, and follow the site response protocol." }];
   }
   if (metrics.temp.highCount > 0 || metrics.temp.lowCount > 0) {
-    return [{ id: "temp-out-of-range", severity: "warning", title: "Temperature pattern needs review", reading: `${metrics.temp.outOfRangeCount} out-of-range sample${metrics.temp.outOfRangeCount === 1 ? "" : "s"}`, context: `Observed range: ${formatReading(metrics.temp.min, 1)}–${formatReading(metrics.temp.max, 1)}°C.`, factors: "Could reflect ambient exposure, heat strain, illness, or a probe that needs repositioning.", action: "Move out of exposure, confirm probe placement, and repeat the reading before clearing the finding." }];
+    return [{ id: "temp-out-of-range", severity: "warning", title: "Temperature is outside the review range", reading: `${metrics.temp.outOfRangeCount} sample${metrics.temp.outOfRangeCount === 1 ? "" : "s"} · ${formatReading(metrics.temp.min, 1)}–${formatReading(metrics.temp.max, 1)}°C`, context: `${metrics.temp.outOfRangeCount} of ${metrics.temp.count} valid temperature samples were outside the configured review range.`, factors: "Ambient exposure, heat strain, illness, or probe placement can affect the signal.", action: "Move out of exposure, confirm probe placement, and repeat the reading." }];
   }
   return [];
 }
 
 function buildTrendFindings({ metrics }) {
   if (metrics.spo2.trend !== "falling" || metrics.spo2.count < 3 || metrics.spo2.criticalCount > 0) return [];
-  return [{ id: "spo2-trend", severity: "warning", title: "SpO2 trend is moving down", reading: `${formatReading(metrics.spo2.firstAverage, 0)}% → ${formatReading(metrics.spo2.lastAverage, 0)}%`, context: "A directional change can matter even when individual samples have not crossed the critical threshold.", factors: "May be related to increasing exertion, breathing strain, or a changing sensor fit.", action: "Check the person and sensor contact now; repeat readings during rest." }];
+  return [{ id: "spo2-trend", severity: "warning", title: "SpO2 is trending down", reading: `${formatReading(metrics.spo2.firstAverage, 0)}% → ${formatReading(metrics.spo2.lastAverage, 0)}%`, context: `The average moved down across the available samples without crossing the critical threshold.`, factors: "Increasing exertion, breathing strain, or changing sensor fit can produce this direction.", action: "Check the person and sensor contact now; repeat readings during rest." }];
 }
 
 function buildFallbackFindings({ contactGaps, validRows }) {
@@ -297,24 +490,45 @@ function buildFallbackFindings({ contactGaps, validRows }) {
 }
 
 function normalizeRows(miner, analyticsRows = [], liveSeries = {}) {
-  const byTimestamp = new Map();
-  (analyticsRows || []).forEach((row) => mergeRow(byTimestamp, row));
-  ["hr", "spo2", "temp"].forEach((key) => (liveSeries?.[key] || []).forEach((point) => mergeRow(byTimestamp, { ...point, [key]: point[key] })));
-  if (!byTimestamp.size && lastSeenValue(miner)) mergeRow(byTimestamp, { timestamp: lastSeenValue(miner), hr: miner.hr, spo2: miner.spo2, temp: miner.temp, finger: miner.finger, manual_alert: miner.manual_alert, button_press_count: miner.button_press_count });
-  return [...byTimestamp.values()].sort((a, b) => a.timestamp - b.timestamp);
+  const rows = (analyticsRows || [])
+    .map((row) => normalizeReadingRow(row))
+    .filter((row) => row.timestamp > 0);
+
+  // Analytics rows are the persisted samples and must remain one row each.
+  // Live series are only merged into an existing row at the exact timestamp;
+  // they must not collapse separate persisted samples that share a timestamp.
+  ["hr", "spo2", "temp"].forEach((key) => (liveSeries?.[key] || []).forEach((point) => {
+    const timestamp = Number(point.timestamp || 0);
+    if (!timestamp) return;
+    const existing = rows.findLast((row) => Number(row.timestamp) === timestamp);
+    if (existing) {
+      mergeReadingFields(existing, { ...point, [key]: point[key] });
+    } else {
+      rows.push(normalizeReadingRow({ ...point, [key]: point[key] }));
+    }
+  }));
+
+  if (!rows.length && lastSeenValue(miner)) {
+    rows.push(normalizeReadingRow({ timestamp: lastSeenValue(miner), hr: miner.hr, spo2: miner.spo2, temp: miner.temp, finger: miner.finger, manual_alert: miner.manual_alert, button_press_count: miner.button_press_count }));
+  }
+  return rows.sort((a, b) => a.timestamp - b.timestamp);
 }
 
-function mergeRow(byTimestamp, row = {}) {
+function normalizeReadingRow(row = {}) {
+  const normalized = { ...row, timestamp: Number(row.timestamp || 0) };
+  mergeReadingFields(normalized, row);
+  return normalized;
+}
+
+function mergeReadingFields(current, row = {}) {
   const timestamp = Number(row.timestamp || 0);
-  if (!timestamp) return;
-  const current = byTimestamp.get(timestamp) || { timestamp };
+  if (timestamp) current.timestamp = timestamp;
   ["hr", "spo2", "temp"].forEach((key) => {
     if (Number(row[key]) > 0) current[key] = Number(row[key]);
   });
   ["finger", "manual_alert", "button_pressed", "button_press_count", "sessionId"].forEach((key) => {
     if (row[key] !== undefined) current[key] = row[key];
   });
-  byTimestamp.set(timestamp, current);
 }
 
 function summarizeMetric(rows, metric, thresholds) {
@@ -375,19 +589,6 @@ function latestSosTimestamp(miner, rows, activityLogs) {
 
 function rowHasFlag(row, thresholds) {
   return ["hr", "spo2", "temp"].some((key) => ["LOW", "HIGH", "CRITICAL"].includes(getVitalStatus(row[key], key, thresholds)));
-}
-
-function sampleLabel(row, thresholds) {
-  const statuses = METRICS.map((metric) => getVitalStatus(row[metric.key], metric.key, thresholds)).filter(Boolean);
-  if (statuses.includes("CRITICAL")) return "Critical";
-  if (statuses.some((status) => ["LOW", "HIGH"].includes(status))) return "Warning";
-  return "Within review band";
-}
-
-function sampleColor(row, thresholds) {
-  const label = sampleLabel(row, thresholds);
-  if (label === "Critical") return C.red;
-  return label === "Warning" ? C.amber : C.green;
 }
 
 function behaviorLabel(metrics, sampleCount) {
@@ -461,7 +662,7 @@ function metricTrend(count, firstAverage, lastAverage, key) {
 }
 
 function PanelHeader({ title, subtitle, meta, inset = false }) {
-  return <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 12, padding: inset ? "12px 15px" : "12px 0", marginBottom: 12, borderBottom: `1px solid ${C.borderSoft}` }}><div><div style={{ color: C.text, fontSize: 14, fontWeight: 950 }}>{title}</div><div style={{ color: C.textMuted, fontSize: 10.5, lineHeight: 1.4, marginTop: 3 }}>{subtitle}</div></div>{meta && <span style={{ color: C.textMuted, fontSize: 10, whiteSpace: "nowrap" }}>{meta}</span>}</div>;
+  return <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 12, padding: inset ? "13px 15px" : "13px 0", marginBottom: 13, borderBottom: `1px solid ${C.borderSoft}` }}><div><div style={{ color: C.text, fontSize: 15, fontWeight: 950 }}>{title}</div><div style={{ color: C.textDim, fontSize: 12, lineHeight: 1.45, marginTop: 4 }}>{subtitle}</div></div>{meta && <span style={{ color: C.textMuted, fontSize: 11, whiteSpace: "nowrap" }}>{meta}</span>}</div>;
 }
 
 function PostureBadge({ posture }) {
@@ -488,8 +689,8 @@ function FindingCard({ finding }) {
       </div>
       <p>{finding.context}</p>
       <div className="health-analysis-finding-grid">
-        <div><span>Possible factors</span><b>{finding.factors}</b></div>
-        <div><span>Recommended check</span><b>{finding.action}</b></div>
+        <div><span>Interpretation</span><b>{finding.factors}</b></div>
+        <div><span>Next action</span><b>{finding.action}</b></div>
       </div>
     </article>
   );
@@ -498,7 +699,7 @@ function FindingCard({ finding }) {
 function FactorLegend() {
   return (
     <div className="health-analysis-factor-legend" aria-label="Factor level legend">
-      <span className="health-analysis-factor-title">Factor level</span>
+      <span className="health-analysis-factor-title">Signal level</span>
       <span><i style={{ background: C.green }} />Low</span>
       <span><i style={{ background: C.cyan }} />Moderate</span>
       <span><i style={{ background: C.amber }} />High</span>
@@ -511,15 +712,24 @@ function BehaviorMetric({ metric, data }) {
   const flagged = data.count ? Math.round((data.outOfRangeCount / data.count) * 100) : 0;
   const averageLabel = data.count ? `${formatReading(data.average, metric.digits)} ${metric.unit}` : "--";
   const rangeLabel = data.count ? `${data.min.toFixed(metric.digits)}–${data.max.toFixed(metric.digits)} ${metric.unit}` : "No readings";
-  const trendLabel = data.count ? `${flagged}% flagged · ${data.trend}` : "Awaiting data";
+  const trendLabel = data.count ? trendCopy(data.trend) : "Awaiting data";
+  const flagLabel = data.count ? `${data.outOfRangeCount} of ${data.count} out of range` : "No readings";
   const meterColor = behaviorMeterColor(data.criticalCount, flagged);
   return (
     <div className="health-analysis-behavior">
       <div className="health-analysis-behavior-head"><span><i style={{ background: metric.color }} />{metric.label}</span><b style={{ color: metric.color }}>{averageLabel}</b></div>
+      <div className="health-analysis-meter-caption"><span>Attention share</span><span>{flagged}%</span></div>
       <div className="health-analysis-meter"><span style={{ width: `${Math.min(100, flagged)}%`, background: meterColor }} /></div>
-      <div className="health-analysis-behavior-foot"><span>{rangeLabel}</span><span>{trendLabel}</span></div>
+      <div className="health-analysis-behavior-foot"><span>Observed: {rangeLabel}</span><span style={{ color: meterColor }}>{flagLabel}</span></div>
+      <div className="health-analysis-behavior-trend">{trendLabel}</div>
     </div>
   );
+}
+
+function trendCopy(trend) {
+  if (trend === "rising") return "Trend: rising across the session";
+  if (trend === "falling") return "Trend: falling across the session";
+  return "Trend: steady across the session";
 }
 
 function behaviorMeterColor(criticalCount, flagged) {

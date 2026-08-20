@@ -208,8 +208,7 @@ export function buildSessions(miners, analyticsData, activityLogs, thresholds, s
     const rows = [...(analyticsData[miner.id] || [])]
       .filter((row) => Number(row.timestamp) > 0)
       .filter((row) => isWithinDateRange(row.timestamp, dateRange))
-      .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
-      .filter((row, index, all) => index === 0 || Number(row.timestamp || 0) !== Number(all[index - 1].timestamp || 0));
+      .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
 
     if (rows.length === 0) return [];
 
@@ -275,6 +274,7 @@ export function buildSessions(miners, analyticsData, activityLogs, thresholds, s
         return {
           id: `${miner.id}-${first.timestamp}-${index}`,
           deviceId: miner.id,
+          sessionId,
           name: miner.name,
           active,
           sessionStatus,
@@ -329,9 +329,11 @@ function buildStoredSessions(miner, storedRows, activityLogs, thresholds, analyt
     return {
       id: `${miner.id}-${summary.sessionId || startTimestamp}`,
       deviceId: miner.id,
+      sessionId: summary.sessionId || "",
       name: miner.name,
       active,
       sessionStatus,
+      readingCount: Math.max(Number(summary.readingCount || 0), matchingRows.length),
       manualPressCount,
       alertCount,
       alerts: summary.alerts || detectSummaryAlerts(summary, thresholds),
@@ -376,6 +378,8 @@ function hydrateStoredSummaries(summaries, analyticsRows) {
     });
     if (matchingRows.length === 0) return summary;
 
+    const storedReadingCount = Number(summary.readingCount || 0);
+    const rawRowsAreComplete = storedReadingCount <= 0 || matchingRows.length >= storedReadingCount;
     const values = (key) => matchingRows.map((row) => Number(row[key] || 0)).filter((value) => value > 0);
     const avg = (key, digits) => {
       const list = values(key);
@@ -392,16 +396,16 @@ function hydrateStoredSummaries(summaries, analyticsRows) {
       ...summary,
       startTimestamp: Math.min(...matchingRows.map((row) => Number(row.timestamp)), start || Number.MAX_SAFE_INTEGER),
       endTimestamp: Math.max(...matchingRows.map((row) => Number(row.timestamp)), end || 0),
-      readingCount: matchingRows.length,
-      avgHr: avg("hr", 0),
-      avgSpo2: avg("spo2", 0),
-      avgTemp: avg("temp", 1),
-      hrMin: hr.min,
-      hrMax: hr.max,
-      spo2Min: spo2.min,
-      spo2Max: spo2.max,
-      tempMin: temp.min,
-      tempMax: temp.max,
+      readingCount: Math.max(storedReadingCount, matchingRows.length),
+      avgHr: rawRowsAreComplete ? avg("hr", 0) : Number(summary.avgHr || avg("hr", 0)),
+      avgSpo2: rawRowsAreComplete ? avg("spo2", 0) : Number(summary.avgSpo2 || avg("spo2", 0)),
+      avgTemp: rawRowsAreComplete ? avg("temp", 1) : Number(summary.avgTemp || avg("temp", 1)),
+      hrMin: rawRowsAreComplete ? hr.min : Number(summary.hrMin || hr.min || 0),
+      hrMax: rawRowsAreComplete ? hr.max : Number(summary.hrMax || hr.max || 0),
+      spo2Min: rawRowsAreComplete ? spo2.min : Number(summary.spo2Min || spo2.min || 0),
+      spo2Max: rawRowsAreComplete ? spo2.max : Number(summary.spo2Max || spo2.max || 0),
+      tempMin: rawRowsAreComplete ? temp.min : Number(summary.tempMin || temp.min || 0),
+      tempMax: rawRowsAreComplete ? temp.max : Number(summary.tempMax || temp.max || 0),
       manualPressCount: Math.max(Number(summary.manualPressCount || 0), ...matchingRows.map((row) => Number(row.button_press_count || 0))),
     };
   });

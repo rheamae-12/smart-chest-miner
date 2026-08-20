@@ -22,7 +22,6 @@ const navGroups = [
     label: "Management",
     items: [
       { to: "/devices", label: "Device Registry", icon: "device" },
-      { to: "/wifi-config", label: "WiFi Config", icon: "wifi" },
       { to: "/settings", label: "System Settings", icon: "settings" },
     ],
   },

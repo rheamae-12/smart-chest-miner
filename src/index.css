@@ -529,10 +529,6 @@ input:-webkit-autofill:focus {
 .page-header-actions,
 .filter-toolbar > *,
 .filter-toolbar-controls > *,
-.alert-banner > * {
-  min-width: 0;
-}
-
 .navbar-status,
 .navbar-actions,
 .page-header-actions {
@@ -1262,6 +1258,92 @@ input:-webkit-autofill:focus {
   min-width: 0;
 }
 
+.cc-alert-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 13px;
+  border-bottom: 1px solid rgba(184, 214, 226, 0.10);
+}
+
+.cc-alert-history-count {
+  margin-top: 2px;
+  color: #81959F;
+  font-size: 9px;
+}
+
+.cc-alert-history-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border: 1px solid rgba(184, 214, 226, 0.16);
+  border-radius: 6px;
+  color: #C5D5DB;
+  font-size: 9px;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.cc-alert-history-link:hover {
+  border-color: rgba(255, 122, 26, 0.45);
+  color: #FF7A1A;
+}
+
+.cc-rail-history-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid;
+  border-left-width: 3px;
+  border-radius: 8px;
+}
+
+.cc-rail-history-entry-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cc-rail-history-entry-main > span {
+  overflow: hidden;
+  font-size: 8px;
+  font-weight: 950;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.cc-rail-history-entry-main > strong {
+  overflow: hidden;
+  color: #EDF7FA;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cc-rail-history-entry-main > small {
+  overflow: hidden;
+  color: #81959F;
+  font-size: 8px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cc-rail-history-entry > time {
+  color: #81959F;
+  font-size: 8px;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .cc-alert-empty {
   display: grid;
   place-items: center;
@@ -1439,10 +1521,210 @@ input:-webkit-autofill:focus {
   overflow-wrap: anywhere;
 }
 
-.diagnostic-guide-panel {
+.manual-sensor-health-panel {
   align-self: stretch;
   height: 100%;
   max-height: 100%;
+}
+
+.manual-sensor-health-header {
+  position: relative;
+  z-index: 1;
+  background: #151d22;
+}
+
+.manual-sensor-health-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  padding: 8px 14px 14px;
+  overflow: auto;
+}
+
+.manual-sensor-health-row {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid rgba(184, 214, 226, 0.10);
+  border-radius: 9px;
+  background: rgba(255,255,255,0.018);
+}
+
+.manual-sensor-health-row-top {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.manual-sensor-health-row-top > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.manual-sensor-health-row-top strong {
+  overflow: hidden;
+  color: #EDF7FA;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manual-sensor-health-row-top > div > span {
+  color: #81959F;
+  font-size: 9px;
+}
+
+.manual-sensor-health-score {
+  flex: 0 0 auto;
+  padding: 5px 7px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.manual-sensor-health-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.manual-sensor-health-check {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(184, 214, 226, 0.08);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.02);
+}
+
+.manual-sensor-health-check-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.manual-sensor-health-check-top > span,
+.manual-sensor-health-check-top > strong {
+  overflow: hidden;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manual-sensor-health-check-top > span {
+  color: #C5D5DB;
+}
+
+.manual-sensor-health-check-top > strong {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.manual-sensor-health-range-wrap {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  color: #81959F;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.manual-sensor-health-range-wrap input[type="range"] {
+  width: 100%;
+  height: 6px;
+  min-height: 6px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  border-radius: 999px;
+  outline: none;
+  background: linear-gradient(to right, var(--manual-health-color) 0 var(--manual-health-fill), #24343D var(--manual-health-fill) 100%) !important;
+  cursor: ew-resize;
+}
+
+.manual-sensor-health-range-wrap input[type="range"]::-webkit-slider-thumb {
+  width: 13px;
+  height: 13px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 2px solid #EDF7FA;
+  border-radius: 50%;
+  background: var(--manual-health-color);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--manual-health-color) 65%, transparent);
+}
+
+.manual-sensor-health-range-wrap input[type="range"]::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #EDF7FA;
+  border-radius: 50%;
+  background: var(--manual-health-color);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--manual-health-color) 65%, transparent);
+}
+
+.manual-sensor-health-range-wrap input[type="range"]:focus-visible {
+  box-shadow: 0 0 0 2px rgba(255, 122, 26, 0.45);
+}
+
+.manual-sensor-health-check-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #81959F;
+  font-size: 8px;
+  line-height: 1.2;
+}
+
+.manual-sensor-health-check-foot > span:first-child {
+  color: #EDF7FA;
+  font-weight: 900;
+}
+
+.manual-sensor-health-check-foot > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manual-sensor-health-row-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #81959F;
+  font-size: 9px;
+}
+
+.manual-sensor-health-reset {
+  padding: 4px 8px;
+  border: 1px solid rgba(184, 214, 226, 0.16);
+  border-radius: 5px;
+  background: transparent;
+  color: #C5D5DB;
+  font-size: 9px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.manual-sensor-health-reset:hover:not(:disabled) {
+  border-color: #FF7A1A;
+  color: #FF7A1A;
+}
+
+.manual-sensor-health-reset:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .sensor-device-list-header {
@@ -1485,12 +1767,6 @@ input:-webkit-autofill:focus {
 .maintenance-row {
   width: 100%;
   box-sizing: border-box;
-}
-
-.diagnostic-guide-header {
-  position: relative;
-  z-index: 1;
-  background: #151d22;
 }
 
 @container app-content (max-width: 1180px) {
@@ -1547,7 +1823,7 @@ input:-webkit-autofill:focus {
     grid-column: 1 / -1;
   }
 
-  .diagnostic-guide-panel {
+  .manual-sensor-health-panel {
     position: static;
     max-height: none;
   }
@@ -2455,7 +2731,7 @@ input:-webkit-autofill:focus {
 
 .health-analysis-selector > span {
   color: #81959F;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2483,7 +2759,7 @@ input:-webkit-autofill:focus {
 .health-analysis-filter-copy span,
 .health-analysis-date-field > span {
   color: #81959F;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2491,7 +2767,7 @@ input:-webkit-autofill:focus {
 
 .health-analysis-filter-copy strong {
   color: #EDF7FA;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .health-analysis-date-field {
@@ -2544,7 +2820,7 @@ input:-webkit-autofill:focus {
 .health-analysis-personnel-copy strong {
   overflow: hidden;
   color: #EDF7FA;
-  font-size: 12px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2553,7 +2829,7 @@ input:-webkit-autofill:focus {
 .health-analysis-personnel-meta {
   overflow: hidden;
   color: #81959F;
-  font-size: 9.5px;
+  font-size: 10.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2563,7 +2839,7 @@ input:-webkit-autofill:focus {
   align-items: center;
   align-self: start;
   gap: 5px;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -2596,14 +2872,14 @@ input:-webkit-autofill:focus {
 .health-analysis-hero h2 {
   margin: 4px 0 0;
   color: #EDF7FA;
-  font-size: 21px;
+  font-size: 24px;
   line-height: 1.1;
 }
 
 .health-analysis-subline {
   margin-top: 6px;
   color: #81959F;
-  font-size: 10.5px;
+  font-size: 12px;
 }
 
 .health-analysis-posture {
@@ -2620,7 +2896,7 @@ input:-webkit-autofill:focus {
 
 .health-analysis-stat-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-top: 16px;
 }
@@ -2638,14 +2914,14 @@ input:-webkit-autofill:focus {
 .health-analysis-stat span {
   overflow: hidden;
   color: #81959F;
-  font-size: 9px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .health-analysis-stat strong {
   overflow: hidden;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 950;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2670,7 +2946,7 @@ input:-webkit-autofill:focus {
 }
 
 .health-analysis-finding-level {
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 950;
   letter-spacing: 0.1em;
 }
@@ -2678,7 +2954,7 @@ input:-webkit-autofill:focus {
 .health-analysis-finding h3 {
   margin: 4px 0 0;
   color: #EDF7FA;
-  font-size: 12.5px;
+  font-size: 14px;
   font-weight: 950;
 }
 
@@ -2686,21 +2962,21 @@ input:-webkit-autofill:focus {
   display: block;
   margin-top: 4px;
   color: #81959F;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
 
 .health-analysis-finding-top > strong {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: 12px;
   text-align: right;
 }
 
 .health-analysis-finding p {
   margin: 7px 0 0;
   color: #C5D5DB;
-  font-size: 10.5px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -2720,7 +2996,7 @@ input:-webkit-autofill:focus {
 
 .health-analysis-finding-grid span {
   color: #81959F;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2728,7 +3004,7 @@ input:-webkit-autofill:focus {
 
 .health-analysis-finding-grid b {
   color: #C5D5DB;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.45;
 }
@@ -2744,7 +3020,7 @@ input:-webkit-autofill:focus {
   border-radius: 8px;
   background: #111a1f;
   color: #C5D5DB;
-  font-size: 9.5px;
+  font-size: 10.5px;
   font-weight: 800;
 }
 
@@ -2764,7 +3040,7 @@ input:-webkit-autofill:focus {
 .health-analysis-factor-title {
   margin-right: 2px;
   color: #81959F;
-  font-size: 8px;
+  font-size: 9px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -2792,7 +3068,7 @@ input:-webkit-autofill:focus {
 
 .health-analysis-behavior-head {
   color: #C5D5DB;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
 }
 
@@ -2815,12 +3091,12 @@ input:-webkit-autofill:focus {
 
 .health-analysis-behavior-head b {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: 15px;
 }
 
 .health-analysis-meter {
   height: 6px;
-  margin-top: 12px;
+  margin-top: 5px;
   overflow: hidden;
   border-radius: 999px;
   background: #24343D;
@@ -2837,39 +3113,76 @@ input:-webkit-autofill:focus {
 .health-analysis-behavior-foot {
   margin-top: 7px;
   color: #81959F;
-  font-size: 9px;
+  font-size: 10px;
+  line-height: 1.35;
 }
 
-.health-analysis-sample-strip {
+.health-analysis-meter-caption {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 13px;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 11px;
   color: #81959F;
   font-size: 9px;
 }
 
-.health-analysis-sample-label {
-  margin-right: 3px;
+.health-analysis-behavior-trend {
+  margin-top: 6px;
+  color: #C5D5DB;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.health-analysis-session-chart-frame {
+  height: 300px;
+  min-height: 260px;
+  padding: 5px;
+  border: 1px solid rgba(184, 214, 226, 0.10);
+  border-radius: 10px;
+  background: #0b1216;
+}
+
+.health-analysis-session-chart-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+  color: #81959F;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.health-analysis-session-tooltip {
+  min-width: 230px;
+  max-width: 330px;
+  padding: 10px 11px;
+  border: 1px solid #35505c;
+  border-radius: 9px;
+  background: #101b20;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
+  color: #EDF7FA;
+  font-size: 11px;
+}
+
+.health-analysis-session-tooltip > strong {
+  display: block;
+  font-size: 11px;
+}
+
+.health-analysis-tooltip-values,
+.health-analysis-tooltip-indicators {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.health-analysis-tooltip-label {
+  color: #81959F;
+  font-size: 9px;
   font-weight: 900;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-}
-
-.health-analysis-sample {
-  width: 8px;
-  height: 15px;
-  border-radius: 3px;
-  box-shadow: 0 0 7px rgba(255,255,255,0.07);
-}
-
-.health-analysis-sample-caption {
-  margin-left: 3px;
-}
-
-.health-analysis-method {
-  border-style: dashed;
 }
 
 .sos-warning-modal {
@@ -2899,8 +3212,15 @@ input:-webkit-autofill:focus {
 @container app-content (max-width: 840px) {
   .health-analysis-filterbar {
     align-items: center;
-    flex-wrap: wrap;
-  }
+  flex-wrap: wrap;
+}
+
+.health-analysis-session-chart-note {
+  margin-top: 8px;
+  color: #d5a84b;
+  font-size: 10px;
+  line-height: 1.45;
+}
 
   .health-analysis-filter-copy {
     flex: 1 1 160px;
