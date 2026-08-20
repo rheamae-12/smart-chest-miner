@@ -1,27 +1,66 @@
 /*
- * Smart Chest Miner - ESP32 firmware (COMPLETE / full hardware)
- * Based on the schematic: MAX30102 (HR/SpO2) + MAX30205 (temperature) +
- * SSD1306 OLED + 3 buzzers + 2 LEDs + SOS button.
+ * ============================================================
+ *  Smart Chest Miner — ESP32 Firmware (Full Hardware Build)
+ * ============================================================
  *
- * Design notes:
- *  - Real HR + SpO2 via the Maxim algorithm (no simulation).
- *  - Temperature from MAX30205 (°C).
- *  - OLED shows live vitals on-device.
- *  - 3 buzzers map to the 3 vitals (HR / SpO2 / Temp); the SOS button sounds all.
- *  - I2C devices are AUTO-DETECTED at boot, so this same sketch runs on the
- *    prototype (MAX30102 only) and the final board (all sensors) unchanged.
- *  - NTP-safe timestamps; Firebase HTTP runs in a FreeRTOS task on core 0 so a
- *    slow upload never freezes the sensor loop / alert buzzers on core 1.
+ * OVERVIEW
+ * --------
+ * Firmware for a wearable chest-mounted health monitor used to track
+ * a miner's vitals in real time. Based on the schematic:
+ *   - MAX30102  : Heart rate (HR) + SpO2
+ *   - MAX30205  : Body temperature
+ *   - SSD1306   : OLED display (live vitals)
+ *   - 3x Buzzer : One per vital (HR / SpO2 / Temp)
+ *   - 2x LED    : Status indicators (green/red)
+ *   - SOS button: Manual alert, triggers all buzzers
  *
- * Required libraries (Library Manager):
- *   - SparkFun MAX3010x Pulse and Proximity Sensor   (MAX30105.h, spo2_algorithm.h)
- *   - Adafruit SSD1306  +  Adafruit GFX               (OLED)
- *   (MAX30205 is read directly over I2C — no extra library.)
+ * HOW TO MONITOR A DIFFERENT MINER
+ * ---------------------------------
+ *   1. Register the new miner on the website FIRST.
+ *      This generates a unique Miner (Device) ID.
+ *   2. Copy that ID into the DEVICE_ID constant below.
+ *   3. Re-flash this same sketch — no other changes needed.
  *
- * Firebase requests use the configured database URL and device credential.
+ *   NOTE: The website owns the miner's name/location (Device Registry).
+ *         This firmware only publishes live state + history for
+ *         whatever DEVICE_ID it's given.
  *
- * HARDWARE: add 470-1000uF on the 5V rail at the ESP32 and 100uF+100nF on the
- * 3.3V sensor rail or WiFi spikes will brown-out the board. See docs/HARDWARE_NOTES.md.
+ * DESIGN NOTES
+ * ------------
+ *   - Real HR + SpO2 via the Maxim algorithm (no simulation by default).
+ *   - Temperature read directly from MAX30205 (°C).
+ *   - OLED shows live vitals on-device.
+ *   - I2C devices are AUTO-DETECTED at boot, so the same sketch runs on:
+ *       (a) the prototype board (MAX30102 only), and
+ *       (b) the final board (all sensors) — unchanged.
+ *   - NTP-synced timestamps for accurate logging.
+ *   - Firebase HTTP requests run in a FreeRTOS task on Core 0, so a
+ *     slow/failed upload never blocks the sensor loop or alert
+ *     buzzers running on Core 1.
+ *
+ * REQUIRED LIBRARIES (Arduino Library Manager)
+ * ---------------------------------------------
+ *   - SparkFun MAX3010x Pulse and Proximity Sensor
+ *       (provides MAX30105.h, spo2_algorithm.h)
+ *   - Adafruit SSD1306
+ *   - Adafruit GFX
+ *   (MAX30205 needs no extra library — read directly over I2C.)
+ *
+ * FIREBASE
+ * --------
+ *   Uses the standard Firebase Realtime Database HTTP REST API,
+ *   authenticated with the configured database URL + device secret
+ *   (see FIREBASE_DATABASE_URL / FIREBASE_DATABASE_SECRET below).
+ *
+ * HARDWARE REQUIREMENT — READ BEFORE POWERING ON
+ * -------------------------------------------------
+ *   Add bulk capacitance or WiFi transmit spikes WILL brown-out the
+ *   board:
+ *     - 470–1000 µF on the 5V rail at the ESP32
+ *     - 100 µF + 100 nF on the 3.3V sensor rail
+ *   See docs/HARDWARE_NOTES.md for placement details.
+ *
+ * ============================================================
  */
 
 #include <Wire.h>
@@ -34,15 +73,15 @@
 
 #define USE_SIMULATION 0
 
-const char* WIFI_SSID     = "Converge_2.4GHz_42BD";
-const char* WIFI_PASSWORD = "bordersnigerald2025";
+const char* WIFI_SSID     = "Converge_5G";
+const char* WIFI_PASSWORD = "bordersnigerald2026";
 
 #define FIREBASE_DATABASE_URL    "https://smart-chest-miner-default-rtdb.firebaseio.com/"
 #define FIREBASE_DATABASE_SECRET "GJY8fpUA211duwUw7o92ks0EXlYOFdqWYz5rK6N5"
 
 // This ID must already exist in the website Device Registry. The website owns
 // the miner name and location; firmware only publishes live state and history.
-const char* DEVICE_ID = "SCM-003";
+const char* DEVICE_ID = "SCM-001";
 
 // ---- Pins (schematic / final board) ----
 #define SDA_PIN          21
@@ -74,7 +113,8 @@ const char* DEVICE_ID = "SCM-003";
 #define WIFI_RECONNECT_INTERVAL  10000
 #define DEVICE_REGISTRATION_RETRY_MS 10000
 #define WIFI_CONFIG_POLL_MS      30000
-#define RED_LED_BLINK_INTERVAL   200
+#define WARNING_LED_BLINK_INTERVAL   1000
+#define CRITICAL_LED_BLINK_INTERVAL   150
 #define NETWORK_TASK_POLL_MS     50
 
 // ---- Contact detection ----
@@ -113,9 +153,8 @@ const char* DEVICE_ID = "SCM-003";
 #define BUZZER_HR_FREQ           1000
 #define BUZZER_SPO2_FREQ         1600
 #define BUZZER_TEMP_FREQ         2200
-#define BUZZER_HR_INTERVAL_MS     450
-#define BUZZER_SPO2_INTERVAL_MS   250
-#define BUZZER_TEMP_INTERVAL_MS   650
+#define WARNING_BUZZER_INTERVAL_MS 1500
+#define WARNING_BUZZER_ON_TIME_MS   180
 
 // ---- Device-local normal ranges (inclusive) ----
 #define HR_NORMAL_MIN        60.0f
@@ -139,7 +178,8 @@ bool hasTemp    = false;
 bool hasDisplay = false;
 
 HealthState healthState = HEALTH_NO_FINGER;
-bool alertHR = false, alertSpO2 = false, alertTemp = false;  // per-vital (critical) for buzzers
+bool alertHR = false, alertSpO2 = false, alertTemp = false;  // per-vital warning or critical state
+bool criticalHR = false, criticalSpO2 = false, criticalTemp = false;
 
 float currentBPM    = 0.0;
 float currentSpO2   = 0.0;
@@ -167,6 +207,7 @@ unsigned long buttonPressCount = 0; // SOS activation count; OFF toggles do not 
 
 bool redLedState = false, greenLedState = false;
 bool hrBuzzerPhase = false, spO2BuzzerPhase = false, tempBuzzerPhase = false;
+HealthState lastIndicatorState = HEALTH_NO_FINGER;
 bool deviceRegistrationChecked = false, deviceRegistered = false;
 
 bool fingerDetected = false, wasFingerDetected = false, noFingerStateUploaded = false;
@@ -434,12 +475,15 @@ void clearContactReadings() {
   rawIndex = 0;
   hrJumpCandidateCount = spO2JumpCandidateCount = 0;
   hrJumpCandidate = spO2JumpCandidate = 0;
-  alertHR = alertSpO2 = false;
-  hrBuzzerPhase = spO2BuzzerPhase = false;
+  alertHR = alertSpO2 = alertTemp = false;
+  criticalHR = criticalSpO2 = criticalTemp = false;
+  hrBuzzerPhase = spO2BuzzerPhase = tempBuzzerPhase = false;
   noTone(BUZZER_HR_PIN);
   noTone(BUZZER_SPO2_PIN);
+  noTone(BUZZER_TEMP_PIN);
   digitalWrite(BUZZER_HR_PIN, LOW);
   digitalWrite(BUZZER_SPO2_PIN, LOW);
+  digitalWrite(BUZZER_TEMP_PIN, LOW);
 }
 
 #if !USE_SIMULATION
@@ -533,8 +577,9 @@ float readBodyTemp() {
 // =================================================================
 void evaluateHealth() {
   alertHR = alertSpO2 = alertTemp = false;
+  criticalHR = criticalSpO2 = criticalTemp = false;
 
-  if (manualAlertActive) { healthState = HEALTH_MANUAL_ALERT; return; }
+  if (manualAlertActive) { healthState = HEALTH_CRITICAL; return; }
   if (!fingerDetected)   { healthState = HEALTH_NO_FINGER;    return; }
 
   bool hrReady = currentBPM > 0;
@@ -553,6 +598,9 @@ void evaluateHealth() {
   alertHR = hrWarning || hrCritical;
   alertSpO2 = spo2Warning || spo2Critical;
   alertTemp = tempWarning || tempCritical;
+  criticalHR = hrCritical;
+  criticalSpO2 = spo2Critical;
+  criticalTemp = tempCritical;
 
   int criticalCount = (hrCritical ? 1 : 0) +
                       (spo2Critical ? 1 : 0) +
@@ -573,7 +621,14 @@ void evaluateHealth() {
 }
 
 void updateIndicators(unsigned long now) {
-  bool manual = (healthState == HEALTH_MANUAL_ALERT);
+  bool manual = manualAlertActive || (healthState == HEALTH_MANUAL_ALERT);
+
+  if (healthState != lastIndicatorState) {
+    redLedState = false;
+    lastRedLedToggle = now;
+    digitalWrite(RED_LED_PIN, LOW);
+    lastIndicatorState = healthState;
+  }
 
   // LEDs
   switch (healthState) {
@@ -588,25 +643,24 @@ void updateIndicators(unsigned long now) {
       digitalWrite(GREEN_LED_PIN, HIGH); digitalWrite(RED_LED_PIN, LOW);
       break;
     case HEALTH_WARNING:
-      digitalWrite(GREEN_LED_PIN, LOW); digitalWrite(RED_LED_PIN, HIGH);
+      digitalWrite(GREEN_LED_PIN, LOW);
+      if (now - lastRedLedToggle >= WARNING_LED_BLINK_INTERVAL) { lastRedLedToggle = now; redLedState = !redLedState; digitalWrite(RED_LED_PIN, redLedState); }
       break;
     case HEALTH_CRITICAL:
     case HEALTH_MANUAL_ALERT:
       digitalWrite(GREEN_LED_PIN, LOW);
-      if (now - lastRedLedToggle >= RED_LED_BLINK_INTERVAL) { lastRedLedToggle = now; redLedState = !redLedState; digitalWrite(RED_LED_PIN, redLedState); }
+      if (now - lastRedLedToggle >= CRITICAL_LED_BLINK_INTERVAL) { lastRedLedToggle = now; redLedState = !redLedState; digitalWrite(RED_LED_PIN, redLedState); }
       break;
   }
 
-  // Buzzers — beep in unison; each sounds only for its own critical vital (or SOS).
-  updateBuzzerTone(BUZZER_TEMP_PIN, manual || alertHR,
-    BUZZER_TEMP_FREQ, BUZZER_TEMP_INTERVAL_MS, now,
-    lastTempBuzzerToggle, tempBuzzerPhase);
-  updateBuzzerTone(BUZZER_SPO2_PIN, manual || alertSpO2,
-    BUZZER_SPO2_FREQ, BUZZER_SPO2_INTERVAL_MS, now,
-    lastSpO2BuzzerToggle, spO2BuzzerPhase);
-  updateBuzzerTone(BUZZER_HR_PIN, manual || alertTemp,
-    BUZZER_HR_FREQ, BUZZER_HR_INTERVAL_MS, now,
-    lastHrBuzzerToggle, hrBuzzerPhase);
+  // Warning alerts use short, widely spaced beeps to reduce average loudness.
+  // Critical alerts and SOS use a continuous tone at full duty.
+  updateBuzzerTone(BUZZER_TEMP_PIN, manual || alertHR, manual || criticalHR,
+    BUZZER_HR_FREQ, now, lastHrBuzzerToggle, hrBuzzerPhase);
+  updateBuzzerTone(BUZZER_SPO2_PIN, manual || alertSpO2, manual || criticalSpO2,
+    BUZZER_SPO2_FREQ, now, lastSpO2BuzzerToggle, spO2BuzzerPhase);
+  updateBuzzerTone(BUZZER_HR_PIN, manual || alertTemp, manual || criticalTemp,
+    BUZZER_TEMP_FREQ, now, lastTempBuzzerToggle, tempBuzzerPhase);
 }
 
 void allBuzzers(uint8_t level) {
@@ -620,8 +674,8 @@ void allBuzzers(uint8_t level) {
   digitalWrite(BUZZER_TEMP_PIN, level);
 }
 
-void updateBuzzerTone(uint8_t pin, bool active, int frequency,
-                      unsigned long interval, unsigned long now,
+void updateBuzzerTone(uint8_t pin, bool active, bool critical, int frequency,
+                      unsigned long now,
                       unsigned long &lastToggle, bool &phase) {
   if (!active) {
     phase = false;
@@ -630,14 +684,23 @@ void updateBuzzerTone(uint8_t pin, bool active, int frequency,
     return;
   }
 
-  if (now - lastToggle >= interval) {
-    lastToggle = now;
-    phase = !phase;
-    if (phase) tone(pin, frequency);
-    else {
-      noTone(pin);
-      digitalWrite(pin, LOW);
+  if (critical) {
+    if (!phase) {
+      tone(pin, frequency);
+      phase = true;
     }
+    return;
+  }
+
+  if (phase && now - lastToggle >= WARNING_BUZZER_ON_TIME_MS) {
+    noTone(pin);
+    digitalWrite(pin, LOW);
+    phase = false;
+    lastToggle = now;
+  } else if (!phase && now - lastToggle >= WARNING_BUZZER_INTERVAL_MS) {
+    lastToggle = now;
+    tone(pin, frequency);
+    phase = true;
   }
 }
 
@@ -994,7 +1057,7 @@ const char* healthStateToString(HealthState state) {
     case HEALTH_NORMAL:       return "NORMAL";
     case HEALTH_WARNING:      return "WARNING";
     case HEALTH_CRITICAL:     return "CRITICAL";
-    case HEALTH_MANUAL_ALERT: return "MANUAL_ALERT";
+    case HEALTH_MANUAL_ALERT: return "CRITICAL";
     default:                  return "UNKNOWN";
   }
 }

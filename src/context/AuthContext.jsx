@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { changeFirebasePassword, createFirebaseAccount, loginWithEmail, logoutFirebase, observeFirebaseAuth, sendFirebasePasswordReset } from "../firebase/auth";
 import { auth, firebaseConfigError, firebaseConfigured } from "../firebase/config";
 import { getUserProfile, saveUserProfile, updateUserProfile } from "../firebase/firestore";
@@ -80,6 +80,60 @@ function saveSession(user, remember) {
   removeStoredValue(SESSION_KEY, other);
 }
 
+async function authenticateFirebase(normalizedEmail, password, remember, handlers) {
+  try {
+    const firebaseUser = await loginWithEmail(normalizedEmail, password);
+    if (!firebaseUser) return false;
+    const nextUser = await profileForFirebaseUser(firebaseUser);
+    clearLoginGuard();
+    handlers.setUser(nextUser);
+    saveSession(nextUser, remember);
+    handlers.setAuthMessage(nextUser.profileWarning ? "" : "Signed in successfully.");
+    if (nextUser.profileWarning) handlers.setAuthError(nextUser.profileWarning);
+    return true;
+  } catch (error) {
+    registerFailedLogin();
+    handlers.setAuthError(describeAuthError(error));
+    return false;
+  }
+}
+
+async function authenticateLocal(normalizedEmail, password, remember, handlers) {
+  const localUser = readLocalUsers().find((item) => item.email === normalizedEmail);
+  if (!localUser || !(await passwordMatches(password, localUser.password, localUser.v))) return false;
+  if (localUser.v !== HASH_VERSION) {
+    const hashed = await hashPassword(password);
+    writeLocalUsers(readLocalUsers().map((item) => item.email === normalizedEmail ? { ...item, password: hashed, v: HASH_VERSION } : item));
+  }
+  const nextUser = {
+    name: localUser.name,
+    email: localUser.email,
+    source: "local",
+    ...(localUser.role ? { role: localUser.role } : {}),
+    ...(localUser.photoURL ? { photoURL: localUser.photoURL } : {}),
+  };
+  clearLoginGuard();
+  handlers.setUser(nextUser);
+  saveSession(nextUser, remember);
+  return true;
+}
+
+async function createFirebaseProfile({ name, email, password, handlers }) {
+  try {
+    const firebaseUser = await createFirebaseAccount({ name, email, password });
+    if (!firebaseUser) return false;
+    const nextUser = await profileForFirebaseUser(firebaseUser, name);
+    handlers.setUser(nextUser);
+    saveSession(nextUser, true);
+    handlers.setAuthMessage(nextUser.profileWarning ? "" : "Account created successfully.");
+    if (nextUser.profileWarning) handlers.setAuthError(nextUser.profileWarning);
+    return true;
+  } catch (error) {
+    handlers.setAuthError(error.code === "auth/email-already-in-use" ? "This email is already registered. Use Log In to continue." : describeAuthError(error));
+    return false;
+  }
+}
+
 async function profileForFirebaseUser(firebaseUser, fallbackName) {
   let existingProfile = null;
   let profileWarning = "";
@@ -148,76 +202,34 @@ export function AuthProvider({ children }) {
     });
   }, []);
 
-  const login = async (email, password, remember = true) => {
+  const login = useCallback(async (email, password, remember = true) => {
     setAuthError("");
     setAuthMessage("");
     const normalizedEmail = email.trim().toLowerCase();
     const guard = readLoginGuard();
-
     if (guard.lockedUntil && guard.lockedUntil > Date.now()) {
       setAuthError(lockoutMessage(guard.lockedUntil));
       return false;
     }
-
     if (!firebaseConfigured && !localAuthEnabled) {
       setAuthError(firebaseConfigError || "Authentication service is unavailable. Contact an administrator.");
       return false;
     }
-
     if (localAuthEnabled && normalizedEmail === demoUser.email && password === "admin123") {
       clearLoginGuard();
       setUser(demoUser);
       saveSession(demoUser, remember);
       return true;
     }
-
-    if (firebaseConfigured) {
-      try {
-        const firebaseUser = await loginWithEmail(normalizedEmail, password);
-        if (firebaseUser) {
-          const nextUser = await profileForFirebaseUser(firebaseUser);
-          clearLoginGuard();
-          setUser(nextUser);
-          saveSession(nextUser, remember);
-          if (nextUser.profileWarning) {
-            setAuthError(nextUser.profileWarning);
-          } else {
-          setAuthMessage("Signed in successfully.");
-          }
-          return true;
-        }
-      } catch (error) {
-        registerFailedLogin();
-        setAuthError(describeAuthError(error));
-        return false;
-      }
-    } else if (localAuthEnabled) {
-      const localUser = readLocalUsers().find((item) => item.email === normalizedEmail);
-      if (localUser && await passwordMatches(password, localUser.password, localUser.v)) {
-        if (localUser.v !== HASH_VERSION) {
-          const hashed = await hashPassword(password);
-          writeLocalUsers(readLocalUsers().map((u) => u.email === normalizedEmail ? { ...u, password: hashed, v: HASH_VERSION } : u));
-        }
-        const nextUser = {
-          name: localUser.name,
-          email: localUser.email,
-          source: "local",
-          ...(localUser.role ? { role: localUser.role } : {}),
-          ...(localUser.photoURL ? { photoURL: localUser.photoURL } : {}),
-        };
-        clearLoginGuard();
-        setUser(nextUser);
-        saveSession(nextUser, remember);
-        return true;
-      }
-    }
-
+    const handlers = { setUser, setAuthError, setAuthMessage };
+    if (firebaseConfigured && await authenticateFirebase(normalizedEmail, password, remember, handlers)) return true;
+    if (localAuthEnabled && await authenticateLocal(normalizedEmail, password, remember, handlers)) return true;
     registerFailedLogin();
     setAuthError("Invalid email or password.");
     return false;
-  };
+  }, []);
 
-  const signUp = async ({ name, email, password }) => {
+  const signUp = useCallback(async ({ name, email, password }) => {
     setAuthError("");
     setAuthMessage("");
 
@@ -235,31 +247,8 @@ export function AuthProvider({ children }) {
       setAuthError("An account already exists for that email.");
       return false;
     }
-
-    if (firebaseConfigured) {
-      try {
-        const firebaseUser = await createFirebaseAccount({ name: cleanName, email: normalizedEmail, password });
-        if (firebaseUser) {
-          const nextUser = await profileForFirebaseUser(firebaseUser, cleanName);
-          setUser(nextUser);
-          saveSession(nextUser, true);
-          if (nextUser.profileWarning) {
-            setAuthError(nextUser.profileWarning);
-          } else {
-          setAuthMessage("Account created successfully.");
-          }
-          return true;
-        }
-      } catch (error) {
-        if (error.code === "auth/email-already-in-use") {
-          setAuthError("This email is already registered. Use Log In to continue.");
-        } else {
-          setAuthError(describeAuthError(error));
-        }
-        return false;
-      }
-    }
-
+    const handlers = { setUser, setAuthError, setAuthMessage };
+    if (firebaseConfigured && await createFirebaseProfile({ name: cleanName, email: normalizedEmail, password, handlers })) return true;
     if (!localAuthEnabled) {
       setAuthError(firebaseConfigError || "Authentication service is unavailable. Contact an administrator.");
       return false;
@@ -277,9 +266,9 @@ export function AuthProvider({ children }) {
     saveSession(nextUser, true);
     setAuthMessage("Account created successfully.");
     return true;
-  };
+  }, []);
 
-  const updateUser = (patch) => {
+  const updateUser = useCallback((patch) => {
     if (!user) return;
     const safePatch = user.source === "firebase" ? { ...patch, role: user.role } : patch;
     const nextUser = { ...user, ...safePatch };
@@ -299,10 +288,10 @@ export function AuthProvider({ children }) {
     const users = readLocalUsers();
     const nextUsers = users.map((item) => (item.email === user.email ? { ...item, ...patch, email: nextUser.email } : item));
     writeLocalUsers(nextUsers);
-  };
+  }, [user]);
 
   // changePassword — verifies current password then updates; works for firebase and local accounts
-  const changePassword = async (currentPassword, newPassword) => {
+  const changePassword = useCallback(async (currentPassword, newPassword) => {
     if (!user) throw new Error("Not signed in.");
     if (user.source === "firebase") {
       await changeFirebasePassword(currentPassword, newPassword);
@@ -319,22 +308,22 @@ export function AuthProvider({ children }) {
       return;
     }
     throw new Error("Demo accounts cannot change password.");
-  };
+  }, [user]);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     await logoutFirebase();
     setUser(null);
     setAuthError("");
     setAuthMessage("");
     removeStoredValue(SESSION_KEY, localStorage);
     removeStoredValue(SESSION_KEY, sessionStorage);
-  };
+  }, []);
 
   // resetPassword — sends a Firebase reset email. Throws if Firebase is not
   // configured (the caller shows the appropriate fallback message).
-  const resetPassword = async (email) => {
+  const resetPassword = useCallback(async (email) => {
     await sendFirebasePasswordReset(String(email || "").trim().toLowerCase());
-  };
+  }, []);
 
   // canManage — role-based gate for destructive/control actions. Any account is a
   // manager unless its role is explicitly read-only (Viewer/Observer/Read-only).
@@ -342,7 +331,10 @@ export function AuthProvider({ children }) {
   // letting you provision restricted, view-only operators. See utils/roles.js.
   const canManage = Boolean(user) && !isViewOnlyRole(user?.role);
 
-  const value = { user, authReady, canManage, login, signUp, updateUser, changePassword, resetPassword, logout, authError, authMessage };
+  const value = useMemo(
+    () => ({ user, authReady, canManage, login, signUp, updateUser, changePassword, resetPassword, logout, authError, authMessage }),
+    [authError, authMessage, authReady, canManage, changePassword, login, logout, resetPassword, signUp, updateUser, user],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

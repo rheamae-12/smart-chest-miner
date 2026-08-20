@@ -65,6 +65,27 @@ describe("buildSessions", () => {
     expect(sessions).toHaveLength(1);
   });
 
+  it("filters fallback session rows by the selected date range", () => {
+    const firstTimestamp = 1_700_150_000_000;
+    const secondTimestamp = firstTimestamp + 24 * 60 * 60 * 1000;
+    const sessions = buildSessions(
+      [{ id: "SCM-001", name: "Miner 1", active: false, stale: false, lastSeen: new Date(secondTimestamp) }],
+      {
+        "SCM-001": [
+          { timestamp: firstTimestamp, sessionId: `SCM-001-session-${firstTimestamp}`, hr: 80, spo2: 97, temp: 36.4 },
+          { timestamp: secondTimestamp, sessionId: `SCM-001-session-${secondTimestamp}`, hr: 82, spo2: 98, temp: 36.5 },
+        ],
+      },
+      [],
+      DEFAULT_THRESHOLDS,
+      {},
+      { start: secondTimestamp - 1_000, end: secondTimestamp + 1_000 },
+    );
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].id).toContain(String(secondTimestamp));
+  });
+
   it("uses persisted sessions and activity logs as the source of truth for counters", () => {
     const firstTimestamp = 1_700_200_000_000;
     const sessionId = `SCM-001-${firstTimestamp}`;

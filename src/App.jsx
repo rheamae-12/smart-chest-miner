@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Modal from "./components/Modal";
@@ -18,6 +18,7 @@ const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const AnalyticsPage = lazy(() => import("./pages/AnalyticsPage"));
 const DevicesPage = lazy(() => import("./pages/DevicesPage"));
 const HealthLogsPage = lazy(() => import("./pages/HealthLogsPage"));
+const HealthAnalysisPage = lazy(() => import("./pages/HealthAnalysisPage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const SensorStatusPage = lazy(() => import("./pages/SensorStatusPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
@@ -30,7 +31,9 @@ export default function App() {
   const location = useLocation();
   const system = useMinerSystem(Boolean(user));
   const [logoutOpen, setLogoutOpen] = useState(false);
-  const liveAlerts = user ? buildAlerts(system.miners, system.thresholds) : [];
+  const [sosWarning, setSosWarning] = useState(null);
+  const knownSosKeysRef = useRef(null);
+  const liveAlerts = useMemo(() => (user ? buildAlerts(system.miners, system.thresholds) : []), [system.miners, system.thresholds, user]);
   useAlertNotifications(liveAlerts);
   const [dismissedAlertIds, setDismissedAlertIds] = useState(() => readStoredStringArray(DISMISSED_ALERTS_STORAGE_KEY));
   const dismissAlerts = (ids) => {
@@ -48,6 +51,25 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(DISMISSED_ALERTS_STORAGE_KEY, JSON.stringify(dismissedAlertIds));
   }, [dismissedAlertIds]);
+
+  useEffect(() => {
+    let warningTimer;
+    if (!user) {
+      knownSosKeysRef.current = null;
+      return undefined;
+    }
+    const activeSosAlerts = liveAlerts.filter((alert) => alert.id.endsWith("-manual"));
+    const activeSosKeys = new Set(activeSosAlerts.map((alert) => sosAlertKey(alert, system.miners)));
+    if (!knownSosKeysRef.current) {
+      knownSosKeysRef.current = activeSosKeys;
+      if (activeSosAlerts.length) warningTimer = window.setTimeout(() => setSosWarning(activeSosAlerts[0]), 0);
+      return () => window.clearTimeout(warningTimer);
+    }
+    const newlyPressed = activeSosAlerts.find((alert) => !knownSosKeysRef.current.has(sosAlertKey(alert, system.miners)));
+    if (newlyPressed) warningTimer = window.setTimeout(() => setSosWarning(newlyPressed), 0);
+    knownSosKeysRef.current = activeSosKeys;
+    return () => window.clearTimeout(warningTimer);
+  }, [liveAlerts, system.miners, user]);
 
   if (!authReady) {
     return (
@@ -77,10 +99,11 @@ export default function App() {
           onClose={() => setLogoutOpen(false)}
           actions={
             <>
-              <button onClick={() => setLogoutOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>
+              <button type="button" onClick={() => setLogoutOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleLogout}
                 style={{ ...primaryButtonStyle, padding: "9px 15px" }}
               >
@@ -90,6 +113,28 @@ export default function App() {
           }
         >
           <div style={{ color: C.textDim, fontSize: 13, lineHeight: 1.6 }}>Log out of the Smart Chest Miner console? Live device monitoring will stop for this browser session.</div>
+        </Modal>
+      )}
+      {sosWarning && (
+        <Modal
+          title="Manual SOS activated"
+          width={590}
+          onClose={() => setSosWarning(null)}
+          actions={(
+            <>
+              <button type="button" onClick={() => setSosWarning(null)} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>Acknowledge</button>
+              <button type="button" onClick={() => { setSosWarning(null); navigate("/alert-history"); }} style={{ ...primaryButtonStyle, padding: "9px 15px" }}>Open Alert Logs</button>
+            </>
+          )}
+        >
+          <div className="sos-warning-modal" style={{ borderColor: `${C.red}55`, background: `${C.red}0d` }}>
+            <div className="sos-warning-icon"><span>!</span></div>
+            <div>
+              <div style={{ color: C.red, fontSize: 15, fontWeight: 950 }}>{sosWarning.message?.split(":")[0] || "A miner"} needs immediate attention.</div>
+              <div style={{ color: C.textDim, fontSize: 12, lineHeight: 1.55, marginTop: 7 }}>The manual SOS button was pressed. Check the miner’s wellbeing now, confirm the sensor reading and location, and follow your site emergency response procedure.</div>
+            </div>
+          </div>
+          <div style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.5, marginTop: 14 }}>This alert is recorded in Alert Logs. Sensor readings can support the response, but they cannot determine the cause of an SOS.</div>
         </Modal>
       )}
       {system.sessionPrompt && (
@@ -130,7 +175,7 @@ export default function App() {
             )}
             <Suspense fallback={<RouteFallback />}>
               <ErrorBoundary key={location.pathname}>
-              <div style={{ height: "100%", display: "contents" }}>
+              <div className="app-route-content" style={{ height: "100%", display: "contents" }}>
               <Routes>
                 <Route path="/" element={<Navigate to="/command" replace />} />
                 <Route
@@ -152,6 +197,10 @@ export default function App() {
                 <Route
                   path="/health-logs"
                   element={<HealthLogsPage miners={system.miners} analyticsData={system.analyticsData} liveData={system.liveData} sessionData={system.sessionData} activityLogs={system.activityLogs} thresholds={system.thresholds} onClearHealthLogs={canManage ? system.clearHealthLogs : undefined} />}
+                />
+                <Route
+                  path="/health-analysis"
+                  element={<HealthAnalysisPage miners={system.miners} analyticsData={system.analyticsData} liveData={system.liveData} sessionData={system.sessionData} activityLogs={system.activityLogs} thresholds={system.thresholds} />}
                 />
                 <Route
                   path="/sensor-status"
@@ -202,4 +251,9 @@ function readStoredStringArray(key) {
   } catch {
     return [];
   }
+}
+
+function sosAlertKey(alert, miners) {
+  const miner = miners.find((candidate) => candidate.id === alert.deviceId);
+  return `${alert.id}:${Number(miner?.button_press_count || 0)}`;
 }

@@ -16,13 +16,7 @@ export default function AlertBanner({ miners, thresholds, dismissedAlertIds = []
   const warningCount = alerts.length - criticalCount;
   const hasAlerts = alerts.length > 0;
   const hiddenOnly = !hasAlerts && allAlerts.length > 0;
-  const color = hasAlerts ? (criticalCount ? C.red : C.amber) : hiddenOnly ? C.offline : C.green;
-  const title = hasAlerts ? "Active conditions need review" : hiddenOnly ? "Banner alerts hidden" : "System normal";
-  const summary = hasAlerts
-    ? `${criticalCount ? `${criticalCount} critical` : ""}${criticalCount && warningCount ? " · " : ""}${warningCount ? `${warningCount} warning` : ""}`
-    : hiddenOnly
-      ? `${allAlerts.length} condition${allAlerts.length === 1 ? "" : "s"} still visible in device status`
-      : "No active warning or critical conditions";
+  const { color, title, summary } = buildBannerCopy({ allAlerts, criticalCount, warningCount, hasAlerts, hiddenOnly });
 
   return (
     <section
@@ -71,7 +65,7 @@ export default function AlertBanner({ miners, thresholds, dismissedAlertIds = []
             textDecoration: "none",
           }}
         >
-          Review history
+          Review history{" "}
           <span aria-hidden="true">→</span>
         </Link>
         {hasAlerts && (
@@ -91,7 +85,7 @@ export default function AlertBanner({ miners, thresholds, dismissedAlertIds = []
           {alerts.slice(0, 3).map((alert) => {
             const alertColor = alert.severity === "critical" ? C.red : C.amber;
             const minerName = minerNames.get(alert.deviceId) || alert.deviceId;
-            const detail = alert.message.replace(new RegExp(`^${escapeRegExp(minerName)}:\\s*`, "i"), "");
+            const detail = alert.message.replace(new RegExp(String.raw`^${escapeRegExp(minerName)}:\s*`, "i"), "");
             return (
               <div
                 key={alert.id}
@@ -135,10 +129,32 @@ export default function AlertBanner({ miners, thresholds, dismissedAlertIds = []
   );
 }
 
+function buildBannerCopy({ allAlerts, criticalCount, warningCount, hasAlerts, hiddenOnly }) {
+  if (hasAlerts) {
+    const criticalSummary = criticalCount ? `${criticalCount} critical` : "";
+    const warningSummary = warningCount ? `${warningCount} warning` : "";
+    const separator = criticalCount && warningCount ? " · " : "";
+    return {
+      color: criticalCount ? C.red : C.amber,
+      title: "Active conditions need review",
+      summary: `${criticalSummary}${separator}${warningSummary}`,
+    };
+  }
+  if (hiddenOnly) {
+    const suffix = allAlerts.length === 1 ? "" : "s";
+    return {
+      color: C.offline,
+      title: "Banner alerts hidden",
+      summary: `${allAlerts.length} condition${suffix} still visible in device status`,
+    };
+  }
+  return { color: C.green, title: "System normal", summary: "No active warning or critical conditions" };
+}
+
 function severityRank(alert) {
   return alert.severity === "critical" ? 0 : 1;
 }
 
 function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 }

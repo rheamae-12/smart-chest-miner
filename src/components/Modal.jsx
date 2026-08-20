@@ -11,6 +11,8 @@ export default function Modal({ title, children, actions, onClose, width = 560, 
   const modalId = useRef(Symbol("modal"));
   const closeRef = useRef(onClose);
   const titleId = useId();
+  const widthValue = typeof width === "number" ? `${width}px` : width;
+  const panelWidth = `min(${widthValue}, calc(100vw - 32px))`;
 
   useEffect(() => {
     closeRef.current = onClose;
@@ -33,7 +35,7 @@ export default function Modal({ title, children, actions, onClose, width = 560, 
     }, 0);
 
     const onKeyDown = (event) => {
-      if (modalStack[modalStack.length - 1] !== id) return;
+      if (modalStack.at(-1) !== id) return;
       if (event.key === "Escape") {
         event.preventDefault();
         closeRef.current?.();
@@ -49,7 +51,7 @@ export default function Modal({ title, children, actions, onClose, width = 560, 
         return;
       }
       const first = controls[0];
-      const last = controls[controls.length - 1];
+      const last = controls.at(-1);
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();
@@ -74,13 +76,7 @@ export default function Modal({ title, children, actions, onClose, width = 560, 
 
   const dialog = (
     <div
-      role="presentation"
       className="modal-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && modalStack[modalStack.length - 1] === modalId.current) {
-          onClose?.();
-        }
-      }}
       style={{
         position: "fixed",
         inset: 0,
@@ -92,9 +88,9 @@ export default function Modal({ title, children, actions, onClose, width = 560, 
         backdropFilter: "blur(12px)",
       }}
     >
-      <div
+      <dialog
+        open
         ref={panelRef}
-        role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
@@ -103,14 +99,13 @@ export default function Modal({ title, children, actions, onClose, width = 560, 
           background: `linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02)), ${C.bg2}`,
           border: `1px solid ${C.border}`,
           borderRadius: 14,
-          width: `min(${typeof width === "number" ? `${width}px` : width}, calc(100vw - 32px))`,
+          width: panelWidth,
           maxHeight: "min(88vh, 820px)",
           boxShadow: C.shadow,
           display: "grid",
           gridTemplateRows: "auto minmax(0, 1fr) auto",
           overflow: "hidden",
           minHeight: 0,
-          outline: "none",
         }}
       >
         <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "20px 22px 14px" }}>
@@ -135,7 +130,7 @@ export default function Modal({ title, children, actions, onClose, width = 560, 
             {actions}
           </footer>
         )}
-      </div>
+      </dialog>
     </div>
   );
 

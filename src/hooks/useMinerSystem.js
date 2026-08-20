@@ -45,6 +45,243 @@ function handleAsyncError(setConnectionError, error, operation) {
   setConnectionError(`${operation} failed. Check the connection and try again.`);
 }
 
+function findMinerById(miners, id) {
+  for (const miner of miners) {
+    if (miner.id === id) return miner;
+  }
+  return undefined;
+}
+
+function processHistoricalDevice(deviceId, rows, context) {
+  const { activeSessionIdRef, activityLogsRef, historicalSummaryTimestampRef, minersRef, setConnectionError, sharedSessionIdFor, staleSecondsRef, thresholdsRef } = context;
+  const latestTimestamp = rows.at(-1)?.timestamp || 0;
+  if (latestTimestamp && isFreshTimestamp(latestTimestamp, staleSecondsRef.current * 1000)) {
+    activeSessionIdRef.current[deviceId] = sharedSessionIdFor(deviceId, latestTimestamp) || createSessionId(deviceId, latestTimestamp);
+  }
+  const sessionSignature = `${latestTimestamp}|${rows.map((row) => row.sessionId || "").join(",")}`;
+  if (!latestTimestamp || historicalSummaryTimestampRef.current[deviceId] === sessionSignature) return;
+  historicalSummaryTimestampRef.current[deviceId] = sessionSignature;
+  const miner = findMinerById(minersRef.current, deviceId);
+  const summaries = buildHistorySummariesForDevice(deviceId, rows, miner, thresholdsRef.current, activityLogsRef.current);
+  saveHistorySummaries(deviceId, summaries.healthLogs, summaries.miningSessions).catch((error) => {
+    if (historicalSummaryTimestampRef.current[deviceId] === sessionSignature) delete historicalSummaryTimestampRef.current[deviceId];
+    handleAsyncError(setConnectionError, error, "Saving session history");
+  });
+}
+
+function processHistoricalSnapshot(mappedHistorical, context) {
+  const { historicalAnalyticsRef, historicalReadyRef, realtimeAnalyticsRef, setAnalyticsData } = context;
+  historicalReadyRef.current = true;
+  historicalAnalyticsRef.current = mappedHistorical;
+  setAnalyticsData(mergeAnalyticsData(mappedHistorical, realtimeAnalyticsRef.current));
+  for (const [deviceId, rows] of Object.entries(mappedHistorical)) {
+    processHistoricalDevice(deviceId, rows, context);
+  }
+}
+
+function persistStatusEvent(statusEvent, context) {
+  const { emittedEventRef, setActivityLogs, setConnectionError } = context;
+  const key = activityLogKey(statusEvent);
+  if (emittedEventRef.current.has(key)) return;
+  addEvent(emittedEventRef.current, key);
+  addImmediateActivityLog(setActivityLogs, statusEvent, key);
+  writeActivityLog({ ...statusEvent, id: key }).catch((error) => handleAsyncError(setConnectionError, error, "Saving status log"));
+}
+
+function persistVitalEvents(miner, thresholds, context) {
+  const { emittedEventRef, setActivityLogs, setConnectionError } = context;
+  for (const event of buildVitalLogs(miner, thresholds)) {
+    const key = event.type === "manual_alert"
+      ? `${event.type}:${event.deviceId}:${event.buttonPressCount || 0}`
+      : `${event.type}:${event.deviceId}:${event.status}:${Math.floor(event.timestamp / 60000)}`;
+    if (emittedEventRef.current.has(key)) continue;
+    addEvent(emittedEventRef.current, key);
+    addImmediateActivityLog(setActivityLogs, event, key);
+    writeActivityLog({ ...event, id: key }).catch((error) => handleAsyncError(setConnectionError, error, "Saving alert log"));
+  }
+}
+
+function realtimeMinerStatus(miner, value) {
+  const expectedStatus = miner.active ? "online" : "offline";
+  const raw = value?.[miner.id] || {};
+  const rawStatus = String(raw.status || "").toLowerCase();
+  const rawLiveStatus = String(raw.live?.status || "").toLowerCase();
+  const rawActive = toBoolean(raw.active, false);
+  const lastSeen = miner.lastSeen?.getTime?.() || raw.lastSeen || Date.now();
+  const liveStatusNeedsSync = rawLiveStatus === "online" || rawLiveStatus === "offline";
+  return { expectedStatus, lastSeen, needsStatusSync: rawStatus !== expectedStatus || rawActive !== miner.active || (liveStatusNeedsSync && rawLiveStatus !== expectedStatus) };
+}
+
+function syncRealtimeDeviceStatus(miner, status, context) {
+  if (!status.needsStatusSync) return;
+  context.updateDeviceStatus(miner.id, status.expectedStatus, status.lastSeen)
+    .catch((error) => handleAsyncError(context.setConnectionError, error, "Updating device status"));
+}
+
+function syncRealtimeMinerSession(miner, status, context) {
+  const { activeSessionIdRef, knownStatusDeviceIdsRef, previousStatusRef, queueSessionPrompt, sharedSessionIdFor } = context;
+  const previousStatus = previousStatusRef.current[miner.id];
+  const firstSeenDevice = !knownStatusDeviceIdsRef.current.has(miner.id);
+  knownStatusDeviceIdsRef.current.add(miner.id);
+  if (firstSeenDevice) {
+    previousStatusRef.current[miner.id] = status.expectedStatus;
+    if (status.expectedStatus === "online" && !activeSessionIdRef.current[miner.id]) {
+      const sharedSessionId = sharedSessionIdFor(miner.id, status.lastSeen);
+      if (sharedSessionId) activeSessionIdRef.current[miner.id] = sharedSessionId;
+    }
+  } else if (previousStatus !== status.expectedStatus) {
+    previousStatusRef.current[miner.id] = status.expectedStatus;
+    if (status.expectedStatus === "online") activeSessionIdRef.current[miner.id] = sharedSessionIdFor(miner.id, status.lastSeen) || createSessionId(miner.id, status.lastSeen);
+    const sessionId = sharedSessionIdFor(miner.id, status.lastSeen) || activeSessionIdRef.current[miner.id] || createSessionId(miner.id, status.lastSeen);
+    activeSessionIdRef.current[miner.id] = sessionId;
+    if (previousStatus === "online" && status.expectedStatus === "offline") queueSessionPrompt(miner, sessionId);
+    persistStatusEvent(buildStatusLog(miner, previousStatus, sessionId), context);
+  }
+}
+
+function processRealtimeMiner(miner, value, context) {
+  const { lastConcernRef, thresholdsRef } = context;
+  if (miner.active) lastConcernRef.current[miner.id] = isConcerningState(miner, thresholdsRef.current);
+  const status = realtimeMinerStatus(miner, value);
+  syncRealtimeDeviceStatus(miner, status, context);
+  syncRealtimeMinerSession(miner, status, context);
+  persistVitalEvents(miner, thresholdsRef.current, context);
+}
+
+function processRealtimeMiners(realtimeMiners, value, context) {
+  for (const miner of realtimeMiners) processRealtimeMiner(miner, value, context);
+}
+
+function appendRealtimeSamples(previous, realtimeMiners) {
+  const next = { ...previous };
+  let changed = false;
+  for (const miner of realtimeMiners) {
+    if (!miner.active || miner.stale || miner.finger === false || (!miner.hr && !miner.spo2 && !miner.temp)) continue;
+    changed = appendLiveSample(next, miner.id, {
+      time: timeLabel(miner.lastSeen),
+      timestamp: miner.lastSeen.getTime(),
+      hr: miner.hr,
+      spo2: miner.spo2,
+      temp: miner.temp,
+    }) || changed;
+  }
+  return changed ? next : previous;
+}
+
+function processAnalyticsDevice(deviceId, rows, context) {
+  const { activityLogsRef, historicalAnalyticsRef, historicalReadingKeysRef, historicalReadingSessionRef, minersRef, persistedHistoryRef, setConnectionError, thresholdsRef } = context;
+  const pendingReadings = [];
+  const sharedRows = mergeAnalyticsData(
+    { [deviceId]: historicalAnalyticsRef.current[deviceId] || [] },
+    { [deviceId]: rows },
+  )[deviceId] || rows;
+  const sessionRows = rows.map((row) => ({
+    ...row,
+    sessionId: sessionIdForTimestamp(deviceId, sharedRows, row.timestamp, activityLogsRef.current),
+  }));
+  for (const [index, row] of rows.entries()) {
+    const readingKey = `${deviceId}:${row.timestamp}`;
+    const sessionRow = sessionRows[index];
+    const sessionId = sessionRow.sessionId || "";
+    if (historicalReadingKeysRef.current.has(readingKey) && historicalReadingSessionRef.current[readingKey] === sessionId) continue;
+    historicalReadingKeysRef.current.add(readingKey);
+    historicalReadingSessionRef.current[readingKey] = sessionId;
+    pendingReadings.push(sessionRow);
+  }
+  if (pendingReadings.length > 0) {
+    saveHistoricalReadingsToFirestore(deviceId, pendingReadings).catch((error) => {
+      for (const reading of pendingReadings) {
+        const readingKey = `${deviceId}:${reading.timestamp}`;
+        if (historicalReadingSessionRef.current[readingKey] === (reading.sessionId || "")) {
+          historicalReadingKeysRef.current.delete(readingKey);
+          delete historicalReadingSessionRef.current[readingKey];
+        }
+      }
+      handleAsyncError(setConnectionError, error, "Saving historical readings");
+    });
+  }
+  if (firestoreDb) return;
+  const latestTimestamp = rows.at(-1)?.timestamp || 0;
+  const sessionSignature = `${latestTimestamp}|${sessionRows.map((row) => row.sessionId || "").join(",")}`;
+  if (!latestTimestamp || persistedHistoryRef.current[deviceId] === sessionSignature) return;
+  persistedHistoryRef.current[deviceId] = sessionSignature;
+  const miner = findMinerById(minersRef.current, deviceId);
+  const summaries = buildHistorySummariesForDevice(deviceId, sessionRows, miner, thresholdsRef.current, activityLogsRef.current);
+  saveHistorySummaries(deviceId, summaries.healthLogs, summaries.miningSessions).catch((error) => {
+    if (persistedHistoryRef.current[deviceId] === sessionSignature) delete persistedHistoryRef.current[deviceId];
+    handleAsyncError(setConnectionError, error, "Saving session history");
+  });
+}
+
+function processRealtimeAnalyticsSnapshot(mappedAnalytics, context) {
+  const { activeSessionIdRef, archivedDeviceIdsRef, historicalAnalyticsRef, historicalReadyRef, hasDeviceSnapshotRef, lastTrimRef, metadataOverridesRef, minersRef, setMiners, realtimeAnalyticsRef, setAnalyticsData, setConnectionError, staleSecondsRef, subscribeHistoricalReadings } = context;
+  realtimeAnalyticsRef.current = mappedAnalytics;
+  for (const [deviceId, rows] of Object.entries(mappedAnalytics)) {
+    const latestTimestamp = rows.at(-1)?.timestamp || 0;
+    if (latestTimestamp && isFreshTimestamp(latestTimestamp, staleSecondsRef.current * 1000)) {
+      activeSessionIdRef.current[deviceId] = context.sharedSessionIdFor(deviceId, latestTimestamp) || createSessionId(deviceId, latestTimestamp);
+    }
+  }
+  subscribeHistoricalReadings([...Object.keys(mappedAnalytics), ...minersRef.current.map((miner) => miner.id)]);
+  const analyticsMiners = applyLocalDeviceOverrides(latestAnalyticsMiners(mappedAnalytics, staleSecondsRef.current * 1000), metadataOverridesRef.current, archivedDeviceIdsRef.current);
+  setAnalyticsData(historicalReadyRef.current ? mergeAnalyticsData(historicalAnalyticsRef.current, mappedAnalytics) : mappedAnalytics);
+  if (analyticsMiners.length > 0 && !hasDeviceSnapshotRef.current && !minersRef.current.some((miner) => miner.active)) {
+  setMiners(analyticsMiners);
+    minersRef.current = analyticsMiners;
+  }
+  if (Date.now() - lastTrimRef.current > 60000) {
+    lastTrimRef.current = Date.now();
+    for (const deviceId of Object.keys(mappedAnalytics)) {
+      trimAnalyticsHistory(deviceId, MAX_ANALYTICS_POINTS).catch((error) => handleAsyncError(setConnectionError, error, "Trimming analytics history"));
+    }
+  }
+  for (const [deviceId, rows] of Object.entries(mappedAnalytics)) processAnalyticsDevice(deviceId, rows, context);
+}
+
+function filterActivityPrompts(current, mapped) {
+  return current.filter((prompt) => !promptMatchesActivityStatus(prompt, mapped));
+}
+
+function filterStoredPrompts(current, mapped) {
+  return current.filter((prompt) => !promptMatchesStoredStatus(prompt, mapped[prompt.deviceId]));
+}
+
+function staleMinersFrom(miners, staleSeconds) {
+  const staleMiners = [];
+  for (const miner of miners) {
+    const timestamp = miner.lastSeen?.getTime?.() || 0;
+    if (miner.active && !isFreshTimestamp(timestamp, staleSeconds * 1000)) staleMiners.push(miner);
+  }
+  return staleMiners;
+}
+
+function patchStaleMiner(miner, staleIds, thresholds) {
+  if (!staleIds.has(miner.id)) return miner;
+  return { ...miner, active: false, status: "offline", stale: true, offlineConcern: isConcerningState(miner, thresholds) };
+}
+
+function processStaleMiners(staleMiners, context) {
+  const { activeSessionIdRef, emittedEventRef, minersRef, previousStatusRef, queueSessionPrompt, setMiners, setConnectionError, sharedSessionIdFor, updateDeviceStatus } = context;
+  const staleIds = new Set(staleMiners.map((miner) => miner.id));
+  const patch = (miner) => patchStaleMiner(miner, staleIds, context.thresholdsRef.current);
+  setMiners((previous) => previous.map(patch));
+  minersRef.current = minersRef.current.map(patch);
+  for (const miner of staleMiners) {
+    previousStatusRef.current[miner.id] = "offline";
+    const timestamp = miner.lastSeen?.getTime?.() || Date.now();
+    updateDeviceStatus(miner.id, "offline", timestamp).catch((error) => handleAsyncError(setConnectionError, error, "Updating offline status"));
+    const offlineMiner = patchStaleMiner(miner, staleIds, context.thresholdsRef.current);
+    const sessionId = sharedSessionIdFor(miner.id, timestamp) || activeSessionIdRef.current[miner.id] || createSessionId(miner.id, timestamp);
+    activeSessionIdRef.current[miner.id] = sessionId;
+    queueSessionPrompt(offlineMiner, sessionId);
+    const event = buildStatusLog(offlineMiner, "online", sessionId);
+    const key = activityLogKey(event);
+    if (emittedEventRef.current.has(key)) continue;
+    addEvent(emittedEventRef.current, key);
+    writeActivityLog(event).catch((error) => handleAsyncError(setConnectionError, error, "Saving disconnect log"));
+  }
+}
+
 // normalizeTimestamp — converts a raw timestamp value to a valid Unix ms number; returns 0 if invalid
 function normalizeTimestamp(value) {
   const timestamp = Number(value);
@@ -135,7 +372,7 @@ function mapAnalyticsValue(value, maxPoints = MAX_ANALYTICS_POINTS) {
       ? rows.map((row, index) => [row?.id || row?.timestamp || index, row])
       : Object.entries(rows || {});
     const sortedRows = entries
-      .map(([key, row]) => ({ ...(row || {}), timestamp: normalizeTimestamp(row?.timestamp) || normalizeTimestamp(key) }))
+      .map(([key, row]) => ({ ...row, timestamp: normalizeTimestamp(row?.timestamp) || normalizeTimestamp(key) }))
       .filter((row) => {
         const timestamp = normalizeTimestamp(row.timestamp);
         const hr = toReading(row.hr ?? row.heartRate);
@@ -182,7 +419,7 @@ function mapSessionSummaries(value) {
   return Object.fromEntries(
     Object.entries(value || {}).map(([deviceId, rows]) => [
       deviceId,
-      (Array.isArray(rows) ? rows : Object.entries(rows || {}).map(([id, row]) => ({ id, ...(row || {}) })))
+      (Array.isArray(rows) ? rows : Object.entries(rows || {}).map(([id, row]) => ({ id, ...row })))
         .filter((row) => Number(row.startTimestamp || row.timestamp || row.statusTimestamp || 0) > 0)
         .sort((a, b) => Number(a.startTimestamp || a.timestamp || a.statusTimestamp || 0) - Number(b.startTimestamp || b.timestamp || b.statusTimestamp || 0)),
     ]),
@@ -257,7 +494,7 @@ function hasSessionBoundary(activityLogs, deviceId, previousTimestamp, currentTi
 }
 
 function sessionStartFromId(sessionId) {
-  const match = String(sessionId || "").match(/-session-(\d+)/);
+  const match = /-session-(\d+)/.exec(String(sessionId || ""));
   return match ? Number(match[1]) : 0;
 }
 
@@ -272,9 +509,7 @@ function sessionIdForTimestamp(deviceId, rows, timestamp, activityLogs = []) {
     const previous = sortedRows[index - 1];
     const gap = Number(row.timestamp) - Number(previous?.timestamp || 0);
     const hasRawSessionId = Boolean(row.sessionId);
-    const rowSessionId = isPerReadingSessionId(deviceId, row)
-      ? ""
-      : hasRawSessionId ? canonicalSessionId(deviceId, row.sessionId, row.timestamp) : "";
+    const rowSessionId = sessionIdForAnalyticsRow(deviceId, row, hasRawSessionId);
     const explicitSessionChanged = Boolean(
       rowSessionId
       && !isApplicationSessionId(deviceId, row.sessionId)
@@ -297,7 +532,7 @@ function sessionIdForTimestamp(deviceId, rows, timestamp, activityLogs = []) {
 
 // latestAnalyticsMiner — builds a minimal miner object from the last analytics row for a device
 function latestAnalyticsMiner(rows, timeoutMs) {
-  const latest = rows?.[rows.length - 1];
+  const latest = rows?.at(-1);
   if (!latest) return null;
   const active = isFreshTimestamp(latest.timestamp, timeoutMs);
 
@@ -348,8 +583,8 @@ export function buildHistorySummariesForDevice(deviceId, rows, miner, thresholds
   }));
 
   const groups = normalizedRows.reduce((sessions, row) => {
-    const current = sessions[sessions.length - 1];
-    const previous = current?.[current.length - 1];
+    const current = sessions.at(-1);
+    const previous = current?.at(-1);
     const currentSessionId = current?.[0]?.sessionId || "";
     const rowSessionId = row.sessionId || "";
     const legacyRowSessionIds = isPerReadingSessionId(deviceId, current?.[0]) && isPerReadingSessionId(deviceId, row);
@@ -366,7 +601,7 @@ export function buildHistorySummariesForDevice(deviceId, rows, miner, thresholds
   const miningSessions = {};
   groups.forEach((sessionRows) => {
     const first = sessionRows[0];
-    const last = sessionRows[sessionRows.length - 1];
+    const last = sessionRows.at(-1);
     const id = String(first.timestamp);
     const sessionId = first.sessionId || `${deviceId}-${id}`;
     const counts = uniquePressCounts(sessionRows);
@@ -376,7 +611,8 @@ export function buildHistorySummariesForDevice(deviceId, rows, miner, thresholds
       const count = Number(row.button_press_count ?? row.buttonPressCount ?? 0);
       return count === minCount && count > 0 && row.manual_alert;
     });
-    const counterPresses = counts.length ? Math.max(0, maxCount - minCount + (firstCountIsPress ? 1 : 0)) : 0;
+    const firstPressBonus = firstCountIsPress ? 1 : 0;
+    const counterPresses = counts.length ? Math.max(0, maxCount - minCount + firstPressBonus) : 0;
     const activationRows = sessionRows.filter((row, index, all) => row.manual_alert && !all[index - 1]?.manual_alert);
     const manualPressCount = Math.max(counterPresses, activationRows.length);
     const avgHr = averageReading(sessionRows, "hr");
@@ -443,9 +679,9 @@ function appendLiveSample(next, deviceId, sample) {
 
   const existing = next[deviceId] || { hr: [], spo2: [], temp: [] };
   const lastTimestamp = Math.max(
-    Number(existing.hr[existing.hr.length - 1]?.timestamp || 0),
-    Number(existing.spo2[existing.spo2.length - 1]?.timestamp || 0),
-    Number((existing.temp || [])[(existing.temp || []).length - 1]?.timestamp || 0),
+    Number(existing.hr.at(-1)?.timestamp || 0),
+    Number(existing.spo2.at(-1)?.timestamp || 0),
+    Number((existing.temp || []).at(-1)?.timestamp || 0),
   );
   if (timestamp <= lastTimestamp) return false;
 
@@ -501,7 +737,7 @@ function applyLocalDeviceOverrides(miners, metadataOverrides, archivedDeviceIds)
 function mapActivityLogs(value) {
   return Object.entries(value || {})
     .map(([id, row]) => {
-      const rawReading = row?.reading;
+      const rawReading = row?.reading ?? row?.readingValue ?? row?.value ?? null;
       return {
         id,
         deviceId: row?.deviceId || "",
@@ -513,15 +749,25 @@ function mapActivityLogs(value) {
         severity: row?.severity || "info",
         title: row?.title || "Miner activity",
         detail: row?.detail || "",
-        reading: rawReading === null || rawReading === undefined || rawReading === ""
-          ? null
-          : Number.isFinite(Number(rawReading)) ? Number(rawReading) : null,
-        unit: row?.unit || "",
+        reading: toNullableReading(rawReading),
+        readingValue: rawReading,
+        unit: row?.unit || row?.readingUnit || "",
         timestamp: normalizeTimestamp(row?.timestamp) || Date.now(),
       };
     })
     .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, MAX_ACTIVITY_LOGS);
+}
+
+function sessionIdForAnalyticsRow(deviceId, row, hasRawSessionId) {
+  if (isPerReadingSessionId(deviceId, row)) return "";
+  if (!hasRawSessionId) return "";
+  return canonicalSessionId(deviceId, row.sessionId, row.timestamp);
+}
+
+function toNullableReading(value) {
+  if (value === null || value === undefined || value === "") return null;
+  return Number.isFinite(Number(value)) ? Number(value) : null;
 }
 
 function activityLogKey(log) {
@@ -564,7 +810,7 @@ function addImmediateActivityLog(setActivityLogs, event, id) {
 // drops offline (manual alert, no chest contact, SpO2 critical, or temperature high).
 // Used to tell a normal session-end apart from a possible emergency disconnect.
 function isConcerningState(miner, thresholds) {
-  if (!miner || !miner.active) return false;
+  if (!miner?.active) return false;
   if (miner.manual_alert) return true;
   if (miner.finger === false) return true;
   if (getVitalStatus(miner.hr, "hr", thresholds) === "CRITICAL") return true;
@@ -603,14 +849,22 @@ function buildStatusLog(miner, previousStatus, sessionId = "") {
     // recorded separately; this prevents a normal completed session from being
     // stored as a critical alert just because the last live state was concerning.
     severity: "info",
-    title: concerning ? "Device lost during alert" : explicitlyCompleted ? "Session completed" : "Connection lost",
-    detail: concerning
-      ? `${miner.name} went offline while a critical condition was active — verify the miner immediately.`
-      : explicitlyCompleted
-        ? `${miner.name} reported an explicit session end after being ${previousStatus || "online"}.`
-        : `${miner.name} stopped sending live data after being ${previousStatus || "online"}. No explicit session-end signal was received.`,
+    title: offlineStatusTitle(concerning, explicitlyCompleted),
+    detail: offlineStatusDetail(miner, concerning, explicitlyCompleted, previousStatus),
     timestamp: miner.lastSeen?.getTime?.() || Date.now(),
   };
+}
+
+function offlineStatusTitle(concerning, explicitlyCompleted) {
+  if (concerning) return "Device lost during alert";
+  if (explicitlyCompleted) return "Session completed";
+  return "Connection lost";
+}
+
+function offlineStatusDetail(miner, concerning, explicitlyCompleted, status = "online") {
+  if (concerning) return `${miner.name} went offline while a critical condition was active \u2014 verify the miner immediately.`;
+  if (explicitlyCompleted) return `${miner.name} reported an explicit session end after being ${status}.`;
+  return `${miner.name} stopped sending live data after being ${status}. No explicit session-end signal was received.`;
 }
 
 // buildVitalLogs — generates activity log entries for out-of-range HR, SpO2, temperature, and manual alerts
@@ -708,14 +962,14 @@ export function buildVitalLogs(miner, thresholds) {
 // manages live chart data, stale detection interval, threshold state, and localStorage persistence
 export function useMinerSystem(enabled) {
   const stored = readStoredSystem();
-  const [miners, rawSetMiners] = useState(() => (firebaseConfigured ? [] : stored?.miners || []));
+  const [miners, setMiners] = useState(() => (firebaseConfigured ? [] : stored?.miners || []));
   const [liveData, setLiveData] = useState({});
   const [analyticsData, setAnalyticsData] = useState({});
   const [sessionData, setSessionData] = useState({});
   const [activityLogs, setActivityLogs] = useState([]);
   const [thresholds, setThresholds] = useState(DEFAULT_THRESHOLDS);
   const [pollingInterval, setPollingInterval] = useState(stored?.pollingInterval || 5);
-  const [staleSeconds] = useState(DEFAULT_STALE_SECONDS);
+  const staleSeconds = DEFAULT_STALE_SECONDS;
   const [usingRealtime, setUsingRealtime] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const [sessionPrompts, setSessionPrompts] = useState([]);
@@ -744,7 +998,7 @@ export function useMinerSystem(enabled) {
   const sessionDeviceKey = [...new Set([
     ...miners.map((miner) => miner.id),
     ...Object.keys(analyticsData || {}),
-  ])].filter(Boolean).sort().join(",");
+  ])].filter(Boolean).sort((a, b) => a.localeCompare(b)).join(",");
 
   const sharedSessionIdFor = useCallback((deviceId, timestamp) => {
     const stored = (sessionDataRef.current[deviceId] || [])
@@ -820,7 +1074,7 @@ export function useMinerSystem(enabled) {
       sessionEvent,
       ...current.filter((log) => !(log.deviceId === sessionEvent.deviceId && log.type === "session_status" && Number(log.timestamp) === sessionTimestamp)),
     ].slice(0, MAX_ACTIVITY_LOGS));
-    rawSetMiners((current) => current.map((miner) => (
+    setMiners((current) => current.map((miner) => (
       miner.id === prompt.deviceId ? { ...miner, sessionStatus: effectiveStatus } : miner
     )));
     minersRef.current = minersRef.current.map((miner) => (
@@ -871,8 +1125,8 @@ export function useMinerSystem(enabled) {
     minersRef.current = miners;
   }, [miners]);
 
-  const setMiners = (updater) => {
-    rawSetMiners((prev) => {
+  const updateMiners = (updater) => {
+    setMiners((prev) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       const nextIds = new Set(next.map((miner) => miner.id));
 
@@ -883,7 +1137,7 @@ export function useMinerSystem(enabled) {
       });
 
       next.forEach((miner) => {
-        const previous = prev.find((item) => item.id === miner.id);
+        const previous = findMinerById(prev, miner.id);
         if (!previous || previous.name !== miner.name || previous.location !== miner.location) {
           metadataOverridesRef.current[miner.id] = {
             name: miner.name,
@@ -950,32 +1204,27 @@ export function useMinerSystem(enabled) {
     let historicalDeviceKey = "";
     const subscribeHistoricalReadings = (deviceIds) => {
       if (!firestoreDb) return;
-      const nextKey = [...new Set(deviceIds.filter(Boolean))].sort().join(",");
+      const nextKey = [...new Set(deviceIds.filter(Boolean))].sort((a, b) => a.localeCompare(b)).join(",");
       if (!nextKey || nextKey === historicalDeviceKey) return;
       historicalDeviceKey = nextKey;
       stopHistoricalReadings?.();
       stopHistoricalReadings = subscribeToHistoricalReadings(
         nextKey.split(","),
         (value) => {
-          historicalReadyRef.current = true;
           const mappedHistorical = mapHistoricalAnalytics(value);
-          historicalAnalyticsRef.current = mappedHistorical;
-          setAnalyticsData(mergeAnalyticsData(mappedHistorical, realtimeAnalyticsRef.current));
-
-          Object.entries(mappedHistorical).forEach(([deviceId, rows]) => {
-            const latestTimestamp = rows[rows.length - 1]?.timestamp || 0;
-            if (latestTimestamp && isFreshTimestamp(latestTimestamp, staleSecondsRef.current * 1000)) {
-              activeSessionIdRef.current[deviceId] = sharedSessionIdFor(deviceId, latestTimestamp) || createSessionId(deviceId, latestTimestamp);
-            }
-            const sessionSignature = `${latestTimestamp}|${rows.map((row) => row.sessionId || "").join(",")}`;
-            if (!latestTimestamp || historicalSummaryTimestampRef.current[deviceId] === sessionSignature) return;
-            historicalSummaryTimestampRef.current[deviceId] = sessionSignature;
-            const miner = minersRef.current.find((item) => item.id === deviceId);
-            const summaries = buildHistorySummariesForDevice(deviceId, rows, miner, thresholdsRef.current, activityLogsRef.current);
-            saveHistorySummaries(deviceId, summaries.healthLogs, summaries.miningSessions).catch((error) => {
-              if (historicalSummaryTimestampRef.current[deviceId] === sessionSignature) delete historicalSummaryTimestampRef.current[deviceId];
-              handleAsyncError(setConnectionError, error, "Saving session history");
-            });
+          processHistoricalSnapshot(mappedHistorical, {
+            activeSessionIdRef,
+            activityLogsRef,
+            historicalAnalyticsRef,
+            historicalReadyRef,
+            historicalSummaryTimestampRef,
+            minersRef,
+            realtimeAnalyticsRef,
+            setAnalyticsData,
+            setConnectionError,
+            sharedSessionIdFor,
+            staleSecondsRef,
+            thresholdsRef,
           });
         },
         (message) => setConnectionError(message),
@@ -992,7 +1241,7 @@ export function useMinerSystem(enabled) {
           // alive even when there is no current live device to display.
           subscribeHistoricalReadings(Object.keys(value || {}));
           setUsingRealtime(Boolean(value && Object.keys(value).length > 0));
-          rawSetMiners([]);
+          setMiners([]);
           minersRef.current = [];
           return;
         }
@@ -1005,84 +1254,24 @@ export function useMinerSystem(enabled) {
 
         setUsingRealtime(true);
         setConnectionError("");
-        rawSetMiners((previous) => (areMinersEquivalent(previous, realtimeMiners) ? previous : realtimeMiners));
+          setMiners((previous) => (areMinersEquivalent(previous, realtimeMiners) ? previous : realtimeMiners));
         minersRef.current = realtimeMiners;
         subscribeHistoricalReadings(realtimeMiners.map((miner) => miner.id));
 
-        realtimeMiners.forEach((miner) => {
-          if (miner.active) lastConcernRef.current[miner.id] = isConcerningState(miner, thresholdsRef.current);
-          const expectedStatus = miner.active ? "online" : "offline";
-          const raw = value?.[miner.id] || {};
-          const rawStatus = String(raw.status || "").toLowerCase();
-          const rawLiveStatus = String(raw.live?.status || "").toLowerCase();
-          const rawActive = toBoolean(raw.active, false);
-          const lastSeen = miner.lastSeen?.getTime?.() || raw.lastSeen || Date.now();
-
-          const liveStatusNeedsSync = rawLiveStatus === "online" || rawLiveStatus === "offline";
-          if (rawStatus !== expectedStatus || rawActive !== miner.active || (liveStatusNeedsSync && rawLiveStatus !== expectedStatus)) {
-            updateDeviceStatus(miner.id, expectedStatus, lastSeen).catch((error) => handleAsyncError(setConnectionError, error, "Updating device status"));
-          }
-
-          const previousStatus = previousStatusRef.current[miner.id];
-          const firstSeenDevice = !knownStatusDeviceIdsRef.current.has(miner.id);
-          knownStatusDeviceIdsRef.current.add(miner.id);
-          if (firstSeenDevice) {
-            // The first snapshot establishes the baseline. A newly registered
-            // offline device has never been online, so it must not create a
-            // misleading "Connection lost" notification.
-            previousStatusRef.current[miner.id] = expectedStatus;
-            if (expectedStatus === "online" && !activeSessionIdRef.current[miner.id]) {
-              const sharedSessionId = sharedSessionIdFor(miner.id, lastSeen);
-              if (sharedSessionId) activeSessionIdRef.current[miner.id] = sharedSessionId;
-            }
-          } else if (previousStatus !== expectedStatus) {
-            previousStatusRef.current[miner.id] = expectedStatus;
-            if (expectedStatus === "online") {
-              activeSessionIdRef.current[miner.id] = sharedSessionIdFor(miner.id, lastSeen) || createSessionId(miner.id, lastSeen);
-            }
-            const sessionId = sharedSessionIdFor(miner.id, lastSeen)
-              || activeSessionIdRef.current[miner.id]
-              || createSessionId(miner.id, lastSeen);
-            activeSessionIdRef.current[miner.id] = sessionId;
-            if (previousStatus === "online" && expectedStatus === "offline") queueSessionPrompt(miner, sessionId);
-            const statusEvent = buildStatusLog(miner, previousStatus, sessionId);
-            const key = activityLogKey(statusEvent);
-            if (!emittedEventRef.current.has(key)) {
-              addEvent(emittedEventRef.current, key);
-              addImmediateActivityLog(setActivityLogs, statusEvent, key);
-              writeActivityLog({ ...statusEvent, id: key }).catch((error) => handleAsyncError(setConnectionError, error, "Saving status log"));
-            }
-          }
-
-          buildVitalLogs(miner, thresholdsRef.current).forEach((event) => {
-            const key = event.type === "manual_alert"
-              ? `${event.type}:${event.deviceId}:${event.buttonPressCount || 0}`
-              : `${event.type}:${event.deviceId}:${event.status}:${Math.floor(event.timestamp / 60000)}`;
-            if (!emittedEventRef.current.has(key)) {
-              addEvent(emittedEventRef.current, key);
-              addImmediateActivityLog(setActivityLogs, event, key);
-              writeActivityLog({ ...event, id: key }).catch((error) => handleAsyncError(setConnectionError, error, "Saving alert log"));
-            }
-          });
+        processRealtimeMiners(realtimeMiners, value, {
+          activeSessionIdRef,
+          emittedEventRef,
+          knownStatusDeviceIdsRef,
+          lastConcernRef,
+          previousStatusRef,
+          queueSessionPrompt,
+          setActivityLogs,
+          setConnectionError,
+          sharedSessionIdFor,
+          thresholdsRef,
+          updateDeviceStatus,
         });
-
-        setLiveData((prev) => {
-          const next = { ...prev };
-          let changed = false;
-          realtimeMiners.forEach((miner) => {
-            if (!miner.active || miner.stale || miner.finger === false || (!miner.hr && !miner.spo2 && !miner.temp)) {
-              return;
-            }
-            changed = appendLiveSample(next, miner.id, {
-              time: timeLabel(miner.lastSeen),
-              timestamp: miner.lastSeen.getTime(),
-              hr: miner.hr,
-              spo2: miner.spo2,
-              temp: miner.temp,
-            }) || changed;
-          });
-          return changed ? next : prev;
-        });
+        setLiveData((prev) => appendRealtimeSamples(prev, realtimeMiners));
 
       },
       (message) => {
@@ -1094,80 +1283,27 @@ export function useMinerSystem(enabled) {
       (value) => {
         setConnectionError("");
         const mappedAnalytics = mapRealtimeAnalytics(value);
-        realtimeAnalyticsRef.current = mappedAnalytics;
-        Object.entries(mappedAnalytics).forEach(([deviceId, rows]) => {
-          const latestTimestamp = rows[rows.length - 1]?.timestamp || 0;
-          if (latestTimestamp && isFreshTimestamp(latestTimestamp, staleSecondsRef.current * 1000)) {
-            activeSessionIdRef.current[deviceId] = sharedSessionIdFor(deviceId, latestTimestamp) || createSessionId(deviceId, latestTimestamp);
-          }
-        });
-        subscribeHistoricalReadings([
-          ...Object.keys(mappedAnalytics),
-          ...minersRef.current.map((miner) => miner.id),
-        ]);
-        const analyticsMiners = applyLocalDeviceOverrides(latestAnalyticsMiners(mappedAnalytics, staleSecondsRef.current * 1000), metadataOverridesRef.current, archivedDeviceIdsRef.current);
-
-        setAnalyticsData(() => historicalReadyRef.current
-          ? mergeAnalyticsData(historicalAnalyticsRef.current, mappedAnalytics)
-          : mappedAnalytics);
-        if (analyticsMiners.length > 0 && !hasDeviceSnapshotRef.current && !minersRef.current.some((miner) => miner.active)) {
-          rawSetMiners(analyticsMiners);
-          minersRef.current = analyticsMiners;
-        }
-
-        if (Date.now() - lastTrimRef.current > 60000) {
-          lastTrimRef.current = Date.now();
-          Object.keys(mappedAnalytics).forEach((deviceId) => {
-            trimAnalyticsHistory(deviceId, MAX_ANALYTICS_POINTS).catch((error) => handleAsyncError(setConnectionError, error, "Trimming analytics history"));
-          });
-        }
-
-        Object.entries(mappedAnalytics).forEach(([deviceId, rows]) => {
-          const pendingReadings = [];
-          const sharedRows = mergeAnalyticsData(
-            { [deviceId]: historicalAnalyticsRef.current[deviceId] || [] },
-            { [deviceId]: rows },
-          )[deviceId] || rows;
-          const sessionRows = rows.map((row) => ({
-            ...row,
-            sessionId: sessionIdForTimestamp(deviceId, sharedRows, row.timestamp, activityLogsRef.current),
-          }));
-          rows.forEach((row, index) => {
-            const readingKey = `${deviceId}:${row.timestamp}`;
-            const sessionRow = sessionRows[index];
-            const sessionId = sessionRow.sessionId || "";
-            if (historicalReadingKeysRef.current.has(readingKey) && historicalReadingSessionRef.current[readingKey] === sessionId) return;
-            historicalReadingKeysRef.current.add(readingKey);
-            historicalReadingSessionRef.current[readingKey] = sessionId;
-            pendingReadings.push(sessionRow);
-          });
-          if (pendingReadings.length > 0) {
-            saveHistoricalReadingsToFirestore(deviceId, pendingReadings).catch((error) => {
-              pendingReadings.forEach((reading) => {
-                const readingKey = `${deviceId}:${reading.timestamp}`;
-                if (historicalReadingSessionRef.current[readingKey] === (reading.sessionId || "")) {
-                  historicalReadingKeysRef.current.delete(readingKey);
-                  delete historicalReadingSessionRef.current[readingKey];
-                }
-              });
-              handleAsyncError(setConnectionError, error, "Saving historical readings");
-            });
-          }
-          // Firestore history is the canonical source for session boundaries.
-          // Do not persist a provisional summary from the capped realtime
-          // window before that full timeline has loaded; another browser can
-          // otherwise save the same live session with a different start time.
-          if (firestoreDb) return;
-          const latestTimestamp = rows[rows.length - 1]?.timestamp || 0;
-          const sessionSignature = `${latestTimestamp}|${sessionRows.map((row) => row.sessionId || "").join(",")}`;
-          if (!latestTimestamp || persistedHistoryRef.current[deviceId] === sessionSignature) return;
-          persistedHistoryRef.current[deviceId] = sessionSignature;
-          const miner = minersRef.current.find((item) => item.id === deviceId);
-          const summaries = buildHistorySummariesForDevice(deviceId, sessionRows, miner, thresholdsRef.current, activityLogsRef.current);
-          saveHistorySummaries(deviceId, summaries.healthLogs, summaries.miningSessions).catch((error) => {
-            if (persistedHistoryRef.current[deviceId] === sessionSignature) delete persistedHistoryRef.current[deviceId];
-            handleAsyncError(setConnectionError, error, "Saving session history");
-          });
+        processRealtimeAnalyticsSnapshot(mappedAnalytics, {
+          activeSessionIdRef,
+          activityLogsRef,
+          archivedDeviceIdsRef,
+          hasDeviceSnapshotRef,
+          historicalAnalyticsRef,
+          historicalReadingKeysRef,
+          historicalReadingSessionRef,
+          historicalReadyRef,
+          lastTrimRef,
+          metadataOverridesRef,
+          minersRef,
+          persistedHistoryRef,
+          setMiners,
+          realtimeAnalyticsRef,
+          setAnalyticsData,
+          setConnectionError,
+          sharedSessionIdFor,
+          staleSecondsRef,
+          subscribeHistoricalReadings,
+          thresholdsRef,
         });
       },
       (message) => setConnectionError(message),
@@ -1180,7 +1316,7 @@ export function useMinerSystem(enabled) {
         activityLogsRef.current = mapped;
         setActivityLogs(mapped);
         setSessionPrompts((current) => {
-          const next = current.filter((prompt) => !promptMatchesActivityStatus(prompt, mapped));
+          const next = filterActivityPrompts(current, mapped);
           return next.length === current.length ? current : next;
         });
       },
@@ -1207,7 +1343,7 @@ export function useMinerSystem(enabled) {
         sessionDataRef.current = mapped;
         setSessionData(mapped);
         setSessionPrompts((current) => {
-          const next = current.filter((prompt) => !promptMatchesStoredStatus(prompt, mapped[prompt.deviceId]));
+          const next = filterStoredPrompts(current, mapped);
           return next.length === current.length ? current : next;
         });
       },
@@ -1219,39 +1355,20 @@ export function useMinerSystem(enabled) {
     if (!enabled) return undefined;
 
     const interval = window.setInterval(() => {
-      const staleMiners = minersRef.current.filter((miner) => {
-        const timestamp = miner.lastSeen?.getTime?.() || 0;
-        return miner.active && !isFreshTimestamp(timestamp, staleSecondsRef.current * 1000);
-      });
-
+      const staleMiners = staleMinersFrom(minersRef.current, staleSecondsRef.current);
       if (staleMiners.length === 0) return;
-
-      const patched = (m) =>
-        staleMiners.some((s) => s.id === m.id)
-          ? { ...m, active: false, status: "offline", stale: true, offlineConcern: isConcerningState(m, thresholdsRef.current) }
-          : m;
-
-      rawSetMiners((prev) => prev.map(patched));
-      // Update the ref immediately so the next interval tick sees active:false
-      // and won't re-emit the same offline event (edge-trigger guard).
-      minersRef.current = minersRef.current.map(patched);
-
-      staleMiners.forEach((miner) => {
-        previousStatusRef.current[miner.id] = "offline";
-        const timestamp = miner.lastSeen?.getTime?.() || Date.now();
-        updateDeviceStatus(miner.id, "offline", timestamp).catch((error) => handleAsyncError(setConnectionError, error, "Updating offline status"));
-        const offlineMiner = { ...miner, active: false, status: "offline", stale: true, offlineConcern: isConcerningState(miner, thresholdsRef.current) };
-        const sessionId = sharedSessionIdFor(miner.id, timestamp)
-          || activeSessionIdRef.current[miner.id]
-          || createSessionId(miner.id, timestamp);
-        activeSessionIdRef.current[miner.id] = sessionId;
-        queueSessionPrompt(offlineMiner, sessionId);
-        const event = buildStatusLog(offlineMiner, "online", sessionId);
-        const key = activityLogKey(event);
-        if (!emittedEventRef.current.has(key)) {
-          addEvent(emittedEventRef.current, key);
-          writeActivityLog(event).catch((error) => handleAsyncError(setConnectionError, error, "Saving disconnect log"));
-        }
+      processStaleMiners(staleMiners, {
+        activeSessionIdRef,
+        emittedEventRef,
+        minersRef,
+        previousStatusRef,
+        queueSessionPrompt,
+        setMiners,
+        setConnectionError,
+        sharedSessionIdFor,
+        staleSecondsRef,
+        thresholdsRef,
+        updateDeviceStatus,
       });
     }, STALE_CHECK_INTERVAL_MS);
 
@@ -1260,7 +1377,7 @@ export function useMinerSystem(enabled) {
 
   return {
     miners,
-    setMiners,
+    setMiners: updateMiners,
     recordActivityLog,
     liveData,
     analyticsData,

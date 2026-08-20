@@ -21,29 +21,24 @@ function hasFirebaseValue(value) {
 }
 
 export const firebaseConfigured = Object.values(firebaseConfig).every(hasFirebaseValue);
-export let firebaseConfigError = "";
-export let app = null;
-export let auth = null;
-export let db = null;
-export let firestoreDb = null;
 
-if (firebaseConfigured) {
+function initializeFirebaseServices() {
+  const services = { firebaseConfigError: "", app: null, auth: null, db: null, firestoreDb: null };
+  if (!firebaseConfigured) return services;
   try {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    firestoreDb = getFirestore(app);
-
+    services.app = initializeApp(firebaseConfig);
+    services.auth = getAuth(services.app);
+    services.firestoreDb = getFirestore(services.app);
     try {
-      db = getDatabase(app);
+      services.db = getDatabase(services.app);
     } catch (error) {
-      firebaseConfigError = `Realtime Database setup failed: ${error.message}`;
-      db = null;
+      services.firebaseConfigError = `Realtime Database setup failed: ${error.message}`;
     }
   } catch (error) {
-    firebaseConfigError = `Firebase setup failed: ${error.message}`;
-    app = null;
-    auth = null;
-    db = null;
-    firestoreDb = null;
+    services.firebaseConfigError = `Firebase setup failed: ${error.message}`;
   }
+  return services;
 }
+
+const firebaseServices = initializeFirebaseServices();
+export const { firebaseConfigError, app, auth, db, firestoreDb } = firebaseServices;

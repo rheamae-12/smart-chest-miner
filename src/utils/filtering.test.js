@@ -10,7 +10,7 @@ describe("filtering utilities", () => {
   });
 
   it("matches alert types from normalized fields and descriptive text", () => {
-    expect(matchesAlertType({ type: "status", status: "offline", severity: "critical" }, "offline")).toBe(true);
+    expect(matchesAlertType({ type: "status", status: "offline", severity: "info" }, "offline")).toBe(true);
     expect(matchesAlertType({ type: "vital", status: "critical", title: "SpO2 critical" }, "low-spo2")).toBe(true);
     expect(matchesAlertType({ type: "vital", status: "high", title: "Heart rate high" }, "high-hr")).toBe(true);
   });

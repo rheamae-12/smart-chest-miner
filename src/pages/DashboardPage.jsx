@@ -38,8 +38,8 @@ export default function DashboardPage({
           <StatCard label="Average Temp" value={formatReading(averageTemp, 1)} unit="°C" color={C.teal} sub="active devices only" />
           <StatCard
             label="Manual SOS"
-            value={activeMiners.length ? (readyCount === activeMiners.length ? "Clear" : activeMiners.length - readyCount) : "--"}
-            color={activeMiners.length ? (readyCount === activeMiners.length ? C.green : C.red) : C.offline}
+            value={manualSosValue(activeMiners.length, readyCount)}
+            color={manualSosColor(activeMiners.length, readyCount)}
             sub="active SOS miners"
           />
         </section>
@@ -53,7 +53,7 @@ export default function DashboardPage({
                 meta={`${fleet.length} registered`}
               />
             </div>
-            <div className="dashboard-fleet-scroll hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
+            <div className="dashboard-fleet-scroll table-scroll-x hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
               <div className="fleet-table-head dashboard-fleet-column-head">
                 <span>Miner</span><span>Connection</span><span>Live vitals</span><span>Safety</span><span>Last seen</span>
               </div>
@@ -107,8 +107,8 @@ function FleetStatusRow({ miner, thresholds, alerts, series }) {
   const online = Boolean(miner.active && !miner.stale);
   const contact = online && miner.finger !== false;
   const sos = Boolean(miner.manual_alert);
-  const worst = alerts.some((alert) => alert.severity === "critical") ? "Critical" : alerts.length ? "Warning" : "Clear";
-  const worstColor = worst === "Critical" ? C.red : worst === "Warning" ? C.amber : online ? C.green : C.offline;
+  const worst = worstStatus(alerts);
+  const worstColor = worstColorFor(worst, online);
   const trend = analyzeSpo2Trend(series?.spo2);
 
   return (
@@ -117,7 +117,7 @@ function FleetStatusRow({ miner, thresholds, alerts, series }) {
         <div style={{ color: C.text, fontSize: 13, fontWeight: 950, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{miner.name}</div>
         <div style={{ color: C.textMuted, fontSize: 10, marginTop: 3 }}>{miner.id} · {miner.location || "Unassigned"}</div>
       </div>
-      <StatusPill color={online ? C.green : C.offline} label={online ? "Online" : miner.stale ? "Stale" : "Offline"} />
+      <StatusPill color={online ? C.green : C.offline} label={fleetConnectionLabel(online, miner.stale)} />
       <div className="fleet-vitals">
         <Reading label="HR" value={online && contact ? `${formatReading(miner.hr, 0)} bpm` : "--"} color={C.red} />
         <Reading label="SpO2" value={online && contact ? `${formatReading(miner.spo2, 0)}%` : "--"} color={C.oxygen} />
@@ -126,12 +126,45 @@ function FleetStatusRow({ miner, thresholds, alerts, series }) {
       <div>
         <div style={{ color: worstColor, fontSize: 11, fontWeight: 900 }}>{sos ? "SOS pressed" : worst}</div>
         <div style={{ color: C.textMuted, fontSize: 10, marginTop: 4 }}>
-          {!online ? "Signals unavailable" : !contact ? "Contact missing" : trend.declining ? "SpO2 trending down" : getVitalStatus(miner.spo2, "spo2", thresholds) === "NORMAL" ? "Sensors reporting" : "Review vitals"}
+          {vitalsSummary(online, contact, trend, miner, thresholds)}
         </div>
       </div>
       <div style={{ color: C.textMuted, fontSize: 10, lineHeight: 1.4 }}>{formatLastSeen(miner.lastSeen)}</div>
     </article>
   );
+}
+
+function manualSosValue(activeCount, readyCount) {
+  if (!activeCount) return "--";
+  return readyCount === activeCount ? "Clear" : String(activeCount - readyCount);
+}
+
+function worstStatus(alerts) {
+  if (alerts.some((alert) => alert.severity === "critical")) return "Critical";
+  return alerts.length ? "Warning" : "Clear";
+}
+
+function fleetConnectionLabel(online, stale) {
+  if (online) return "Online";
+  return stale ? "Stale" : "Offline";
+}
+
+function manualSosColor(activeCount, readyCount) {
+  if (!activeCount) return C.offline;
+  return readyCount === activeCount ? C.green : C.red;
+}
+
+function worstColorFor(worst, online) {
+  if (worst === "Critical") return C.red;
+  if (worst === "Warning") return C.amber;
+  return online ? C.green : C.offline;
+}
+
+function vitalsSummary(online, contact, trend, miner, thresholds) {
+  if (!online) return "Signals unavailable";
+  if (!contact) return "Contact missing";
+  if (trend.declining) return "SpO2 trending down";
+  return getVitalStatus(miner.spo2, "spo2", thresholds) === "NORMAL" ? "Sensors reporting" : "Review vitals";
 }
 
 function SectionHeading({ title, subtitle, meta, compact = false }) {

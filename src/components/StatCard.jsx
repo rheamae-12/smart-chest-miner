@@ -2,7 +2,7 @@ import { useCountUp } from "../hooks/useCountUp";
 import { C, cardStyle } from "../theme";
 
 export default function StatCard({ label, value, unit, color, sub, tone = "neutral" }) {
-  const accent = color || (tone === "warning" ? C.amber : tone === "danger" ? C.red : tone === "success" ? C.green : C.cyan);
+  const accent = color || toneColor(tone);
   const displayed = useCountUp(value);
 
   return (
@@ -20,4 +20,11 @@ export default function StatCard({ label, value, unit, color, sub, tone = "neutr
       {sub && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>{sub}</div>}
     </div>
   );
+}
+
+function toneColor(tone) {
+  if (tone === "warning") return C.amber;
+  if (tone === "danger") return C.red;
+  if (tone === "success") return C.green;
+  return C.cyan;
 }

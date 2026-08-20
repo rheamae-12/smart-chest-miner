@@ -13,6 +13,7 @@ const navGroups = [
       { to: "/dashboard", label: "Dashboard", icon: "pulse" },
       { to: "/analytics", label: "Analytics", icon: "chart" },
       { to: "/health-logs", label: "Health Logs", icon: "clock" },
+      { to: "/health-analysis", label: "Health Analysis", icon: "brain" },
       { to: "/sensor-status", label: "Sensor Status", icon: "network" },
       { to: "/alert-history", label: "Alert Logs", icon: "alert" },
     ],
@@ -68,7 +69,7 @@ export default function Sidebar() {
       {/* Grouped nav */}
       <nav className="hide-scrollbar sidebar-nav" aria-label="Primary navigation" style={{ flex: 1, padding: collapsed ? "12px 9px" : "12px 11px", overflow: "auto" }}>
         {navGroups.map((group, gi) => (
-          <div className="sidebar-group" key={group.label} style={{ marginTop: gi === 0 ? 0 : collapsed ? 6 : 16 }}>
+          <div className="sidebar-group" key={group.label} style={{ marginTop: sidebarGroupMargin(gi, collapsed) }}>
             {!collapsed ? (
               <div className="sidebar-group-label" style={{ fontSize: 9, color: C.textMuted, letterSpacing: "0.16em", textTransform: "uppercase", fontWeight: 900, padding: "0 9px 8px", opacity: 0.55 }}>{group.label}</div>
             ) : (
@@ -84,6 +85,7 @@ export default function Sidebar() {
       {/* Collapse */}
       <div className="sidebar-collapse" style={{ padding: collapsed ? "12px 9px" : "12px 11px", borderTop: `1px solid ${C.borderSoft}` }}>
         <button
+          type="button"
           onClick={() => setCollapsed((value) => !value)}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           className="sidebar-collapse-btn"
@@ -109,8 +111,13 @@ export default function Sidebar() {
           {!collapsed && <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.06em" }}>Collapse</span>}
         </button>
       </div>
-    </aside>
+      </aside>
   );
+}
+
+function sidebarGroupMargin(index, collapsed) {
+  if (index === 0) return 0;
+  return collapsed ? 6 : 16;
 }
 
 // NavItem — single nav row: icon chip + label, with a glowing active rail

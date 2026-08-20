@@ -7,6 +7,7 @@ export default function FilterToolbar({
   onReset,
   label = "Filter view",
 }) {
+  const activeBorder = activeCount ? `${C.primary}58` : C.borderSoft;
   return (
     <section className="filter-toolbar" style={{ ...cardStyle, padding: "11px 14px" }}>
       <div className="filter-toolbar-summary">
@@ -24,7 +25,7 @@ export default function FilterToolbar({
                 padding: "2px 6px",
                 borderRadius: 999,
                 color: activeCount ? C.primary : C.textMuted,
-                border: `1px solid ${activeCount ? `${C.primary}58` : C.borderSoft}`,
+                border: `1px solid ${activeBorder}`,
                 background: activeCount ? `${C.primary}14` : "rgba(255,255,255,0.025)",
                 fontSize: 9,
                 fontWeight: 900,
@@ -55,8 +56,10 @@ export default function FilterToolbar({
 }
 
 export function FilterField({ label, children, wide = false, className = "" }) {
+  const fieldClass = wide ? "filter-field is-wide" : "filter-field";
+  const extraClass = className ? ` ${className}` : "";
   return (
-    <label className={`${wide ? "filter-field is-wide" : "filter-field"}${className ? ` ${className}` : ""}`}>
+    <label className={`${fieldClass}${extraClass}`}>
       <span>{label}</span>
       {children}
     </label>
@@ -65,7 +68,8 @@ export function FilterField({ label, children, wide = false, className = "" }) {
 
 export function FilterTabs({ value, onChange, options, ariaLabel }) {
   return (
-    <div className="filter-tabs" role="group" aria-label={ariaLabel}>
+    <fieldset className="filter-tabs" style={{ border: 0, margin: 0, padding: 0 }}>
+      <legend className="sr-only">{ariaLabel}</legend>
       {options.map((option) => {
         const active = option.value === value;
         return (
@@ -81,7 +85,7 @@ export function FilterTabs({ value, onChange, options, ariaLabel }) {
           </button>
         );
       })}
-    </div>
+    </fieldset>
   );
 }
 

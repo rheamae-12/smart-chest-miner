@@ -43,6 +43,7 @@ export const pageLabels = {
   "/analytics": "Analytics",
   "/devices": "Device Registry",
   "/health-logs": "Health Logs",
+  "/health-analysis": "Health Analysis",
   "/sensor-status": "Sensor Status",
   "/wifi-config": "WiFi Configuration",
   "/alert-history": "Alert History",

@@ -14,12 +14,13 @@ export default function StatusBadge({ active, status, label, detail }) {
   const tone = STATUS_TONES[normalized] || STATUS_TONES.offline;
   const text = label || tone.label;
   const live = normalized === "online";
+  const detailLabel = detail ? `: ${detail}` : "";
 
   return (
     <span
       className={`status-badge is-${normalized}`}
       title={detail || text}
-      aria-label={`${text}${detail ? `: ${detail}` : ""}`}
+      aria-label={`${text}${detailLabel}`}
       style={{
         display: "inline-flex",
         alignItems: "center",

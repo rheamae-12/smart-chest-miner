@@ -1,14 +1,17 @@
-import { useMemo, useState } from "react";
-import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Area, CartesianGrid, ComposedChart, Line, Tooltip, XAxis, YAxis } from "recharts";
 import FilterToolbar, { FilterField, FilterTabs } from "../components/FilterToolbar";
 import { C, cardStyle, controlStyle, pageStyle } from "../theme";
 import { countMinuteReadings } from "../utils/analyticsReadings";
+import { zeroBasedTenScale } from "../utils/chartScales";
 import { average, compactTimestamp, dedupeConsecutiveLogs, formatReading, formatSystemTimestamp, lastSeenValue } from "../utils/formatters";
 import { compareMinersActiveFirst } from "../utils/minerOrdering";
 
 // AnalyticsPage — trend charts and miner comparison for HR, SpO2, and temperature analytics
 export default function AnalyticsPage({ miners, analyticsData, liveData = {}, activityLogs = [] }) {
   const [filter, setFilter] = useState({ miner: "all", range: "ALL", bucket: "1" });
+  const chartFrameRef = useRef(null);
+  const [chartSize, setChartSize] = useState({ width: 320, height: 320 });
   const sortedMiners = useMemo(() => buildMinerOptions(miners, analyticsData, liveData), [analyticsData, liveData, miners]);
   const visibleMiners = useMemo(
     () => (filter.miner === "all" ? sortedMiners : sortedMiners.filter((miner) => miner.id === filter.miner)),
@@ -27,6 +30,8 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
     [analyticsData, dataReferenceTimestamp, filter.range, liveData, visibleMiners],
   );
   const chartData = useMemo(() => bucketRows(rows, Number(filter.bucket)), [filter.bucket, rows]);
+  const vitalScale = zeroBasedTenScale(chartData.flatMap((row) => [row.hr, row.spo2]), 140);
+  const temperatureScale = zeroBasedTenScale(chartData.map((row) => row.temp), 50);
   const logs = useMemo(
     () => buildActivityLogEntries(activityLogs, filter.miner, filter.range, activityReferenceTimestamp),
     [activityLogs, activityReferenceTimestamp, filter.miner, filter.range],
@@ -35,6 +40,31 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
   const selectedMinerName = filter.miner === "all" ? "All miners" : visibleMiners[0]?.name || "Selected miner";
   const rangeLabel = RANGE_OPTIONS.find((option) => option.value === filter.range)?.longLabel || "All recorded data";
   const detailLabel = filter.bucket === "1" ? "1-minute detail" : `${filter.bucket}-minute averages`;
+
+  useEffect(() => {
+    const frame = chartFrameRef.current;
+    if (!frame) return undefined;
+
+    const measure = () => {
+      const computedStyle = window.getComputedStyle(frame);
+      const horizontalSpace = Number.parseFloat(computedStyle.paddingLeft || "0") + Number.parseFloat(computedStyle.paddingRight || "0");
+      const verticalSpace = Number.parseFloat(computedStyle.paddingTop || "0") + Number.parseFloat(computedStyle.paddingBottom || "0");
+      const nextSize = {
+        width: Math.max(260, Math.floor(frame.clientWidth - horizontalSpace)),
+        height: Math.max(260, Math.floor(frame.clientHeight - verticalSpace)),
+      };
+      setChartSize((current) => current.width === nextSize.width && current.height === nextSize.height ? current : nextSize);
+    };
+
+    measure();
+    const observer = typeof window.ResizeObserver === "function" ? new window.ResizeObserver(measure) : null;
+    observer?.observe(frame);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
 
   return (
     <div style={pageStyle}>
@@ -79,7 +109,7 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
 
         <section className="analytics-content-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 12, minHeight: 0 }}>
           <main style={{ display: "grid", gridTemplateRows: "minmax(0, 1fr)", gap: 12, minHeight: 0 }}>
-            <div style={{ ...cardStyle, padding: 16, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr auto" }}>
+            <div className="analytics-chart-card" style={{ ...cardStyle, padding: 16, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr auto" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", paddingBottom: 11, marginBottom: 13, borderBottom: `1px solid ${C.borderSoft}` }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ color: C.text, fontSize: 15, fontWeight: 950 }}>Reading History</div>
@@ -89,10 +119,9 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
                 </div>
                 <Legend />
               </div>
-              <div className="analytics-chart-frame" style={{ minHeight: 0, height: "100%", borderRadius: 8, border: `1px solid ${C.borderSoft}`, background: "#151515", padding: 8 }}>
+              <div ref={chartFrameRef} className="analytics-chart-frame" style={{ minHeight: 0, height: "100%", borderRadius: 8, border: `1px solid ${C.borderSoft}`, background: "#151515", padding: 8 }}>
                 {chartData.length ? (
-                  <ResponsiveContainer key={`${filter.miner}-${filter.range}-${filter.bucket}-${chartData.length}`} width="100%" height="100%">
-                    <ComposedChart data={chartData} margin={{ top: 12, right: 52, left: 4, bottom: 18 }}>
+                  <ComposedChart width={chartSize.width} height={chartSize.height} data={chartData} margin={{ top: 12, right: 52, left: 4, bottom: 18 }}>
                       <defs>
                         <linearGradient id="analyticsHr" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor={C.red} stopOpacity={0.22} />
@@ -101,20 +130,19 @@ export default function AnalyticsPage({ miners, analyticsData, liveData = {}, ac
                       </defs>
                       <CartesianGrid stroke={C.borderSoft} vertical={false} />
                       <XAxis dataKey="time" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={26} label={{ value: "Time", fill: C.textMuted, fontSize: 10, position: "insideBottom", offset: -4 }} />
-                      <YAxis yAxisId="vital" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={42} label={{ value: "bpm / %", angle: -90, fill: C.textMuted, fontSize: 10, position: "insideLeft" }} />
-                      <YAxis yAxisId="temp" orientation="right" domain={dynamicDomain(chartData, "temp", 0.4)} tick={{ fill: C.teal, fontSize: 10 }} axisLine={false} tickLine={false} width={46} unit="°C" label={{ value: "°C", angle: 90, fill: C.teal, fontSize: 10, position: "insideRight" }} />
+                      <YAxis yAxisId="vital" domain={vitalScale.domain} ticks={vitalScale.ticks} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} width={42} label={{ value: "bpm / %", angle: -90, fill: C.textMuted, fontSize: 10, position: "insideLeft" }} />
+                      <YAxis yAxisId="temp" orientation="right" domain={temperatureScale.domain} ticks={temperatureScale.ticks} tick={{ fill: C.teal, fontSize: 10 }} axisLine={false} tickLine={false} width={46} unit="°C" label={{ value: "°C", angle: 90, fill: C.teal, fontSize: 10, position: "insideRight" }} />
                       <Tooltip contentStyle={{ background: C.bg3, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
                       <Area yAxisId="vital" type="monotone" dataKey="hr" name="Heart Rate" stroke={C.red} fill="url(#analyticsHr)" strokeWidth={2.2} dot={chartData.length < 2 ? { r: 3 } : false} isAnimationActive={false} connectNulls />
                       <Area yAxisId="vital" type="monotone" dataKey="spo2" name="SpO2" stroke={C.oxygen} fill="transparent" strokeWidth={2} dot={chartData.length < 2 ? { r: 3 } : false} isAnimationActive={false} connectNulls />
                       <Line yAxisId="temp" type="monotone" dataKey="temp" name="Temperature" stroke={C.teal} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
-                    </ComposedChart>
-                  </ResponsiveContainer>
+                  </ComposedChart>
                 ) : (
                   <EmptyState />
                 )}
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, color: C.textMuted, fontSize: 10, marginTop: 8 }}>
-                <span>TIME AXIS: {chartData[chartData.length - 1]?.time || "NO TIMESTAMP"}</span>
+              <div className="analytics-chart-footer" style={{ display: "flex", justifyContent: "space-between", gap: 12, color: C.textMuted, fontSize: 10, marginTop: 8 }}>
+                <span>TIME AXIS: {chartData.at(-1)?.time || "NO TIMESTAMP"}</span>
                 <span><b style={{ color: C.red }}>HR</b> BPM | <b style={{ color: C.oxygen }}>SpO2</b> % | <b style={{ color: C.teal }}>Temp</b> °C</span>
               </div>
             </div>
@@ -173,7 +201,7 @@ function buildMinerOptions(miners, analyticsData, liveData) {
   [...Object.keys(analyticsData || {}), ...Object.keys(liveData || {})].forEach((id) => {
     if (!id || byId.has(id)) return;
     const rows = analyticsData[id] || [];
-    const latest = rows[rows.length - 1] || {};
+    const latest = rows.at(-1) || {};
     byId.set(id, {
       id,
       name: latest.miner || id,
@@ -283,15 +311,6 @@ function bucketRows(rows, minutes) {
     }));
 }
 
-// getRangeStart — returns a Unix ms timestamp for the start of the selected range (or 0 for all-time)
-function dynamicDomain(data, key, padding = 1) {
-  const values = (data || []).map((row) => Number(row[key])).filter((value) => Number.isFinite(value) && value > 0);
-  if (!values.length) return ["auto", "auto"];
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  return [Number((min - padding).toFixed(1)), Number((max + padding).toFixed(1))];
-}
-
 function getRangeStart(range, referenceTimestamp = 0) {
   const anchor = Number(referenceTimestamp) > 0 ? Number(referenceTimestamp) : Date.now();
   if (range === "30M") return anchor - 30 * 60 * 1000;
@@ -321,10 +340,17 @@ function buildActivityLogEntries(activityLogs, minerFilter, range, referenceTime
       name: log.miner || log.deviceId,
       title: log.title,
       detail: log.detail,
-      color: log.severity === "critical" ? C.red : log.severity === "warning" ? C.amber : log.status === "online" ? C.green : C.offline,
+      color: activityColor(log),
       timestamp: log.timestamp,
       time: formatSystemTimestamp(log.timestamp),
     }));
+}
+
+function activityColor(log) {
+  if (log.severity === "critical") return C.red;
+  if (log.severity === "warning") return C.amber;
+  if (log.status === "online") return C.green;
+  return C.offline;
 }
 
 // Select — labelled select dropdown used for Miner / Range / Bucket filter controls

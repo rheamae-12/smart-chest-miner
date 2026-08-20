@@ -39,9 +39,11 @@ const tableRow = {
   fontSize: 12,
 };
 
-function isAlertEntry(log) {
-  if (log.severity === "info") return false;
+// eslint-disable-next-line react-refresh/only-export-components
+export function isAlertEntry(log) {
   if (log.type === "status" && log.status === "online") return false;
+  if (log.type === "status" && log.status === "offline") return true;
+  if (log.severity === "info") return false;
   return true;
 }
 
@@ -134,10 +136,10 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
           onClose={() => { if (!clearingLogs) setClearLogsOpen(false); }}
           actions={
             <>
-              <button disabled={clearingLogs} onClick={() => setClearLogsOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 15px", opacity: clearingLogs ? 0.5 : 1 }}>
+              <button type="button" disabled={clearingLogs} onClick={() => setClearLogsOpen(false)} style={{ ...ghostButtonStyle, padding: "9px 15px", opacity: clearingLogs ? 0.5 : 1 }}>
                 Cancel
               </button>
-              <button disabled={clearingLogs} onClick={confirmClearLogs} style={{ ...primaryButtonStyle, padding: "9px 15px", opacity: clearingLogs ? 0.75 : 1 }}>
+              <button type="button" disabled={clearingLogs} onClick={confirmClearLogs} style={{ ...primaryButtonStyle, padding: "9px 15px", opacity: clearingLogs ? 0.75 : 1 }}>
                 {clearingLogs ? "Clearing..." : "Confirm Clear"}
               </button>
             </>
@@ -220,6 +222,7 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
               <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <span style={{ color: C.textMuted, fontSize: 11, fontWeight: 800 }}>{alertLogs.length} total alert{alertLogs.length === 1 ? "" : "s"} recorded</span>
                 <button
+                  type="button"
                   disabled={!alertLogs.length || !onClearActivityLogs}
                   onClick={() => { setClearLogsError(""); setClearLogsOpen(true); }}
                   title={!onClearActivityLogs ? "View-only account" : undefined}
@@ -237,7 +240,7 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
               <span>Action</span>
             </div>
 
-            <div className="hide-scrollbar" style={{ overflow: "auto", minHeight: 0 }}>
+            <div className="hide-scrollbar table-scroll-x" style={{ overflow: "auto", minHeight: 0 }}>
               {pageRows.length === 0 ? (
                 <div style={{ padding: 42, color: C.textMuted, textAlign: "center", fontSize: 13 }}>
                   No alert records match the current filters.
@@ -255,8 +258,8 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
             </div>
 
             {/* Pagination footer */}
-            <div style={{ borderTop: `1px solid ${C.borderSoft}`, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 11, color: C.textMuted }}>
+            <div className="alert-history-pagination" style={{ borderTop: `1px solid ${C.borderSoft}`, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <span className="alert-history-entry-summary" style={{ fontSize: 11, color: C.textMuted }}>
                 {filtered.length === 0
                   ? "No entries"
                   : `Showing ${(safePage - 1) * PAGE_SIZE + 1}–${Math.min(safePage * PAGE_SIZE, filtered.length)} of ${filtered.length} entries`}
@@ -290,6 +293,9 @@ export default function AlertHistoryPage({ activityLogs = [], onClearActivityLog
 }
 
 function AlertRow({ log, alertType, onViewSnapshot }) {
+  const offline = log.type === "status" && log.status === "offline";
+  const levelColor = alertLevelColor(offline, log.severity);
+  const levelLabel = alertLevelLabel(offline, log.severity);
   return (
     <div className="data-row" style={tableRow}>
       <span style={{ color: C.textMuted, fontFamily: "monospace", fontSize: 11 }}>
@@ -300,10 +306,9 @@ function AlertRow({ log, alertType, onViewSnapshot }) {
         <div style={{ color: C.textMuted, fontSize: 10, marginTop: 2 }}>{log.deviceId}</div>
       </div>
       <span style={{ color: C.textDim }}>{alertType}</span>
-      <strong style={{ color: log.severity === "critical" ? C.red : C.amber }}>
-        {log.severity === "critical" ? "Critical" : "Warning"}
-      </strong>
+      <strong style={{ color: levelColor }}>{levelLabel}</strong>
       <button
+        type="button"
         onClick={onViewSnapshot}
         style={{ ...ghostButtonStyle, padding: "5px 10px", fontSize: 11 }}
       >
@@ -318,21 +323,27 @@ function Pagination({ page, totalPages, onPage }) {
   const pages = buildPageNumbers(page, totalPages);
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+    <div className="alert-history-pagination-nav" style={{ display: "flex", alignItems: "center", gap: 4 }}>
       <button
+        type="button"
         disabled={page === 1}
         onClick={() => onPage(page - 1)}
+        aria-label="Previous page"
+        className="pagination-button"
         style={{ ...ghostButtonStyle, padding: "4px 10px", fontSize: 11, opacity: page === 1 ? 0.4 : 1 }}
       >
         Previous
       </button>
-      {pages.map((p, i) =>
-        p === "…" ? (
-          <span key={`e${i}`} style={{ color: C.textMuted, fontSize: 12, padding: "0 3px" }}>…</span>
+      {pages.map((p) =>
+        typeof p === "string" && p.startsWith("ellipsis-") ? (
+          <span key={p} style={{ color: C.textMuted, fontSize: 12, padding: "0 3px" }}>…</span>
         ) : (
           <button
+            type="button"
             key={p}
             onClick={() => onPage(p)}
+            aria-label={`Go to page ${p}`}
+            className={`pagination-button${p === page ? " is-current" : ""}`}
             style={{
               ...ghostButtonStyle,
               padding: "4px 9px",
@@ -347,8 +358,11 @@ function Pagination({ page, totalPages, onPage }) {
         )
       )}
       <button
+        type="button"
         disabled={page === totalPages}
         onClick={() => onPage(page + 1)}
+        aria-label="Next page"
+        className="pagination-button"
         style={{ ...ghostButtonStyle, padding: "4px 10px", fontSize: 11, opacity: page === totalPages ? 0.4 : 1 }}
       >
         Next
@@ -363,7 +377,7 @@ function buildPageNumbers(page, total) {
   const sorted = [...pages].sort((a, b) => a - b);
   const result = [];
   sorted.forEach((p, i) => {
-    if (i > 0 && p - sorted[i - 1] > 1) result.push("…");
+    if (i > 0 && p - sorted[i - 1] > 1) result.push(`ellipsis-${sorted[i - 1]}-${p}`);
     result.push(p);
   });
   return result;
@@ -382,6 +396,7 @@ function RecentAlertNote({ log, onClick }) {
   const accentColor = log.severity === "critical" ? C.red : C.amber;
   return (
     <button
+      type="button"
       onClick={onClick}
       style={{
         display: "block", width: "100%", textAlign: "left",
@@ -397,31 +412,95 @@ function RecentAlertNote({ log, onClick }) {
   );
 }
 
-function formatAlertReading(log) {
-  const hasReading = log?.reading !== null && log?.reading !== undefined && log?.reading !== "" && Number.isFinite(Number(log.reading));
-  if (hasReading) {
-    const value = Number(log.reading);
-    const digits = log.unit === "°C" ? 1 : 0;
-    return `${formatReading(value, digits)}${log.unit ? ` ${log.unit}` : ""}`;
+// eslint-disable-next-line react-refresh/only-export-components
+export function formatAlertReading(log) {
+  const text = `${log?.title || ""} ${log?.detail || ""}`;
+  const metric = alertMetric(text);
+  const explicitUnit = normalizeAlertUnit(log?.unit || log?.readingUnit);
+  const unit = explicitUnit || { hr: "bpm", spo2: "%", temp: "\u00b0C" }[metric] || "";
+  const digits = metric === "temp" ? 1 : 0;
+  const unitSuffix = unit ? ` ${unit}` : "";
+  const directCandidates = [log?.reading, log?.readingValue, log?.value, log?.currentValue];
+  const directValue = directCandidates
+    .map((candidate) => {
+      const numericValue = Number(candidate);
+      if (Number.isFinite(numericValue)) return numericValue;
+      const textValue = /-?\d+(?:\.\d+)?/.exec(String(candidate || ""));
+      return textValue ? Number(textValue[0]) : 0;
+    })
+    .find((value) => Number.isFinite(value) && value > 0);
+  if (directValue) return `${formatReading(directValue, digits)}${unitSuffix}`;
+
+  const fieldValue = alertFieldValue(log, metric);
+  const numericFieldValue = Number(fieldValue);
+  if (Number.isFinite(numericFieldValue) && numericFieldValue > 0) {
+    return `${formatReading(numericFieldValue, digits)}${unitSuffix}`;
   }
 
   // Older activity records did not persist a separate reading field. Recover
-  // the value from their detail text so historical snapshots remain useful.
-  const detail = String(log?.detail || "");
-  const patterns = [
-    { pattern: /HR\s+(-?\d+(?:\.\d+)?)\s*bpm/i, unit: "bpm", digits: 0 },
-    { pattern: /SpO2\s+(-?\d+(?:\.\d+)?)\s*%/i, unit: "%", digits: 0 },
-    { pattern: /temperature\s+(-?\d+(?:\.\d+)?)\s*°?C/i, unit: "°C", digits: 1 },
-  ];
-  const match = patterns.find(({ pattern }) => pattern.exec(detail));
-  if (!match) return "—";
-  const value = match.pattern.exec(detail)?.[1];
-  return `${formatReading(Number(value), match.digits)} ${match.unit}`;
+  // the value from their title/detail text so historical snapshots remain useful.
+  const value = extractAlertReading(text, metric);
+  if (!value) return "—";
+  return `${formatReading(Number(value), digits)}${unitSuffix}`;
+}
+
+function normalizeAlertUnit(value) {
+  const unit = String(value || "").trim().toLowerCase();
+  if (unit.includes("bpm")) return "bpm";
+  if (unit.includes("%")) return "%";
+  const compactUnit = unit.replace(/[^a-z°]/g, "");
+  if (compactUnit === "c" || compactUnit === "°c") return "°C";
+  return "";
+}
+
+function alertMetric(text) {
+  if (/\b(?:heart\s*rate|hr)\b/i.test(text)) return "hr";
+  if (/(?:spo2|spo₂)/i.test(text)) return "spo2";
+  if (/\b(?:temperature|temp)\b/i.test(text)) return "temp";
+  return "";
+}
+
+function extractAlertReading(text, metric) {
+  const units = { hr: "bpm", spo2: "%", temp: "c" };
+  const unit = units[metric];
+  if (!unit) return "";
+  const unitIndex = text.toLowerCase().lastIndexOf(unit);
+  if (unitIndex < 0) return "";
+  const tokens = text.slice(0, unitIndex).split(/[^0-9.-]+/).filter(Boolean);
+  return tokens.at(-1) || "";
+}
+
+function alertLevelColor(offline, severity) {
+  if (offline) return C.offline;
+  return severity === "critical" ? C.red : C.amber;
+}
+
+function alertLevelLabel(offline, severity) {
+  if (offline) return "Offline";
+  return severity === "critical" ? "Critical" : "Warning";
+}
+
+function snapshotLevelLabel(offline, critical) {
+  if (offline) return "Offline";
+  return critical ? "Critical" : "Warning";
+}
+
+function snapshotLevelColor(offline, critical) {
+  if (offline) return C.offline;
+  return critical ? C.red : C.amber;
+}
+
+function alertFieldValue(log, metric) {
+  if (metric === "hr") return log?.hr;
+  if (metric === "spo2") return log?.spo2;
+  if (metric === "temp") return log?.temp;
+  return null;
 }
 
 function SnapshotModal({ log, onClose }) {
   const alertType = deriveAlertType(log);
   const isCritical = log.severity === "critical";
+  const isOffline = log.type === "status" && log.status === "offline";
 
   return (
     <Modal
@@ -429,7 +508,7 @@ function SnapshotModal({ log, onClose }) {
       onClose={onClose}
       width={620}
       actions={
-        <button onClick={onClose} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>Close</button>
+        <button type="button" onClick={onClose} style={{ ...ghostButtonStyle, padding: "9px 15px" }}>Close</button>
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -453,7 +532,7 @@ function SnapshotModal({ log, onClose }) {
           <SnapField label="Device ID" value={log.deviceId || "—"} />
           <SnapField label="Timestamp" value={formatTimestamp(log.timestamp)} />
           <SnapField label="Reading" value={formatAlertReading(log)} />
-          <SnapField label="Level" value={isCritical ? "Critical" : "Warning"} valueColor={isCritical ? C.red : C.amber} />
+          <SnapField label="Level" value={snapshotLevelLabel(isOffline, isCritical)} valueColor={snapshotLevelColor(isOffline, isCritical)} />
           <SnapField label="Event Type" value={log.type || "—"} />
         </div>
 
